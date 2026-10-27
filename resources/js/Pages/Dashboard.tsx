@@ -111,7 +111,7 @@ function AppCard({ app, databases }: { app: AppSummary; databases: AppSummary[] 
             {card}
             <ul aria-label={`${app.name}'s databases`} className="p-1">
                 {databases.map((db) => {
-                    const Icon = templateIcon(db.template ?? '');
+                    const Icon = templateIcon(db.template);
                     return (
                         <li key={db.id}>
                             <Link
@@ -139,7 +139,7 @@ function AppCard({ app, databases }: { app: AppSummary; databases: AppSummary[] 
 // AppCardBody is the card itself. On a tray it overlaps the tray's border,
 // so the two read as one tile.
 function AppCardBody({ app, tray }: { app: AppSummary; tray: boolean }) {
-    const Icon = app.template ? templateIcon(app.template) : BoxIcon;
+    const Icon = templateIcon(app.template);
     const url = app.domain ? `${app.tls ? 'https' : 'http'}://${app.domain}` : null;
 
     return (

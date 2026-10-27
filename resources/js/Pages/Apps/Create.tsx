@@ -1,10 +1,10 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { BoxIcon, LayoutTemplateIcon, type LucideIcon } from 'lucide-react';
+import { BoxIcon, LayoutTemplateIcon } from 'lucide-react';
 
 import { AppForm } from '@/Components/AppForm';
 import { Page } from '@/Components/Page';
 import { Panel } from '@/Components/Panel';
-import { templateIcon } from '@/lib/templates';
+import { type AppIcon, templateIcon } from '@/lib/templates';
 import { cn } from '@/lib/utils';
 import type { RegistryOption, TemplateOption } from '@/types/models';
 
@@ -93,7 +93,7 @@ function Choice({
     selected,
 }: {
     href: string;
-    icon: LucideIcon;
+    icon: AppIcon;
     title: string;
     detail: string;
     mono?: boolean;

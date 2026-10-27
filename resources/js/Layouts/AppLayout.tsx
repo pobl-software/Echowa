@@ -200,14 +200,14 @@ function AccountMenu() {
 
 // Drawer is the navigation on phones and tablets, with labels.
 function Drawer() {
-    const { appName, auth } = usePage().props;
+    const { auth } = usePage().props;
     const isActive = useActive();
     const [theme, setTheme] = useTheme();
 
     return (
         <div className="flex h-full flex-col">
             <div className="flex h-14 items-center border-b border-sidebar-border px-4">
-                <Logo name={appName} />
+                <Logo />
             </div>
             <nav aria-label="Main" className="flex-1 space-y-0.5 overflow-y-auto p-3">
                 {nav.map((item) => {

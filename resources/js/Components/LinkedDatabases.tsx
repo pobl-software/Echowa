@@ -1,5 +1,5 @@
 import { Link, router, useForm, usePoll } from '@inertiajs/react';
-import { DatabaseIcon, type LucideIcon, PlusIcon, UnlinkIcon } from 'lucide-react';
+import { DatabaseIcon, PlusIcon, UnlinkIcon } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
@@ -19,7 +19,7 @@ import {
 import { FieldError } from '@/Components/ui/field';
 import { Input } from '@/Components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
-import { templateIcon } from '@/lib/templates';
+import { type AppIcon, templateIcon } from '@/lib/templates';
 import { cn } from '@/lib/utils';
 import type { App, DatabaseChoices, LinkedDatabase } from '@/types/models';
 
@@ -301,7 +301,7 @@ function Choice({
     onCheckedChange,
     children,
 }: {
-    icon: LucideIcon;
+    icon: AppIcon;
     title: string;
     detail: string;
     mono?: boolean;

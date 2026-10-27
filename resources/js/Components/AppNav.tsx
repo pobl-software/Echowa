@@ -1,6 +1,5 @@
 import { Link } from '@inertiajs/react';
 import {
-    BoxIcon,
     BracesIcon,
     CalendarClockIcon,
     ChartLineIcon,
@@ -17,6 +16,7 @@ import {
 } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react';
 
+import { templateIcon } from '@/lib/templates';
 import { cn } from '@/lib/utils';
 
 export const appSections = [
@@ -80,12 +80,13 @@ function useLink({ app, onSelect }: Props) {
 // AppNavAside is an app's section list beside the page on wide screens.
 export function AppNavAside(props: Props & { subtitle?: ReactNode }) {
     const link = useLink(props);
+    const Icon = templateIcon(props.app.template);
 
     return (
         <>
             <div className="flex h-14 shrink-0 items-center gap-2.5 border-b px-4">
                 <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
-                    <BoxIcon className="size-3.5 text-muted-foreground" />
+                    <Icon className="size-3.5 text-muted-foreground" />
                 </span>
                 <div className="min-w-0 leading-tight">
                     <p className="truncate text-sm font-medium">{props.app.name}</p>

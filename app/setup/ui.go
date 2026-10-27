@@ -67,11 +67,11 @@ func (u *ui) banner(version, machine string) {
 		return
 	}
 	p := u.paint
-	// The logo's three bars, a signal and its fading echoes, in half blocks.
+	// The logo's arrow, in half blocks.
 	fmt.Fprintf(u.out, "\n  %s   %s %s\n  %s   %s\n  %s   %s\n\n",
-		p.accent("█ ▄  "), p.bold("Echowa"), p.dim(version),
-		p.accent("█ █ █"), "Deploys for one server",
-		p.accent("█ ▀  "), p.dim(machine))
+		p.accent("     ▀█▄ "), p.bold("Echowa"), p.dim(version),
+		p.accent("█████████"), "Deploys for one server",
+		p.accent("     ▄█▀ "), p.dim(machine))
 }
 
 // begin starts a step, labelled with what it sets up ("Docker Engine").
