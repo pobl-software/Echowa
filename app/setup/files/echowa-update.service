@@ -1,0 +1,20 @@
+# Updates Echowa to the release it asked for (ADR 0021): checks the request,
+# downloads the release and checks its signature, backs up the database,
+# swaps the binary, restarts Echowa, and rolls back if the new version
+# doesn't come up. Progress goes to /var/lib/echowa/update/status.json and
+# the journal. Started by echowa-update.path.
+#
+# Root, unsandboxed: it replaces /usr/local/bin/echowa and the units, and
+# restarts Echowa, which is what Echowa itself mustn't be able to do.
+
+[Unit]
+Description=Update Echowa
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/echowa update --from-request
+# A restart waits for running deploys (up to 11 minutes), and a rollback
+# restarts again.
+TimeoutStartSec=30min

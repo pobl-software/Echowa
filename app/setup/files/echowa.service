@@ -1,0 +1,55 @@
+# Echowa as a systemd service (ADR 0020). `echowa setup` writes this to
+# /etc/systemd/system/echowa.service.
+
+[Unit]
+Description=Echowa deploy tool
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=echowa
+Group=echowa
+# docker.sock is root-equivalent. This group is the only privilege Echowa has.
+SupplementaryGroups=docker
+EnvironmentFile=/etc/echowa/env
+# Sessions and logs go to storage/ under the working directory, next to the
+# database. Migrations run on start.
+WorkingDirectory=/var/lib/echowa
+StateDirectory=echowa
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/bin/echowa
+Restart=on-failure
+RestartSec=5s
+# On stop, Echowa lets running deploys finish (up to ECHOWA_DEPLOY_TIMEOUT,
+# 10m by default) before it exits. Queued ones resume on the next start.
+TimeoutStopSec=11min
+
+# Hardening. Echowa only needs its state directory, the network and
+# docker.sock (a socket, which a read-only file system still lets it use).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# AF_NETLINK only to list this machine's addresses (/up's local check);
+# with no capabilities, nothing can be changed through it.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# Not MemoryDenyWriteExecute: the SQLite driver compiles SQLite (WebAssembly)
+# to machine code at start.
+
+[Install]
+WantedBy=multi-user.target

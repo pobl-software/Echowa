@@ -1,0 +1,12 @@
+# Added to traefik.yml on a server whose UI is served over HTTPS (ADR 0022):
+# publishes the "echowa" entrypoint, so the UI has a port of its own and the
+# firewall can limit who reaches it without touching 80 and 443. Only then,
+# because with HTTP access Echowa itself listens on 8192.
+
+services:
+  traefik:
+    ports:
+      - target: 8192
+        published: 8192
+        protocol: tcp
+        mode: host

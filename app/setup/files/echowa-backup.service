@@ -1,0 +1,26 @@
+# A consistent copy of Echowa's database, safe while it runs. Started daily
+# by echowa-backup.timer (echowa setup --with-backups). Keeps 14 days.
+#
+# The copies are useless without APP_KEY from /etc/echowa/env, which they
+# deliberately don't include. Keep the key somewhere else (deploy/README.md,
+# "Backups").
+
+[Unit]
+Description=Back up Echowa's database
+After=echowa.service
+
+[Service]
+Type=oneshot
+User=echowa
+Group=echowa
+UMask=0077
+EnvironmentFile=/etc/echowa/env
+WorkingDirectory=/var/lib/echowa
+ExecStart=/bin/sh -c 'exec /usr/local/bin/echowa backup "/var/backups/echowa/echowa-$(date -u +%%Y%%m%%dT%%H%%M%%SZ).sqlite"'
+ExecStart=/usr/bin/find /var/backups/echowa -name "echowa-*.sqlite" -mtime +14 -delete
+NoNewPrivileges=yes
+ProtectSystem=strict
+# The database is in WAL mode: reading it writes its -shm index.
+ReadWritePaths=/var/backups/echowa /var/lib/echowa
+ProtectHome=yes
+PrivateTmp=yes

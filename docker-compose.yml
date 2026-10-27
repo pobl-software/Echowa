@@ -1,0 +1,23 @@
+# Echowa has no service dependencies in development: its own data is a
+# SQLite file (ADR 0014), and the Go server and Vite run on the host.
+#
+# `docker compose --profile app up -d --build` runs the image locally to
+# check it builds and boots. This is not how Echowa runs in production: there
+# it's a systemd binary on the host (docs/mvp.md, ADR 0013).
+
+services:
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+    env_file: .env
+    environment:
+      APP_HOST: 0.0.0.0
+      DB_DATABASE: /data/echowa.sqlite
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

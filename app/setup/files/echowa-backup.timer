@@ -1,0 +1,13 @@
+# Daily database backup (echowa-backup.service).
+
+[Unit]
+Description=Back up Echowa's database daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+# Catch up after the server was off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

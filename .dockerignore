@@ -1,0 +1,19 @@
+# Secrets: configure the container with environment variables instead.
+.env
+.env.*
+
+# Built inside the image, or not needed in it.
+node_modules
+public/build
+public/hot
+storage
+tmp
+docs
+tests
+.agents
+.claude
+.git
+.idea
+.vscode
+**/.DS_Store
+dist

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <title inertia>Echowa</title>
+        <meta name="color-scheme" content="light dark">
+        <script>
+            // Apply the saved theme before first paint (resources/js/lib/theme.ts).
+            try {
+                var theme = localStorage.getItem('echowa-theme');
+                if (theme === 'dark' || (theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) {}
+        </script>
+
+        {{ .vite }}
+        {{ .inertiaHead }}
+    </head>
+    <body class="antialiased">
+        {{ .inertia }}
+    </body>
+</html>

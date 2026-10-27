@@ -1,0 +1,44 @@
+# Traefik for local development (Docker Desktop or OrbStack): HTTP on :80
+# only, no TLS, no certificates. Apps are reached at http://<name>.localhost.
+#
+#   docker stack deploy -c deploy/traefik/stack.local.yml traefik
+#
+# Same provider settings and entrypoint name ("web") as stack.yml, so labels
+# behave the same as in production, minus TLS.
+
+services:
+  traefik:
+    image: traefik:v3.7.16
+    command:
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedByDefault=false
+      - --providers.swarm.network=echowa-public
+      - --providers.swarm.refreshSeconds=5
+      - --entrypoints.web.address=:80
+      - --ping=true
+      - --log.level=INFO
+      - --global.checkNewVersion=false
+      - --global.sendAnonymousUsage=false
+    ports:
+      # Ingress mode (the default): Docker Desktop and OrbStack forward it
+      # to localhost on the Mac. Set TRAEFIK_HTTP_PORT if something else
+      # (Valet, Herd) already has :80.
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - echowa-public
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  echowa-public:
+    external: true

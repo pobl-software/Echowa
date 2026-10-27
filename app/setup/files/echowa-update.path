@@ -1,0 +1,13 @@
+# Starts echowa-update.service when Echowa asks for an update from its
+# Settings page, by writing the version it wants to this file (ADR 0021).
+# Echowa can't replace its own binary; root does it.
+
+[Unit]
+Description=Watch for Echowa update requests
+
+[Path]
+PathExists=/var/lib/echowa/update/request
+Unit=echowa-update.service
+
+[Install]
+WantedBy=multi-user.target

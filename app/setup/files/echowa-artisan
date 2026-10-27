@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs an Echowa artisan command the way the service runs: as echowa, in its
+# data directory, with its env file. Written by `echowa setup`.
+#   sudo echowa-artisan user:create
+exec runuser -u echowa -- /bin/sh -c 'umask 077 && cd /var/lib/echowa && set -a && . /etc/echowa/env && set +a && exec /usr/local/bin/echowa artisan "$@"' echowa-artisan "$@"

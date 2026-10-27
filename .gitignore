@@ -1,0 +1,23 @@
+.idea
+.vscode
+.DS_Store
+.env
+.env.*
+!.env.example
+storage
+tmp
+dist
+
+node_modules
+public/build
+public/hot
+
+# SQLite database and its WAL/shm files
+database/*.sqlite*
+
+# Internal docs and agent config: kept locally, never published
+/docs/
+/AGENTS.md
+/CLAUDE.md
+/.claude/
+/.agents/

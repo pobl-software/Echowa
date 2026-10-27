@@ -1,0 +1,77 @@
+package config
+
+import (
+	"github.com/goravel/framework/support/carbon"
+
+	// Before any config is read: it lets `echowa setup` run on a server
+	// that has no APP_KEY yet (app/cli).
+	_ "goravel/app/cli"
+	"goravel/app/facades"
+)
+
+// Boot Start all init methods of the current folder to bootstrap all config.
+func Boot() {}
+
+func init() {
+	config := facades.Config()
+	config.Add("app", map[string]any{
+		// Application Name
+		//
+		// This value is the name of your application. This value is used when the
+		// framework needs to place the application's name in a notification or
+		// any other location as required by the application or its packages.
+		"name": config.Env("APP_NAME", "Echowa"),
+
+		// Application Environment
+		//
+		// This value determines the "environment" your application is currently
+		// running in. This may determine how you prefer to configure various
+		// services the application utilizes. Set this in your ".env" file.
+		"env": config.Env("APP_ENV", "production"),
+
+		// Application Debug Mode
+		"debug": config.Env("APP_DEBUG", false),
+
+		// Application Timezone
+		//
+		// Here you may specify the default timezone for your application.
+		// Example: UTC, Asia/Shanghai
+		// More: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+		"timezone": carbon.UTC,
+
+		// Application Locale Configuration
+		//
+		// The application locale determines the default locale that will be used
+		// by the translation service provider. You are free to set this value
+		// to any of the locales which will be supported by the application.
+		"locale": "en",
+
+		// Application Fallback Locale
+		//
+		// The fallback locale determines the locale to use when the current one
+		// is not available. You may change the value to correspond to any of
+		// the language folders that are provided through your application.
+		"fallback_locale": "en",
+
+		// Encryption Key
+		//
+		// 32 character string, otherwise these encrypted strings
+		// will not be safe. Please do this before deploying an application!
+		"key": config.Env("APP_KEY", ""),
+		"maintenance": map[string]any{
+			// Maintenance Mode Driver
+			//
+			// These configuration options determine the driver used to determine and
+			// manage Goravel's "maintenance mode" status. The "cache" driver will
+			// allow maintenance mode to be controlled across multiple machines.
+			//
+			// Supported drivers: "file", "cache"
+			"driver": config.Env("APP_MAINTENANCE_DRIVER", "file"),
+			// Maintenance Mode Store
+			//
+			// This option controls the cache store used by the "cache" maintenance
+			// driver. Leave it empty to use the default cache store.
+			"store": config.Env("APP_MAINTENANCE_STORE", ""),
+		},
+	})
+}

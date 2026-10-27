@@ -1,0 +1,24 @@
+# Live reload against the dev machine (deploy/dev-vm.sh): on each Go or
+# template change, cross-compile, then restart Echowa inside the machine.
+# Plain `air`, or the "echowa" entry in .claude/launch.json. To run Echowa
+# on the Mac instead, use `air -c .air.mac.toml`.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "deploy/dev-vm.sh build"
+  full_bin = "env ECHOWA_SKIP_BUILD=1 deploy/dev-vm.sh serve"
+  delay = 500
+  include_ext = ["go", "html"]
+  exclude_dir = ["storage", "tmp", "node_modules", "public", "resources/js", "docs", "deploy"]
+  exclude_regex = ["_test\\.go$"]
+  # serve stops the copy running in the machine when it gets SIGINT.
+  send_interrupt = true
+  kill_delay = "35s"
+  stop_on_error = true
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = false
