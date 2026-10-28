@@ -48,6 +48,8 @@ type Fake struct {
 	ExecFunc func(service string, cmd []string) ([]byte, error)
 	// ExecToFunc answers ExecTo. Nil means the service isn't running.
 	ExecToFunc func(ctx context.Context, service string, cmd []string, out io.Writer) (int, error)
+	// ExecStreamFunc answers ExecStream. Nil means the service isn't running.
+	ExecStreamFunc func(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
 	// Logs holds what StreamServiceLogs yields per service. With Follow, it
 	// then waits for lines added with WriteLog until ctx ends.
 	Logs map[string][]LogLine
@@ -439,6 +441,14 @@ func (f *Fake) Exec(_ context.Context, service string, cmd []string) ([]byte, er
 func (f *Fake) ExecTo(ctx context.Context, service string, cmd []string, out io.Writer) (int, error) {
 	if f.ExecToFunc != nil {
 		return f.ExecToFunc(ctx, service, cmd, out)
+	}
+
+	return 0, fmt.Errorf("%s: %w", service, ErrNotRunning)
+}
+
+func (f *Fake) ExecStream(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	if f.ExecStreamFunc != nil {
+		return f.ExecStreamFunc(ctx, service, cmd, stdin, stdout, stderr)
 	}
 
 	return 0, fmt.Errorf("%s: %w", service, ErrNotRunning)

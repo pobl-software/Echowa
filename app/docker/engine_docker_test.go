@@ -12,6 +12,9 @@ package docker
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +22,7 @@ import (
 	nethttp "net/http"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -516,6 +520,53 @@ func TestEngineExecRunsInTheAppsContainer(t *testing.T) {
 	_, err = engine.ExecTo(short, name, []string{"sleep", "30"}, io.Discard)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 5*time.Second, "a cancelled context ends the exec's stream")
+
+	// ExecStream: stdin in, stdout and stderr apart, as a dump and a
+	// restore use them.
+	const size = 20 << 20
+	sent := sha256.New()
+	var got, errs strings.Builder
+	code, err = engine.ExecStream(ctx, name, []string{"sh", "-c", `sha256sum; echo "read it" >&2`},
+		io.TeeReader(io.LimitReader(rand.Reader, size), sent), &got, &errs)
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, hex.EncodeToString(sent.Sum(nil))+"  -\n", got.String(), "all of stdin arrived, then its end")
+	assert.Equal(t, "read it\n", errs.String(), "stderr apart from stdout")
+
+	got.Reset()
+	code, err = engine.ExecStream(ctx, name, []string{"sh", "-c", "head -c 3000000 /dev/zero; exit 5"}, nil, &got, io.Discard)
+	require.NoError(t, err, "a status other than 0 isn't an error")
+	assert.Equal(t, 5, code)
+	assert.Equal(t, 3000000, got.Len(), "stdout streams without a cap")
+
+	start = time.Now()
+	code, err = engine.ExecStream(ctx, name, []string{"sh", "-c", "head -c 10 >/dev/null; exit 4"}, rand.Reader, io.Discard, io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, 4, code, "a command that stops reading early still returns")
+	assert.Less(t, time.Since(start), 10*time.Second)
+
+	broken := errors.New("the download failed")
+	got.Reset()
+	_, err = engine.ExecStream(ctx, name, []string{"wc", "-c"}, io.MultiReader(strings.NewReader("abc"), iotest.ErrReader(broken)), &got, io.Discard)
+	assert.ErrorIs(t, err, broken, "a failed read of stdin is the exec's error")
+	assert.Equal(t, "3", strings.TrimSpace(got.String()), "the command saw its input end there")
+
+	short, cancelShort = context.WithTimeout(ctx, time.Second)
+	defer cancelShort()
+	start = time.Now()
+	_, err = engine.ExecStream(short, name, []string{"cat"}, &slowReader{}, io.Discard, io.Discard)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 5*time.Second, "a cancelled context ends the exec")
+}
+
+// slowReader gives a byte every 100ms, forever.
+type slowReader struct{}
+
+func (slowReader) Read(p []byte) (int, error) {
+	time.Sleep(100 * time.Millisecond)
+	p[0] = 'x'
+
+	return 1, nil
 }
 
 func TestEngineExecToWithoutAShell(t *testing.T) {

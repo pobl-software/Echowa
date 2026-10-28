@@ -51,6 +51,9 @@ type Template struct {
 	// Inspect reads the database's own figures (ADR 0027). Nil for a
 	// template that has none.
 	Inspect *Inspect
+	// Backup dumps and restores the database (ADR 0034). Nil for a
+	// template Echowa doesn't back up, such as Redis.
+	Backup *Backup
 }
 
 // TLS turns a template's server's TLS on with the certificate in the
@@ -249,6 +252,7 @@ var all = []Template{
 			Client: "Set SSL mode to verify-ca and the CA certificate as the root certificate: sslmode=verify-ca sslrootcert=<file> for psql.",
 		},
 		Inspect: postgresInspect,
+		Backup:  postgresBackup,
 	},
 	{
 		Slug:        "mysql",
@@ -290,6 +294,7 @@ var all = []Template{
 			Client: "Set SSL mode to VERIFY_CA and the CA certificate as the CA file: --ssl-mode=VERIFY_CA --ssl-ca=<file> for mysql.",
 		},
 		Inspect: mysqlInspect,
+		Backup:  mysqlBackup,
 	},
 	{
 		Slug:        "redis",

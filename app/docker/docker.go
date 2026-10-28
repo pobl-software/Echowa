@@ -91,6 +91,17 @@ type Client interface {
 	// ends first; the command may then still be running in the container.
 	ExecTo(ctx context.Context, service string, cmd []string, out io.Writer) (int, error)
 
+	// ExecStream runs cmd, without a TTY, in the service's newest running
+	// task container, with stdin, when it isn't nil, as its input, closed at
+	// stdin's end. It writes stdout and stderr to their writers as they
+	// arrive, and returns the exit code, which isn't an error whatever it
+	// is. cmd is a template's backup or restore command (ADR 0034). The
+	// error wraps ErrNotRunning or ErrNotManaged as Exec's does, is ctx's
+	// when ctx ends first, or says stdin's read failed, in which case the
+	// command saw its input end early. It returns once the command has
+	// ended and nothing reads stdin any more.
+	ExecStream(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
+
 	// Host is what the daemon reports about the machine it runs on.
 	Host(ctx context.Context) (Host, error)
 }

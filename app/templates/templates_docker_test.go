@@ -8,13 +8,16 @@
 //	go test -tags docker ./app/templates/...
 //
 // It pulls postgres:18, mysql:9.7 and redis:8, and needs the docker CLI to
-// exec into the tasks.
+// exec into the tasks. PostgreSQL and MySQL are also backed up and
+// restored, as ADR 0034 does.
 package templates
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os/exec"
 	"strings"
@@ -394,4 +397,131 @@ func TestTemplatesListTheirSlowQueries(t *testing.T) {
 			}
 		})
 	}
+}
+
+// backupProbes make and read the data a backup test restores: kept has
+// UTF-8 text, binary data and enough rows that a cut-off dump ends inside
+// a statement, and kept_count is a view.
+var backupProbes = map[string]struct {
+	sql    func(r *templateRun, statements string) (string, error)
+	create string
+	// binary prints row 1's data as hex.
+	binary string
+}{
+	"postgres": {
+		sql: func(r *templateRun, statements string) (string, error) {
+			return r.exec("sh", "-c", `psql -X -q -A -t -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"`, "sh", statements)
+		},
+		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data bytea);
+			INSERT INTO kept VALUES (1, 'café', '\x00ff'), (2, 'naïve ☃', NULL);
+			INSERT INTO kept SELECT n, encode(sha256(n::text::bytea), 'hex'), sha256(n::text::bytea) FROM generate_series(3, 5000) n;
+			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
+		binary: "SELECT encode(data, 'hex') FROM kept WHERE id = 1",
+	},
+	"mysql": {
+		sql: func(r *templateRun, statements string) (string, error) {
+			return r.exec("sh", "-c", `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root -N -B -e "$1" "$MYSQL_DATABASE"`, "sh", statements)
+		},
+		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data varbinary(32));
+			INSERT INTO kept VALUES (1, 'café', 0x00ff), (2, 'naïve ☃', NULL);
+			SET SESSION cte_max_recursion_depth = 10000;
+			INSERT INTO kept WITH RECURSIVE s (n) AS (SELECT 3 UNION ALL SELECT n + 1 FROM s WHERE n < 5000)
+				SELECT n, SHA2(n, 256), UNHEX(SHA2(n, 256)) FROM s;
+			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
+		binary: "SELECT HEX(data) FROM kept WHERE id = 1",
+	},
+}
+
+func TestTemplatesBackUpAndRestore(t *testing.T) {
+	for _, tmpl := range All() {
+		if tmpl.Backup == nil {
+			continue
+		}
+		t.Run(tmpl.Slug, func(t *testing.T) {
+			b := tmpl.Backup
+			probe, ok := backupProbes[tmpl.Slug]
+			require.True(t, ok, "add a probe for %s", tmpl.Slug)
+			sql := func(r *templateRun, statements string) string {
+				t.Helper()
+				out, err := probe.sql(r, statements)
+				require.NoError(t, err, out)
+				return strings.TrimSpace(out)
+			}
+			assertKept := func(r *templateRun, msg string) {
+				t.Helper()
+				assert.Equal(t, "café\nnaïve ☃", sql(r, "SELECT note FROM kept WHERE id <= 2 ORDER BY id"), msg)
+				assert.Equal(t, "5000", sql(r, "SELECT n FROM kept_count"), msg)
+				assert.Equal(t, "00ff", strings.ToLower(sql(r, probe.binary)), msg)
+			}
+
+			// Reading the slow queries leaves pg_stat_statements in the
+			// database, so a real dump carries it, and the target has it.
+			inspected := func(r *templateRun) {
+				t.Helper()
+				if tmpl.Inspect != nil && tmpl.Inspect.SlowQueryFlags == "" {
+					_, err := r.engine.Exec(r.ctx, r.spec.Name, tmpl.Inspect.SlowQueries)
+					require.NoError(t, err)
+				}
+			}
+
+			source := deployTemplate(t, tmpl.Slug, false)
+			sql(source, probe.create)
+			inspected(source)
+			out, err := source.engine.Exec(source.ctx, source.spec.Name, b.Version)
+			require.NoError(t, err)
+			version, err := ServerVersion(out)
+			require.NoError(t, err)
+			t.Logf("server version %s (%s)", version, strings.TrimSpace(string(out)))
+			assert.True(t, b.Compatible(version, version))
+
+			start := time.Now()
+			dump, code, stderr := source.stream(b.Dump, nil)
+			require.Equal(t, 0, code, stderr)
+			t.Logf("dumped %d bytes in %s", len(dump), time.Since(start))
+			assert.Empty(t, stderr, "a clean dump writes nothing to stderr")
+
+			target := deployTemplate(t, tmpl.Slug, false)
+			inspected(target)
+			_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump))
+			require.Equal(t, 0, code, stderr)
+			assertKept(target, "restored into a fresh app, with its own database and passwords")
+
+			sql(source, "UPDATE kept SET note = 'changed' WHERE id = 1; DELETE FROM kept WHERE id = 2")
+			_, code, stderr = source.stream(b.Restore, bytes.NewReader(dump))
+			require.Equal(t, 0, code, stderr)
+			assertKept(source, "restored over changed data")
+
+			_, code, stderr = target.stream(b.Restore, strings.NewReader("this is not a dump\n"))
+			assert.NotEqual(t, 0, code, "a dump that isn't one fails")
+			t.Logf("not a dump: %s", stderr)
+
+			sql(target, "INSERT INTO kept (id, note) VALUES (9999, 'after')")
+			_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump[:len(dump)/2]))
+			assert.NotEqual(t, 0, code, "a restore that fails half way exits non-zero")
+			t.Logf("cut off: %s", stderr)
+			if b.Atomic {
+				assert.Equal(t, "5001", sql(target, "SELECT COUNT(*) FROM kept"), "the failed restore rolled back")
+				assert.Equal(t, "after", sql(target, "SELECT note FROM kept WHERE id = 9999"))
+			}
+
+			out, err = exec.Command("docker", "service", "scale", "--detach", source.spec.Name+"=0").CombinedOutput()
+			require.NoError(t, err, string(out))
+			assert.Eventually(t, func() bool {
+				_, err := source.engine.ExecStream(source.ctx, source.spec.Name, b.Dump, nil, io.Discard, io.Discard)
+				return errors.Is(err, docker.ErrNotRunning)
+			}, time.Minute, time.Second, "a dump of a stopped service fails with ErrNotRunning")
+		})
+	}
+}
+
+// stream runs cmd in the service's task through ExecStream, as a backup
+// or restore does, and returns its stdout, exit code and stderr.
+func (r *templateRun) stream(cmd []string, stdin io.Reader) ([]byte, int, string) {
+	r.t.Helper()
+	var out bytes.Buffer
+	stderr := &docker.TailBuffer{Limit: 16 << 10}
+	code, err := r.engine.ExecStream(r.ctx, r.spec.Name, cmd, stdin, &out, stderr)
+	require.NoError(r.t, err)
+
+	return out.Bytes(), code, strings.TrimSpace(stderr.String())
 }

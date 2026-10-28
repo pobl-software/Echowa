@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -40,7 +41,7 @@ func (e *ExecError) Error() string {
 func (e *Engine) Exec(ctx context.Context, service string, cmd []string) ([]byte, error) {
 	stdout := &cappedBuffer{limit: MaxExecOutput}
 	stderr := &cappedBuffer{limit: maxExecStderr, truncate: true}
-	code, err := e.exec(ctx, service, cmd, stdout, stderr)
+	code, err := e.exec(ctx, service, cmd, nil, stdout, stderr)
 	if err != nil {
 		return nil, err
 	}
@@ -52,12 +53,16 @@ func (e *Engine) Exec(ctx context.Context, service string, cmd []string) ([]byte
 }
 
 func (e *Engine) ExecTo(ctx context.Context, service string, cmd []string, out io.Writer) (int, error) {
-	return e.exec(ctx, service, cmd, out, out)
+	return e.exec(ctx, service, cmd, nil, out, out)
 }
 
-// exec runs cmd in the service's newest running task container and returns
-// its exit code.
-func (e *Engine) exec(ctx context.Context, service string, cmd []string, stdout, stderr io.Writer) (int, error) {
+func (e *Engine) ExecStream(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	return e.exec(ctx, service, cmd, stdin, stdout, stderr)
+}
+
+// exec runs cmd in the service's newest running task container, with stdin
+// as its input when it isn't nil, and returns its exit code.
+func (e *Engine) exec(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	svc, err := e.inspect(ctx, service)
 	if errors.Is(err, ErrServiceNotFound) {
 		return 0, fmt.Errorf("%s: %w", service, ErrNotRunning)
@@ -80,7 +85,9 @@ func (e *Engine) exec(ctx context.Context, service string, cmd []string, stdout,
 	}
 	id := newestContainer(list.Items)
 
-	created, err := e.api.ExecCreate(ctx, id, client.ExecCreateOptions{AttachStdout: true, AttachStderr: true, Cmd: cmd})
+	created, err := e.api.ExecCreate(ctx, id, client.ExecCreateOptions{
+		AttachStdin: stdin != nil, AttachStdout: true, AttachStderr: true, Cmd: cmd,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("exec in container %.12s: %w", id, err)
 	}
@@ -93,11 +100,31 @@ func (e *Engine) exec(ctx context.Context, service string, cmd []string, stdout,
 	stop := context.AfterFunc(ctx, attached.Close)
 	defer stop()
 
-	if _, err := stdcopy.StdCopy(stdout, stderr, attached.Reader); err != nil {
+	input := &inputReader{r: stdin}
+	var copying sync.WaitGroup
+	if stdin != nil {
+		copying.Go(func() {
+			// A write fails once the command has exited, which its exit
+			// code reports. The end of stdin, or a failed read of it, is
+			// the end of the command's input.
+			_, _ = io.Copy(attached.Conn, input)
+			_ = attached.CloseWrite()
+		})
+	}
+	_, err = stdcopy.StdCopy(stdout, stderr, attached.Reader)
+	// The output ends when the command does. Closing the connection stops
+	// the copy of stdin at its next write, so nothing reads stdin after
+	// this returns.
+	attached.Close()
+	copying.Wait()
+	if err != nil {
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
 		}
 		return 0, fmt.Errorf("exec in container %.12s: %w", id, err)
+	}
+	if input.err != nil {
+		return 0, fmt.Errorf("read the input of the exec in container %.12s: %w", id, input.err)
 	}
 
 	inspected, err := e.api.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
@@ -106,6 +133,22 @@ func (e *Engine) exec(ctx context.Context, service string, cmd []string, stdout,
 	}
 
 	return inspected.ExitCode, nil
+}
+
+// inputReader keeps the error of a failed read, which io.Copy can't tell
+// apart from a failed write.
+type inputReader struct {
+	r   io.Reader
+	err error
+}
+
+func (i *inputReader) Read(p []byte) (int, error) {
+	n, err := i.r.Read(p)
+	if err != nil && err != io.EOF {
+		i.err = err
+	}
+
+	return n, err
 }
 
 // newestContainer is the most recently created of a service's running
