@@ -49,6 +49,10 @@ var (
 // now doesn't start another.
 var ErrBackupRunning = errors.New("a backup of this app is already running")
 
+// ErrScheduleRunning means the schedule's last backup hasn't finished, so
+// this one was recorded as skipped.
+var ErrScheduleRunning = errors.New("this schedule's last backup is still running")
+
 // errDumpFailed ends the upload when the dump does, so the multipart
 // upload is aborted and no object appears.
 var errDumpFailed = errors.New("the dump failed")
@@ -57,13 +61,15 @@ var errDumpFailed = errors.New("the dump failed")
 // left running. Stored times have second precision, hence the truncation.
 var backupStart = time.Now().Truncate(time.Second)
 
-// runningBackups counts each app's backups in progress, and waits for them
-// in tests. One Echowa process runs per server (ADR 0013).
+// runningBackups counts each app's backups in progress, holds the schedules
+// with one going, and waits for them in tests. One Echowa process runs per
+// server (ADR 0013).
 var runningBackups = struct {
 	sync.Mutex
-	apps map[uint]int
-	wg   sync.WaitGroup
-}{apps: map[uint]int{}}
+	apps      map[uint]int
+	schedules map[uint]bool
+	wg        sync.WaitGroup
+}{apps: map[uint]int{}, schedules: map[uint]bool{}}
 
 // AppBackup is how the app's template backs it up, or nil for a custom
 // app or a template without backups, such as Redis.
@@ -82,7 +88,7 @@ func AppBackup(app *models.App) *templates.Backup {
 // BackUpNow starts a backup of the app to loc in the background, unless
 // one is already going (ErrBackupRunning).
 func BackUpNow(app *models.App, loc *models.StorageLocation) (*models.Backup, error) {
-	return startBackup(app, loc, models.BackupByHand, nil, true)
+	return startBackup(app, loc, models.BackupByHand, nil)
 }
 
 // WaitForBackups waits until no backup is going. For tests.
@@ -90,41 +96,68 @@ func WaitForBackups() {
 	runningBackups.wg.Wait()
 }
 
-func startBackup(app *models.App, loc *models.StorageLocation, trigger models.BackupTrigger, scheduleID *uint, alone bool) (*models.Backup, error) {
+// startBackup starts a backup in the background. Without a schedule it's
+// Back up now, which refuses while any backup of the app is going. With
+// one, it's that schedule's, which never overlaps itself: the due minute
+// is recorded as skipped instead.
+func startBackup(app *models.App, loc *models.StorageLocation, trigger models.BackupTrigger, schedule *models.BackupSchedule) (*models.Backup, error) {
 	b := AppBackup(app)
 	if b == nil {
 		return nil, fmt.Errorf("%s has no backups", app.Name)
 	}
 	runningBackups.Lock()
 	defer runningBackups.Unlock()
-	if alone && runningBackups.apps[app.ID] > 0 {
+	if schedule == nil && runningBackups.apps[app.ID] > 0 {
 		return nil, ErrBackupRunning
 	}
 
+	now := carbon.NewDateTime(carbon.Now())
 	rec := &models.Backup{
 		AppID:             app.ID,
 		StorageLocationID: loc.ID,
-		BackupScheduleID:  scheduleID,
 		Trigger:           trigger,
 		Status:            models.BackupRunning,
-		StartedAt:         carbon.NewDateTime(carbon.Now()),
+		StartedAt:         now,
+	}
+	if schedule != nil {
+		rec.BackupScheduleID = &schedule.ID
+		if runningBackups.schedules[schedule.ID] {
+			message := "This schedule's last backup was still running."
+			rec.Status, rec.Message, rec.FinishedAt = models.BackupSkipped, &message, now
+			if err := facades.Orm().Query().Create(rec); err != nil {
+				return nil, err
+			}
+			return rec, ErrScheduleRunning
+		}
 	}
 	if err := facades.Orm().Query().Create(rec); err != nil {
 		return nil, err
 	}
 
 	runningBackups.apps[app.ID]++
+	if schedule != nil {
+		runningBackups.schedules[schedule.ID] = true
+	}
 	runningBackups.wg.Add(1)
 	go func() {
 		defer func() {
 			runningBackups.Lock()
 			runningBackups.apps[app.ID]--
+			if schedule != nil {
+				delete(runningBackups.schedules, schedule.ID)
+			}
 			runningBackups.Unlock()
 			runningBackups.wg.Done()
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), BackupTimeout)
 		defer cancel()
-		finishBackup(rec, lockedBackup(ctx, app, b, loc, rec))
+		result := lockedBackup(ctx, app, b, loc, rec)
+		finishBackup(rec, result)
+		if schedule != nil && result.status == models.BackupSucceeded {
+			if err := pruneSchedule(ctx, schedule); err != nil {
+				facades.Log().Error(fmt.Errorf("backup schedule %d: retention: %w", schedule.ID, err))
+			}
+		}
 	}()
 
 	return rec, nil
@@ -409,17 +442,22 @@ type StorageChoice struct {
 	Prefix string `json:"prefix"`
 }
 
-// BackupsSection is a template app's Backups section (ADR 0034).
+// BackupsSection is a template app's Backups section (ADR 0034), and what
+// its Overview shows.
 type BackupsSection struct {
 	// Database is the one database a backup covers.
 	Database string `json:"database"`
 	// Locations come with the one the app last backed up to first.
-	Locations []StorageChoice `json:"locations"`
-	Backups   []BackupSummary `json:"backups"`
+	Locations []StorageChoice         `json:"locations"`
+	Schedules []BackupScheduleSummary `json:"schedules"`
+	Backups   []BackupSummary         `json:"backups"`
+	// LastSucceeded is the newest successful backup, or nil.
+	LastSucceeded *BackupSummary  `json:"last_succeeded"`
+	Failures      []BackupFailure `json:"failures"`
 }
 
 // AppBackups is the app's Backups section, with its newest limit backups.
-func AppBackups(ctx context.Context, app *models.App, limit int) (*BackupsSection, error) {
+func AppBackups(ctx context.Context, app *models.App, limit int, now time.Time) (*BackupsSection, error) {
 	b := AppBackup(app)
 	if b == nil {
 		return nil, nil
@@ -440,6 +478,22 @@ func AppBackups(ctx context.Context, app *models.App, limit int) (*BackupsSectio
 	}
 
 	section := &BackupsSection{Database: env[b.Database], Locations: []StorageChoice{}, Backups: []BackupSummary{}}
+	if section.Schedules, err = backupSchedules(ctx, app.ID, now); err != nil {
+		return nil, err
+	}
+	if section.Failures, err = backupFailures(ctx, app.ID); err != nil {
+		return nil, err
+	}
+	var last []models.Backup
+	err = facades.Orm().WithContext(ctx).Query().With("StorageLocation").
+		Where("app_id", app.ID).Where("status", models.BackupSucceeded).Order("id desc").Limit(1).Get(&last)
+	if err != nil {
+		return nil, err
+	}
+	if len(last) == 1 {
+		row := backupSummary(&last[0])
+		section.LastSucceeded = &row
+	}
 	for _, loc := range locations {
 		choice := StorageChoice{ID: loc.ID, Name: loc.Name, Bucket: loc.Bucket, Prefix: loc.Prefix}
 		if len(rows) > 0 && rows[0].StorageLocationID == loc.ID {
@@ -448,19 +502,26 @@ func AppBackups(ctx context.Context, app *models.App, limit int) (*BackupsSectio
 			section.Locations = append(section.Locations, choice)
 		}
 	}
-	for _, rec := range rows {
-		summary := BackupSummary{
-			ID: rec.ID, Trigger: rec.Trigger, Status: rec.Status, SizeBytes: rec.SizeBytes,
-			ServerVersion: rec.ServerVersion, Message: rec.Message, StartedAt: rec.StartedAt, FinishedAt: rec.FinishedAt,
-		}
-		if rec.Key != "" {
-			summary.Name = path.Base(rec.Key)
-		}
-		if rec.StorageLocation != nil {
-			summary.Location = rec.StorageLocation.Name
-		}
-		section.Backups = append(section.Backups, summary)
+	for i := range rows {
+		section.Backups = append(section.Backups, backupSummary(&rows[i]))
 	}
 
 	return section, nil
+}
+
+// backupSummary is rec without its output. Load its StorageLocation for
+// the location's name.
+func backupSummary(rec *models.Backup) BackupSummary {
+	summary := BackupSummary{
+		ID: rec.ID, Trigger: rec.Trigger, Status: rec.Status, SizeBytes: rec.SizeBytes,
+		ServerVersion: rec.ServerVersion, Message: rec.Message, StartedAt: rec.StartedAt, FinishedAt: rec.FinishedAt,
+	}
+	if rec.Key != "" {
+		summary.Name = path.Base(rec.Key)
+	}
+	if rec.StorageLocation != nil {
+		summary.Location = rec.StorageLocation.Name
+	}
+
+	return summary
 }

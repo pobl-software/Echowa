@@ -246,6 +246,40 @@ func ScheduledTaskMessages() validation.Option {
 	})
 }
 
+// MaxBackupKeep is the most successful backups a schedule keeps.
+const MaxBackupKeep = 100
+
+// BackupSchedule returns the rules for a backup schedule's form (ADR 0034).
+func BackupSchedule() map[string]any {
+	return map[string]any{
+		"storage_location_id": "required|integer|exists:storage_locations,id",
+		"schedule":            "required|string|cron",
+		"timezone":            "required|string|iana_timezone",
+		"keep":                fmt.Sprintf("required|integer|min:1|max:%d", MaxBackupKeep),
+		"enabled":             "boolean",
+	}
+}
+
+// BackupScheduleFilters normalises the backup schedule form before
+// validation.
+func BackupScheduleFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"schedule": "trim",
+		"timezone": "trim",
+	})
+}
+
+// BackupScheduleMessages words the form's limits.
+func BackupScheduleMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"storage_location_id.required": "Choose a storage location.",
+		"storage_location_id.exists":   "That storage location doesn't exist any more.",
+		"keep.min":                     "Keep at least one.",
+		"keep.max":                     fmt.Sprintf("At most %d.", MaxBackupKeep),
+		"keep.integer":                 "Use a whole number.",
+	})
+}
+
 // StorageLocation returns the rules for an S3 storage location's form
 // (ADR 0034). id is 0 when creating. On update a blank secret key keeps
 // the stored one.

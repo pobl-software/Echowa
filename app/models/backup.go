@@ -55,3 +55,20 @@ type Backup struct {
 
 	StorageLocation *StorageLocation `json:"-"`
 }
+
+// BackupSchedule backs an app up to a storage location when Schedule is
+// due in Timezone, and keeps its newest Keep successful backups (ADR 0034).
+type BackupSchedule struct {
+	orm.Model
+	AppID             uint   `json:"app_id"`
+	StorageLocationID uint   `json:"storage_location_id"`
+	Schedule          string `json:"schedule"`
+	Timezone          string `json:"timezone"`
+	Keep              int    `json:"keep"`
+	Enabled           bool   `json:"enabled"`
+	// DismissedBackupID is the newest backup that didn't succeed and was
+	// dismissed on Overview. A newer one shows again.
+	DismissedBackupID *uint `json:"dismissed_backup_id"`
+
+	StorageLocation *StorageLocation `json:"-"`
+}

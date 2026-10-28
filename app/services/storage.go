@@ -50,6 +50,9 @@ type StorageLocationSummary struct {
 	// Backups is how many backup records use the location, which Echowa
 	// forgets if it's deleted.
 	Backups int64 `json:"backups"`
+	// Schedules is how many backup schedules use it. While any do, it
+	// can't be deleted.
+	Schedules int64 `json:"schedules"`
 }
 
 func StorageLocations(ctx context.Context) ([]StorageLocationSummary, error) {
@@ -57,25 +60,36 @@ func StorageLocations(ctx context.Context) ([]StorageLocationSummary, error) {
 	if err := facades.Orm().WithContext(ctx).Query().Order("name").Get(&locations); err != nil {
 		return nil, err
 	}
+	backups, err := countByLocation(ctx, "backups")
+	if err != nil {
+		return nil, err
+	}
+	schedules, err := countByLocation(ctx, "backup_schedules")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]StorageLocationSummary, 0, len(locations))
+	for _, loc := range locations {
+		rows = append(rows, StorageLocationSummary{StorageLocation: loc, Backups: backups[loc.ID], Schedules: schedules[loc.ID]})
+	}
+
+	return rows, nil
+}
+
+// countByLocation counts table's rows per storage_location_id.
+func countByLocation(ctx context.Context, table string) (map[uint]int64, error) {
 	var counts []struct {
 		StorageLocationID uint
 		Count             int64
 	}
-	err := facades.Orm().WithContext(ctx).Query().Table("backups").
+	err := facades.Orm().WithContext(ctx).Query().Table(table).
 		Select("storage_location_id", "COUNT(*) AS count").Group("storage_location_id").Scan(&counts)
-	if err != nil {
-		return nil, err
-	}
 	byID := map[uint]int64{}
 	for _, c := range counts {
 		byID[c.StorageLocationID] = c.Count
 	}
-	rows := make([]StorageLocationSummary, 0, len(locations))
-	for _, loc := range locations {
-		rows = append(rows, StorageLocationSummary{StorageLocation: loc, Backups: byID[loc.ID]})
-	}
 
-	return rows, nil
+	return byID, err
 }
 
 // MovesBackups says the form points loc at another bucket or endpoint,

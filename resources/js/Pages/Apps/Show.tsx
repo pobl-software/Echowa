@@ -2,7 +2,7 @@ import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { ExternalLinkIcon } from 'lucide-react';
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 
-import { AppBackups } from '@/Components/AppBackups';
+import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
 import { AppMetrics } from '@/Components/AppMetrics';
@@ -205,6 +205,9 @@ export default function AppsShow({
                             {taskFailures.map((failure) => (
                                 <ScheduledTaskAlert key={failure.task_id} app={app} failure={failure} />
                             ))}
+                            {backups?.failures.map((failure) => (
+                                <BackupAlert key={failure.schedule_id} app={app} failure={failure} />
+                            ))}
                             {database && <DatabaseWarnings database={database} />}
                             <Stats
                                 items={[
@@ -278,6 +281,13 @@ export default function AppsShow({
                                         <Detail label="External access">
                                             <SectionLink app={app} section="connection" onSelect={show}>
                                                 {app.external_port ? `On, port ${app.external_port}` : 'Off'}
+                                            </SectionLink>
+                                        </Detail>
+                                    )}
+                                    {backups && (
+                                        <Detail label="Last backup">
+                                            <SectionLink app={app} section="backups" onSelect={show}>
+                                                <LastBackup section={backups} />
                                             </SectionLink>
                                         </Detail>
                                     )}

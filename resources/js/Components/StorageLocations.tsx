@@ -81,6 +81,7 @@ export function StorageLocations({ locations, prefix }: { locations: StorageLoca
                             <TableHead>Name</TableHead>
                             <TableHead className="hidden sm:table-cell">Bucket</TableHead>
                             <TableHead className="hidden md:table-cell">Endpoint</TableHead>
+                            <TableHead className="hidden text-right lg:table-cell">Schedules</TableHead>
                             <TableHead className="hidden text-right lg:table-cell">Backups</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -99,6 +100,9 @@ export function StorageLocations({ locations, prefix }: { locations: StorageLoca
                                 </TableCell>
                                 <TableCell className="hidden font-mono text-xs md:table-cell">
                                     {host(location.endpoint)}
+                                </TableCell>
+                                <TableCell className="hidden text-right tabular-nums lg:table-cell">
+                                    {location.schedules}
                                 </TableCell>
                                 <TableCell className="hidden text-right tabular-nums lg:table-cell">
                                     {location.backups}
@@ -127,7 +131,13 @@ export function StorageLocations({ locations, prefix }: { locations: StorageLoca
                                                     size="icon-sm"
                                                     className="text-destructive"
                                                     aria-label={`Delete ${location.name}`}
-                                                    title="Delete"
+                                                    // A schedule needs it; the server refuses too.
+                                                    disabled={location.schedules > 0}
+                                                    title={
+                                                        location.schedules > 0
+                                                            ? 'Backup schedules use it. Change or delete them first.'
+                                                            : 'Delete'
+                                                    }
                                                 >
                                                     <Trash2Icon />
                                                 </Button>

@@ -69,6 +69,15 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 		return resp
 	}
 
+	apps, err := services.LocationSchedules(ctx, loc.ID)
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
+	if len(apps) > 0 {
+		inertia.Flash(ctx, "error", fmt.Sprintf("%s is where the backup schedules of %s go. Change or delete them first.", loc.Name, joinNames(apps)))
+		return inertia.Redirect(ctx, "/settings")
+	}
+
 	count, err := services.StorageLocationBackups(ctx, loc.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)

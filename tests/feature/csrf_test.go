@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"goravel/app/services"
 	"goravel/tests"
 )
 
@@ -16,6 +17,14 @@ type CsrfTestSuite struct {
 
 func TestCsrfTestSuite(t *testing.T) {
 	suite.Run(t, new(CsrfTestSuite))
+}
+
+// SetupTest makes the admin, so /login shows rather than redirecting to
+// the first-run setup page (ADR 0023).
+func (s *CsrfTestSuite) SetupTest() {
+	s.RefreshDatabase()
+	_, _, err := services.SaveUser("Admin", "admin@example.test", "password123")
+	s.Require().NoError(err)
 }
 
 func (s *CsrfTestSuite) TestGetSetsReadableXsrfCookie() {

@@ -15,8 +15,8 @@ import (
 )
 
 // Schedule runs inside the server process (docs/mvp.md, "Image pruning",
-// "App status", "Metrics" and "Scheduled tasks"; ADR 0021 for the update
-// check). Artisan
+// "App status", "Metrics", "Scheduled tasks" and "Backups"; ADR 0021 for
+// the update check). Artisan
 // commands start the scheduler too, so they get no events: only the server
 // prunes, polls, reads and rolls up metrics, and checks for updates.
 func Schedule() []schedule.Event {
@@ -54,6 +54,15 @@ func Schedule() []schedule.Event {
 			}
 		}).EveryMinute().SkipIfStillRunning().Name("echowa:run-scheduled-tasks"),
 
+		// Starts the due backups in the background and returns (ADR 0034).
+		facades.Schedule().Call(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := services.RunDueBackups(ctx, time.Now()); err != nil {
+				facades.Log().Error(fmt.Errorf("backup schedules: %w", err))
+			}
+		}).EveryMinute().SkipIfStillRunning().Name("echowa:run-backups"),
+
 		// Hourly at :05 for the hour before, daily at 00:15 for the day
 		// before, and pruning at :30, clear of both.
 		facades.Schedule().Call(func() {
@@ -79,6 +88,14 @@ func Schedule() []schedule.Event {
 				facades.Log().Error(fmt.Errorf("scheduled task runs prune: %w", err))
 			}
 		}).HourlyAt([]string{"45"}).SkipIfStillRunning().Name("echowa:prune-task-runs"),
+
+		facades.Schedule().Call(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := services.PruneBackupRecords(ctx, time.Now()); err != nil {
+				facades.Log().Error(fmt.Errorf("backup records prune: %w", err))
+			}
+		}).HourlyAt([]string{"50"}).SkipIfStillRunning().Name("echowa:prune-backup-records"),
 
 		facades.Schedule().Call(func() {
 			_, err := services.RunPrune(context.Background(), services.PruneScheduled)

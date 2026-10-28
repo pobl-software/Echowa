@@ -100,6 +100,8 @@ export interface StorageLocation {
     path_style: boolean;
     // How many backup records use it, which Echowa forgets if it's deleted.
     backups: number;
+    // How many backup schedules use it. While any do, it can't be deleted.
+    schedules: number;
 }
 
 // models.BackupStatus and BackupTrigger (ADR 0034).
@@ -138,13 +140,46 @@ export interface StorageChoice {
     prefix: string;
 }
 
-// services.BackupsSection: a template app's Backups section.
+// services.BackupScheduleSummary: a row of the Backups section's schedules.
+export interface BackupSchedule {
+    id: number;
+    storage_location_id: number;
+    location: string;
+    // Five-field cron, read in timezone.
+    schedule: string;
+    timezone: string;
+    // How many of its successful backups it keeps.
+    keep: number;
+    // How many it has now.
+    kept: number;
+    enabled: boolean;
+    // null while it's off.
+    next_run_at: string | null;
+    last_backup: BackupSummary | null;
+}
+
+// services.BackupFailure: a schedule's newest backup that didn't succeed,
+// until it's dismissed on Overview.
+export interface BackupFailure {
+    schedule_id: number;
+    schedule: string;
+    timezone: string;
+    backup: BackupSummary;
+    // When a later backup of the schedule succeeded, if one has.
+    succeeded_at: string | null;
+}
+
+// services.BackupsSection: a template app's Backups section, and its
+// Overview's line and alerts.
 export interface BackupsSection {
     // The one database a backup covers.
     database: string;
     // The one the app last backed up to comes first.
     locations: StorageChoice[];
+    schedules: BackupSchedule[];
     backups: BackupSummary[];
+    last_succeeded: BackupSummary | null;
+    failures: BackupFailure[];
 }
 
 // backups.Step: one stage of a storage location's Test. error is empty

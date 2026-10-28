@@ -314,7 +314,7 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 		// The Backups section's, for a template whose database Echowa backs
 		// up (ADR 0034).
 		"backups": func(c context.Context) (any, error) {
-			return services.AppBackups(c, &app, 50)
+			return services.AppBackups(c, &app, 50, time.Now())
 		},
 		// The Databases section's, for a custom app (ADR 0028).
 		"linkedDatabases": func(c context.Context) (any, error) {
