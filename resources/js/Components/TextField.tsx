@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 
-import { Field, FieldError, FieldLabel } from '@/Components/ui/field';
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
 import { Input } from '@/Components/ui/input';
 
 interface TextFieldProps extends ComponentProps<typeof Input> {
@@ -10,10 +10,12 @@ interface TextFieldProps extends ComponentProps<typeof Input> {
     error?: string;
     // Shown at the right of the label, e.g. a "Forgot password?" link.
     labelAction?: ReactNode;
+    // Shown under the input: what the field does or what follows from it.
+    description?: ReactNode;
 }
 
 // A labelled input with its validation error: the building block for forms.
-export function TextField({ id, label, error, labelAction, ...props }: TextFieldProps) {
+export function TextField({ id, label, error, labelAction, description, ...props }: TextFieldProps) {
     return (
         <Field data-invalid={!!error || undefined}>
             <div className="flex items-center justify-between gap-2">
@@ -22,6 +24,7 @@ export function TextField({ id, label, error, labelAction, ...props }: TextField
             </div>
             <Input id={id} name={id} aria-invalid={!!error || undefined} {...props} />
             {error && <FieldError>{error}</FieldError>}
+            {description && <FieldDescription>{description}</FieldDescription>}
         </Field>
     );
 }

@@ -88,6 +88,25 @@ export interface RegistryRow extends Registry {
     apps_count: number;
 }
 
+// models.StorageLocation. The secret key never leaves the server.
+export interface StorageLocation {
+    id: number;
+    name: string;
+    endpoint: string;
+    region: string;
+    bucket: string;
+    prefix: string;
+    access_key_id: string;
+    path_style: boolean;
+}
+
+// backups.Step: one stage of a storage location's Test. error is empty
+// when it passed.
+export interface StorageCheckStep {
+    name: string;
+    error: string;
+}
+
 // controllers.RegistryOption
 export interface RegistryOption {
     id: number;

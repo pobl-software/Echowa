@@ -123,6 +123,12 @@ func Web() {
 			router.Post("/settings/prune", settings.Prune)
 			router.Post("/settings/update/check", settings.CheckForUpdate)
 			router.Post("/settings/update", settings.Update)
+
+			storage := controllers.NewStorageLocationController()
+			router.Post("/settings/storage", storage.Store)
+			router.Post("/settings/storage/test", storage.Check)
+			router.Put("/settings/storage/{location}", storage.Update)
+			router.Delete("/settings/storage/{location}", storage.Destroy)
 		})
 	})
 

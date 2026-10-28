@@ -1,0 +1,27 @@
+# An S3-compatible server for development (versitygw over a directory), so
+# backups have a bucket to go to without a cloud account (ADR 0034).
+# deploy/dev-vm.sh up deploys it and makes the bucket:
+#
+#   endpoint    http://localhost:7070   (path-style, region us-east-1)
+#   bucket      echowa-dev
+#   access key  echowa-dev
+#   secret key  echowa-dev-secret
+#
+# Development only: the keys are in this file, and it speaks plain HTTP.
+
+services:
+  s3:
+    image: versity/versitygw:v1.9.0
+    command: ["--port", ":7070", "posix", "/data"]
+    environment:
+      ROOT_ACCESS_KEY_ID: echowa-dev
+      ROOT_SECRET_ACCESS_KEY: echowa-dev-secret
+    ports:
+      - "7070:7070"
+    volumes:
+      - data:/data
+    deploy:
+      replicas: 1
+
+volumes:
+  data:

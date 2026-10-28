@@ -6,8 +6,10 @@ import (
 
 	"github.com/goravel/framework/testing"
 
+	"goravel/app/backups"
 	"goravel/app/docker"
 	"goravel/app/facades"
+	"goravel/app/models"
 	"goravel/app/services"
 	"goravel/bootstrap"
 	"goravel/config"
@@ -22,9 +24,21 @@ func init() {
 	// No test talks to a real Docker daemon. Suites that care call
 	// FakeDocker for a fresh fake.
 	services.Docker = func() docker.Client { return fakeDocker }
+	// Nor to S3. Suites that care call FakeStorage.
+	backups.Open = func(loc *models.StorageLocation) backups.Store {
+		OpenedStorage = append(OpenedStorage, *loc)
+		return fakeStorage
+	}
 }
 
-var fakeDocker = &docker.Fake{}
+var (
+	fakeDocker  = &docker.Fake{}
+	fakeStorage = backups.NewFake()
+)
+
+// OpenedStorage lists, oldest first, the locations backups.Open was given
+// since the last FakeStorage.
+var OpenedStorage []models.StorageLocation
 
 type TestCase struct {
 	testing.TestCase
@@ -36,6 +50,15 @@ func (tc *TestCase) FakeDocker() *docker.Fake {
 	fakeDocker = &docker.Fake{}
 
 	return fakeDocker
+}
+
+// FakeStorage gives the test a fresh in-memory bucket, which every storage
+// location opens, and forgets which locations were opened.
+func (tc *TestCase) FakeStorage() *backups.Fake {
+	fakeStorage = backups.NewFake()
+	OpenedStorage = nil
+
+	return fakeStorage
 }
 
 // useTestDatabase points the default connection, and the metrics file, at

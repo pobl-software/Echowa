@@ -8,6 +8,7 @@
 #
 #   http://localhost:3000            Echowa (UI and webhooks)
 #   http://<app>.localhost:8090      deployed apps, through Traefik
+#   http://localhost:7070            an S3 server for backups (deploy/s3)
 #
 # Usage, from the repo root:
 #
@@ -17,7 +18,7 @@
 #                                    then serve with ECHOWA_SKIP_BUILD=1)
 #   deploy/dev-vm.sh stop            stop Echowa in the machine
 #   deploy/dev-vm.sh artisan <cmd>   run an artisan command against its database
-#   deploy/dev-vm.sh test-docker     run the Docker integration tests in it
+#   deploy/dev-vm.sh test-docker     run the Docker and S3 integration tests in it
 #   deploy/dev-vm.sh docker-conns    print Echowa's open connections to dockerd
 #                                    every second; each open log stream holds one
 #   deploy/dev-vm.sh shell           open a shell in the machine
@@ -29,6 +30,8 @@ set -euo pipefail
 
 VM=${ECHOWA_DEV_VM:-echowa-dev}
 TRAEFIK_PORT=8090
+S3_PORT=7070
+S3_BUCKET=echowa-dev
 DATA_DIR=/var/lib/echowa-dev
 BIN=tmp/echowa-linux
 
@@ -81,10 +84,27 @@ up() {
 	in_vm sudo env TRAEFIK_HTTP_PORT=$TRAEFIK_PORT \
 		docker stack deploy --detach=false --quiet -c deploy/traefik/stack.local.yml traefik >/dev/null
 
+	log "Deploying an S3 server on port $S3_PORT (bucket $S3_BUCKET, keys in deploy/s3/stack.local.yml)"
+	in_vm sudo docker stack deploy --detach=false --quiet -c deploy/s3/stack.local.yml s3 >/dev/null
+	s3_bucket
+
 	log "Migrating $DATA_DIR/echowa.sqlite"
 	run_bin in_vm_quiet artisan migrate
 
 	log "Ready. Next: deploy/dev-vm.sh artisan user:create, then start the dev servers (AGENTS.md)."
+}
+
+# s3_bucket makes the dev bucket once the S3 server answers. A bucket that
+# already exists answers 409, which is fine.
+s3_bucket() {
+	in_vm_quiet bash -c "for _ in \$(seq 1 30); do
+			code=\$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 \
+				--user echowa-dev:echowa-dev-secret -X PUT http://localhost:$S3_PORT/$S3_BUCKET) || code=000
+			case \$code in 200 | 409) exit 0 ;; esac
+			sleep 1
+		done
+		echo \"the S3 server didn't make the bucket (last answer: \$code)\" >&2
+		exit 1"
 }
 
 # Cross-compiles for the machine. Pure Go (no cgo), so it's a plain build.
@@ -164,7 +184,7 @@ artisan)
 	;;
 test-docker)
 	require_vm
-	for pkg in docker templates; do
+	for pkg in docker templates backups; do
 		GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o "tmp/$pkg.test" "./app/$pkg"
 		in_vm "./tmp/$pkg.test" -test.count=1 -test.v
 	done

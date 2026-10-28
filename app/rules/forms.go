@@ -246,6 +246,49 @@ func ScheduledTaskMessages() validation.Option {
 	})
 }
 
+// StorageLocation returns the rules for an S3 storage location's form
+// (ADR 0034). id is 0 when creating. On update a blank secret key keeps
+// the stored one.
+func StorageLocation(id uint) map[string]any {
+	rules := StorageLocationCheck(id)
+	rules["name"] = "required|string|max:100|" + unique("storage_locations", "name", id)
+
+	return rules
+}
+
+// StorageLocationCheck returns the rules for testing a location's form
+// before it's saved: everything but its name.
+func StorageLocationCheck(id uint) map[string]any {
+	secret := "required|string|max:500"
+	if id != 0 {
+		secret = "nullable|string|max:500"
+	}
+
+	return map[string]any{
+		"endpoint":      "required|string|max:255|storage_endpoint",
+		"region":        "required|string|max:50|alpha_dash",
+		"bucket":        "required|string|s3_bucket",
+		"prefix":        "nullable|string|key_prefix",
+		"access_key_id": "required|string|max:200",
+		"secret_key":    secret,
+		"path_style":    "boolean",
+	}
+}
+
+// StorageLocationFilters normalises the storage location form before
+// validation.
+func StorageLocationFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name":          "trim",
+		"endpoint":      "trim",
+		"region":        "trim|lower",
+		"bucket":        "trim",
+		"prefix":        "trim",
+		"access_key_id": "trim",
+		"secret_key":    "trim",
+	})
+}
+
 // unique ignores the row being updated.
 func unique(table, column string, id uint) string {
 	if id == 0 {
