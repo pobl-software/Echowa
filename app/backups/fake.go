@@ -15,7 +15,11 @@ import (
 type Fake struct {
 	mu      sync.Mutex
 	objects map[string][]byte
+	aborted []string
 	Err     error
+	// PutErr fails only Put, after reading all of what it's given, as an
+	// upload that fails at its end would.
+	PutErr error
 }
 
 func NewFake() *Fake {
@@ -43,6 +47,9 @@ func (f *Fake) Put(ctx context.Context, key string, r io.Reader) error {
 	b, err := io.ReadAll(r)
 	if err != nil {
 		return err
+	}
+	if f.PutErr != nil {
+		return f.PutErr
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -99,4 +106,23 @@ func (f *Fake) Delete(ctx context.Context, key string) error {
 	delete(f.objects, key)
 
 	return nil
+}
+
+func (f *Fake) AbortUploads(ctx context.Context, key string) error {
+	if f.Err != nil {
+		return f.Err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.aborted = append(f.aborted, key)
+
+	return nil
+}
+
+// Aborted lists the keys AbortUploads was called for, in order.
+func (f *Fake) Aborted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.aborted)
 }

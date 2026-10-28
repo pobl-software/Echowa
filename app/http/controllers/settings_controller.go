@@ -9,9 +9,7 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	gonertia "github.com/romsar/gonertia/v3"
 
-	"goravel/app/facades"
 	"goravel/app/inertia"
-	"goravel/app/models"
 	"goravel/app/release"
 	"goravel/app/services"
 )
@@ -27,8 +25,8 @@ func NewSettingsController() *SettingsController {
 func (r *SettingsController) Index(ctx http.Context) http.Response {
 	cfg := services.PruneSettings()
 	current, last := services.PruneState()
-	locations := []models.StorageLocation{}
-	if err := facades.Orm().WithContext(ctx).Query().Order("name").Get(&locations); err != nil {
+	locations, err := services.StorageLocations(ctx)
+	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 

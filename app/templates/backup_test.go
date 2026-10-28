@@ -1,6 +1,7 @@
 package templates
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,6 +60,8 @@ func TestBackupCommandsKeepSecretsOutOfTheirArguments(t *testing.T) {
 		t.Run(tmpl.Slug, func(t *testing.T) {
 			b := tmpl.Backup
 			assert.NotEmpty(t, b.Version)
+			assert.True(t, slices.ContainsFunc(tmpl.Env, func(e Env) bool { return e.Key == b.Database }),
+				"the database is named in the template's env")
 			assert.NotEmpty(t, b.Extension)
 			assert.NotNil(t, b.Compatible)
 			for _, cmd := range [][]string{b.Dump, b.Restore} {

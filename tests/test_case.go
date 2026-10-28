@@ -3,6 +3,7 @@ package tests
 import (
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/goravel/framework/testing"
 
@@ -26,6 +27,9 @@ func init() {
 	services.Docker = func() docker.Client { return fakeDocker }
 	// Nor to S3. Suites that care call FakeStorage.
 	backups.Open = func(loc *models.StorageLocation) backups.Store {
+		// Backups open their location in the background.
+		openedMu.Lock()
+		defer openedMu.Unlock()
 		OpenedStorage = append(OpenedStorage, *loc)
 		return fakeStorage
 	}
@@ -34,6 +38,7 @@ func init() {
 var (
 	fakeDocker  = &docker.Fake{}
 	fakeStorage = backups.NewFake()
+	openedMu    sync.Mutex
 )
 
 // OpenedStorage lists, oldest first, the locations backups.Open was given

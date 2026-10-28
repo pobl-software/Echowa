@@ -98,6 +98,53 @@ export interface StorageLocation {
     prefix: string;
     access_key_id: string;
     path_style: boolean;
+    // How many backup records use it, which Echowa forgets if it's deleted.
+    backups: number;
+}
+
+// models.BackupStatus and BackupTrigger (ADR 0034).
+export type BackupStatus = 'running' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';
+export type BackupTrigger = 'schedule' | 'manual' | 'before_restore';
+
+// services.BackupSummary: a row of the Backups section's history.
+export interface BackupSummary {
+    id: number;
+    trigger: BackupTrigger;
+    status: BackupStatus;
+    location: string;
+    // The dump's file name; empty until the backup names it.
+    name: string;
+    // Uploaded so far while running.
+    size_bytes: number;
+    server_version: string;
+    message: string | null;
+    started_at: string;
+    finished_at: string | null;
+}
+
+// models.Backup, from GET /apps/{app}/backups/{backup}.
+export interface BackupDetail extends Omit<BackupSummary, 'location' | 'name'> {
+    key: string;
+    sha256: string;
+    // The end of the dump's stderr.
+    output: string;
+}
+
+// services.StorageChoice: a location Back up now offers.
+export interface StorageChoice {
+    id: number;
+    name: string;
+    bucket: string;
+    prefix: string;
+}
+
+// services.BackupsSection: a template app's Backups section.
+export interface BackupsSection {
+    // The one database a backup covers.
+    database: string;
+    // The one the app last backed up to comes first.
+    locations: StorageChoice[];
+    backups: BackupSummary[];
 }
 
 // backups.Step: one stage of a storage location's Test. error is empty
@@ -135,6 +182,8 @@ export interface TemplateOption {
     // 'switch' when it lists its slow queries once they're switched on,
     // 'always' when it lists them anyway, empty when it can't (ADR 0027).
     slow_queries: '' | 'switch' | 'always';
+    // The app has a Backups section (ADR 0034).
+    backups: boolean;
 }
 
 // services.LinkedDatabase: a template app a custom app is linked to (ADR

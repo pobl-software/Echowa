@@ -10,21 +10,24 @@ import (
 	"goravel/app/http/middleware"
 )
 
-// Server-Sent Events routes. They stay open as long as the page that opened
-// them, so they skip Goravel's global request timeout (GlobalMiddleware)
-// and use a session that's never saved (middleware.AuthenticateStream).
+// Server-Sent Events routes, and a backup's download. They stay open as
+// long as they need, so they skip Goravel's global request timeout
+// (GlobalMiddleware) and use a session that's never saved
+// (middleware.AuthenticateStream).
 const (
 	appLogsStream    = "/apps/{app}/logs/stream"
 	deploymentStream = "/deployments/{deployment}/stream"
+	backupDownload   = "/apps/{app}/backups/{backup}/download"
 )
 
-var streams = []string{appLogsStream, deploymentStream}
+var streams = []string{appLogsStream, deploymentStream, backupDownload}
 
 func Streams() {
 	facades.Route().Middleware(&middleware.AuthenticateStream{}).Group(func(router route.Router) {
 		stream := controllers.NewStreamController()
 		router.Get(appLogsStream, stream.AppLogs)
 		router.Get(deploymentStream, stream.Deployment)
+		router.Get(backupDownload, controllers.NewBackupController().Download)
 	})
 }
 

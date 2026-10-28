@@ -67,6 +67,8 @@ type TemplateOption struct {
 	// they're switched on, "always" when it lists them anyway, and empty
 	// when it can't (ADR 0027).
 	SlowQueries string `json:"slow_queries"`
+	// Backups says the app has a Backups section (ADR 0034).
+	Backups bool `json:"backups"`
 }
 
 type TemplateEnvOption struct {
@@ -87,7 +89,7 @@ func templateOption(t templates.Template) TemplateOption {
 	option := TemplateOption{
 		Slug: t.Slug, Name: t.Name, Description: t.Description, Repository: t.Repository,
 		DefaultTag: t.DefaultTag, Port: t.Port, HTTP: t.HTTP, Healthcheck: t.Healthcheck,
-		Env: []TemplateEnvOption{}, Volumes: []string{},
+		Env: []TemplateEnvOption{}, Volumes: []string{}, Backups: t.Backup != nil,
 	}
 	for _, e := range t.Env {
 		option.Env = append(option.Env, TemplateEnvOption{Key: e.Key, Source: e.Value.Source()})
@@ -309,6 +311,11 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 		"slowQueries": gonertia.Optional(func(c context.Context) (any, error) {
 			return services.SlowQueries(c, &app), nil
 		}),
+		// The Backups section's, for a template whose database Echowa backs
+		// up (ADR 0034).
+		"backups": func(c context.Context) (any, error) {
+			return services.AppBackups(c, &app, 50)
+		},
 		// The Databases section's, for a custom app (ADR 0028).
 		"linkedDatabases": func(c context.Context) (any, error) {
 			if app.Template != nil {
@@ -557,6 +564,12 @@ func (r *AppController) Destroy(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findOr404(ctx, "app", &app, "Volumes"); resp != nil {
 		return resp
+	}
+	// A dump or restore would fail part way, and a restore could leave the
+	// new app's data half written.
+	if work := services.AppBusy(app.ID); work == services.WorkBackup || work == services.WorkRestore {
+		inertia.Flash(ctx, "error", fmt.Sprintf("%s of %s is running. Wait for it to finish, then delete the app.", capitalise(work.Describe()), app.Name))
+		return inertia.Back(ctx)
 	}
 
 	if err := services.Docker().RemoveService(ctx, app.ServiceName()); err != nil {

@@ -35,8 +35,12 @@ func (r *DeploymentController) Show(ctx http.Context) http.Response {
 			"current_deployment_id": app.CurrentDeploymentID,
 			// For the sections it has (resources/js/Components/AppNav.tsx).
 			"template": app.Template,
+			"backups":  services.AppBackup(&app) != nil,
 		},
 		"serviceName": app.ServiceName(),
+		// Why a queued deployment hasn't started, when it's waiting for the
+		// app's lock (ADR 0034).
+		"waitingFor": waitingFor(&app, &deployment),
 		// The log never holds secrets: the deploy job only writes env var
 		// counts, never values, and never the registry token.
 		"deployment": deployment,
@@ -88,4 +92,17 @@ func (r *DeploymentController) find(ctx http.Context) (models.App, models.Deploy
 	}
 
 	return app, deployment, nil
+}
+
+// waitingFor is what a queued deployment waits for, or "" when it's only
+// waiting for a worker.
+func waitingFor(app *models.App, d *models.Deployment) string {
+	if d.Status != models.DeploymentQueued {
+		return ""
+	}
+	if work := services.AppBusy(app.ID); work == services.WorkBackup || work == services.WorkRestore {
+		return fmt.Sprintf("Waiting for %s of this app to finish.", work.Describe())
+	}
+
+	return ""
 }

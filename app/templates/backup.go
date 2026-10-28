@@ -11,6 +11,8 @@ import (
 // The commands are constants that read secrets from the container's env
 // inside sh -c: nothing a request sends goes into one.
 type Backup struct {
+	// Database is the env var naming the one database Dump covers.
+	Database string
 	// Version prints the server's version, which ServerVersion reads.
 	Version []string
 	// Dump writes the app's database to stdout.
@@ -89,8 +91,9 @@ func versionParts(v string, n int) ([]int, bool) {
 // template's user, which needs no password (ADR 0027). The custom format
 // is compressed already, and pg_restore reads it from a pipe.
 var postgresBackup = &Backup{
-	Version: []string{"postgres", "-V"},
-	Dump:    []string{"sh", "-c", `exec pg_dump -Fc -w -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
+	Database: "POSTGRES_DB",
+	Version:  []string{"postgres", "-V"},
+	Dump:     []string{"sh", "-c", `exec pg_dump -Fc -w -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
 	Restore: []string{"sh", "-c", `exec pg_restore -w -U "$POSTGRES_USER" -d "$POSTGRES_DB" ` +
 		`--clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error`},
 	Extension:  "dump",
@@ -101,7 +104,8 @@ var postgresBackup = &Backup{
 // MySQL's connect over the socket as root, whose password is in the env.
 // The dump names no database, so it restores into another app's.
 var mysqlBackup = &Backup{
-	Version: []string{"mysqld", "--version"},
+	Database: "MYSQL_DATABASE",
+	Version:  []string{"mysqld", "--version"},
 	Dump: []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysqldump -u root ` +
 		`--single-transaction --routines --triggers --events --set-gtid-purged=OFF --no-tablespaces --hex-blob "$MYSQL_DATABASE"`},
 	Restore:    []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root "$MYSQL_DATABASE"`},

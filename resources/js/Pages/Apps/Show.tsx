@@ -2,6 +2,7 @@ import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { ExternalLinkIcon } from 'lucide-react';
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 
+import { AppBackups } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
 import { AppMetrics } from '@/Components/AppMetrics';
@@ -28,6 +29,7 @@ import type { AppLive, AppSeries, DatabaseLive, DatabaseSeries } from '@/types/m
 import {
     type App,
     type AppVolume,
+    type BackupsSection,
     type ConnectInfo,
     type DatabaseChoices,
     type DeploymentSummary,
@@ -84,6 +86,9 @@ interface Props {
     // a template app.
     scheduledTasks: ScheduledTask[];
     taskFailures: TaskFailure[];
+    // The Backups section's (ADR 0034). Null when the app's template isn't
+    // backed up.
+    backups: BackupsSection | null;
 }
 
 // The section lives in ?tab= so redirects (e.g. after saving settings) and
@@ -91,7 +96,7 @@ interface Props {
 // links working.
 const movedSections: Record<string, AppSection> = { database: 'metrics', settings: 'docker' };
 
-function sectionFromUrl(app: App): AppSection {
+function sectionFromUrl(app: Parameters<typeof sectionsFor>[0]): AppSection {
     const param = new URLSearchParams(window.location.search).get('tab');
     const tab = (param && movedSections[param]) ?? param;
     return sectionsFor(app).some((s) => s.id === tab) ? (tab as AppSection) : 'overview';
@@ -122,8 +127,11 @@ export default function AppsShow({
     databaseChoices,
     scheduledTasks,
     taskFailures,
+    backups,
 }: Props) {
-    const [section, setSection] = useState<AppSection>(() => sectionFromUrl(app));
+    // The nav needs to know whether the template is one Echowa backs up.
+    const navApp = { ...app, backups: template?.backups ?? false };
+    const [section, setSection] = useState<AppSection>(() => sectionFromUrl(navApp));
     const volumes = app.volumes ?? [];
 
     // While a deployment runs, refresh its status and the service's.
@@ -165,13 +173,13 @@ export default function AppsShow({
                 status={<LiveStatusBadge status={status} />}
                 aside={
                     <AppNavAside
-                        app={app}
+                        app={navApp}
                         current={section}
                         onSelect={show}
                         subtitle={`${app.repository}:${app.default_tag}`}
                     />
                 }
-                tabs={<AppNavTabs app={app} current={section} onSelect={show} />}
+                tabs={<AppNavTabs app={navApp} current={section} onSelect={show} />}
                 actions={
                     <>
                         {url && (
@@ -343,6 +351,8 @@ export default function AppsShow({
                             {!template.http && <ExternalAccessSection app={app} template={template} />}
                         </ConfigPanel>
                     )}
+
+                    {section === 'backups' && backups && <AppBackups app={app} section={backups} />}
 
                     {section === 'docker' && (
                         <DockerConfig app={app} registries={registries} template={template ?? undefined} />

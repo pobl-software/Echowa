@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"github.com/goravel/framework/contracts/http"
 
 	"goravel/app/backups"
@@ -43,6 +44,16 @@ func (r *StorageLocationController) Update(ctx http.Context) http.Response {
 	if resp != nil {
 		return resp
 	}
+	if in.MovesBackups(&loc) {
+		count, err := services.StorageLocationBackups(ctx, loc.ID)
+		if err != nil {
+			return inertia.ServerError(ctx, err)
+		}
+		if count > 0 {
+			moved := "This location has backups, so its endpoint and bucket can't change. Add a new location instead."
+			return failed(ctx, map[string]string{"endpoint": moved, "bucket": moved})
+		}
+	}
 
 	if err := services.UpdateStorageLocation(ctx, &loc, in); err != nil {
 		return inertia.ServerError(ctx, err)
@@ -58,10 +69,18 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 		return resp
 	}
 
+	count, err := services.StorageLocationBackups(ctx, loc.ID)
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
 	if err := services.DeleteStorageLocation(ctx, &loc); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	inertia.Flash(ctx, "success", "Deleted "+loc.Name+".")
+	if count > 0 {
+		inertia.Flash(ctx, "success", fmt.Sprintf("Deleted %s and Echowa's records of its %s. They're still in the bucket.", loc.Name, backupCount(count)))
+	} else {
+		inertia.Flash(ctx, "success", "Deleted "+loc.Name+".")
+	}
 
 	return inertia.Redirect(ctx, "/settings")
 }
@@ -110,4 +129,12 @@ func (r *StorageLocationController) validate(ctx http.Context, id uint) (service
 	}
 
 	return in, nil
+}
+
+func backupCount(n int64) string {
+	if n == 1 {
+		return "1 backup"
+	}
+
+	return fmt.Sprintf("%d backups", n)
 }

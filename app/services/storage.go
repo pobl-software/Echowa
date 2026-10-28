@@ -44,6 +44,52 @@ func (in StorageLocationInput) Apply(loc *models.StorageLocation) {
 	loc.PathStyle = in.PathStyle
 }
 
+// StorageLocationSummary is a row of Settings' S3 storage list.
+type StorageLocationSummary struct {
+	models.StorageLocation
+	// Backups is how many backup records use the location, which Echowa
+	// forgets if it's deleted.
+	Backups int64 `json:"backups"`
+}
+
+func StorageLocations(ctx context.Context) ([]StorageLocationSummary, error) {
+	var locations []models.StorageLocation
+	if err := facades.Orm().WithContext(ctx).Query().Order("name").Get(&locations); err != nil {
+		return nil, err
+	}
+	var counts []struct {
+		StorageLocationID uint
+		Count             int64
+	}
+	err := facades.Orm().WithContext(ctx).Query().Table("backups").
+		Select("storage_location_id", "COUNT(*) AS count").Group("storage_location_id").Scan(&counts)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[uint]int64{}
+	for _, c := range counts {
+		byID[c.StorageLocationID] = c.Count
+	}
+	rows := make([]StorageLocationSummary, 0, len(locations))
+	for _, loc := range locations {
+		rows = append(rows, StorageLocationSummary{StorageLocation: loc, Backups: byID[loc.ID]})
+	}
+
+	return rows, nil
+}
+
+// MovesBackups says the form points loc at another bucket or endpoint,
+// which its backups' records don't follow: their keys would name objects
+// that aren't there.
+func (in StorageLocationInput) MovesBackups(loc *models.StorageLocation) bool {
+	return strings.TrimSuffix(in.Endpoint, "/") != loc.Endpoint || in.Bucket != loc.Bucket
+}
+
+// StorageLocationBackups counts the backup records that use the location.
+func StorageLocationBackups(ctx context.Context, id uint) (int64, error) {
+	return facades.Orm().WithContext(ctx).Query().Model(&models.Backup{}).Where("storage_location_id", id).Count()
+}
+
 func CreateStorageLocation(ctx context.Context, in StorageLocationInput) (*models.StorageLocation, error) {
 	loc := &models.StorageLocation{}
 	in.Apply(loc)

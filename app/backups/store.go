@@ -27,6 +27,10 @@ type Store interface {
 	List(ctx context.Context, prefix, delimiter string) (Listing, error)
 	// Delete removes the object, or does nothing if there's none.
 	Delete(ctx context.Context, key string) error
+	// AbortUploads aborts any multipart upload of key left open, such as
+	// one Echowa was making when it stopped. Its parts are paid for until
+	// then.
+	AbortUploads(ctx context.Context, key string) error
 }
 
 type Object struct {

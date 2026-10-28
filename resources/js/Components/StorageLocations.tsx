@@ -81,6 +81,7 @@ export function StorageLocations({ locations, prefix }: { locations: StorageLoca
                             <TableHead>Name</TableHead>
                             <TableHead className="hidden sm:table-cell">Bucket</TableHead>
                             <TableHead className="hidden md:table-cell">Endpoint</TableHead>
+                            <TableHead className="hidden text-right lg:table-cell">Backups</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -98,6 +99,9 @@ export function StorageLocations({ locations, prefix }: { locations: StorageLoca
                                 </TableCell>
                                 <TableCell className="hidden font-mono text-xs md:table-cell">
                                     {host(location.endpoint)}
+                                </TableCell>
+                                <TableCell className="hidden text-right tabular-nums lg:table-cell">
+                                    {location.backups}
                                 </TableCell>
                                 <TableCell>
                                     <div className="flex justify-end gap-1">
@@ -134,7 +138,11 @@ export function StorageLocations({ locations, prefix }: { locations: StorageLoca
                                                 })
                                             }
                                         >
-                                            Echowa forgets this bucket and its keys. Nothing in the bucket is deleted.
+                                            Echowa forgets this bucket and its keys
+                                            {location.backups > 0 &&
+                                                `, and its records of ${location.backups === 1 ? '1 backup' : `${location.backups} backups`}`}
+                                            . Nothing in the bucket is deleted, so a backup there can still be restored
+                                            once you add it again.
                                         </ConfirmDelete>
                                     </div>
                                 </TableCell>
@@ -231,6 +239,9 @@ function LocationDialog({
         }
         setChecking(false);
     };
+    // A location with backups keeps its endpoint and bucket: their records
+    // name objects there.
+    const moored = (location?.backups ?? 0) > 0;
     const field = (key: keyof LocationForm) => ({
         value: form.data[key] as string,
         onChange: (e: React.ChangeEvent<HTMLInputElement>) => form.setData(key, e.target.value),
@@ -274,6 +285,7 @@ function LocationDialog({
                                 </>
                             }
                             {...field('endpoint')}
+                            disabled={moored}
                         />
 
                         <div className="grid gap-5 sm:grid-cols-2">
@@ -282,7 +294,9 @@ function LocationDialog({
                                 label="Bucket"
                                 className="font-mono"
                                 autoComplete="off"
+                                description={moored ? "Backups name this bucket, so it can't change." : undefined}
                                 {...field('bucket')}
+                                disabled={moored}
                             />
                             <TextField
                                 id="region"

@@ -98,6 +98,31 @@ func (s *s3Store) List(ctx context.Context, prefix, delimiter string) (Listing, 
 	return listing, nil
 }
 
+func (s *s3Store) AbortUploads(ctx context.Context, key string) error {
+	pages := s3.NewListMultipartUploadsPaginator(s.client, &s3.ListMultipartUploadsInput{
+		Bucket: aws.String(s.bucket), Prefix: aws.String(key),
+	})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return err
+		}
+		for _, u := range page.Uploads {
+			if aws.ToString(u.Key) != key {
+				continue
+			}
+			_, err := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+				Bucket: aws.String(s.bucket), Key: u.Key, UploadId: u.UploadId,
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (s *s3Store) Delete(ctx context.Context, key string) error {
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
 

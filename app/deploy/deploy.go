@@ -32,8 +32,17 @@ import (
 // ErrBusy means another call is already running this app's deployments.
 var ErrBusy = errors.New("a deployment of this app is already running")
 
-// retryDelay is how long a Job for a busy app waits before trying again.
-const retryDelay = 3 * time.Second
+// ErrHeld means a backup or restore holds the app's lock
+// (services.LockApp), so its deployments wait.
+var ErrHeld = errors.New("a backup or restore of this app is running")
+
+// retryDelay is how long a Job for a busy app waits before trying again,
+// and heldRetryDelay one waiting for a backup or restore, which take
+// minutes.
+const (
+	retryDelay     = 3 * time.Second
+	heldRetryDelay = 15 * time.Second
+)
 
 // Dispatch enqueues a Job for the app, after delay. Tests replace it.
 var Dispatch = func(appID uint, delay time.Duration) error {
@@ -83,10 +92,13 @@ func (j *Job) Handle(args ...any) error {
 	}
 
 	err := RunQueued(context.Background(), appID)
-	if errors.Is(err, ErrBusy) {
+	switch {
+	case errors.Is(err, ErrBusy):
 		// The running call may already have finished its last check for
 		// queued deployments, so come back rather than drop the request.
 		return Dispatch(appID, retryDelay)
+	case errors.Is(err, ErrHeld):
+		return Dispatch(appID, heldRetryDelay)
 	}
 
 	return err
@@ -118,9 +130,10 @@ func release(appID uint) {
 }
 
 // RunQueued runs the app's queued deployments, oldest first, until none are
-// left. It returns ErrBusy at once if another call is running them. A
-// deployment that fails is recorded as failed; only database errors are
-// returned.
+// left. It returns ErrBusy at once if another call is running them, and
+// ErrHeld when a backup or restore holds the app's lock, leaving the rest
+// queued. A deployment that fails is recorded as failed; only database
+// errors are returned.
 func RunQueued(ctx context.Context, appID uint) error {
 	if !claim(appID) {
 		return ErrBusy
@@ -137,7 +150,13 @@ func RunQueued(ctx context.Context, appID uint) error {
 		if deployment.ID == 0 {
 			return nil
 		}
-		if err := run(ctx, &deployment); err != nil {
+		unlock, holder, ok := services.LockApp(appID, services.WorkDeploy)
+		if !ok {
+			return fmt.Errorf("%w (%s)", ErrHeld, holder)
+		}
+		err = run(ctx, &deployment)
+		unlock()
+		if err != nil {
 			return err
 		}
 	}
