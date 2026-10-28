@@ -280,6 +280,25 @@ func BackupScheduleMessages() validation.Option {
 	})
 }
 
+// Restore returns the rules for restoring into an app (ADR 0034). The
+// source is a backup's record, or a location and a manifest's key in it.
+func Restore() map[string]any {
+	return map[string]any{
+		"backup":   "integer",
+		"location": "integer",
+		"key":      "string|max:1024",
+		"safety":   "boolean",
+		"confirm":  "required|string",
+	}
+}
+
+// RestoreMessages are the restore form's errors in words.
+func RestoreMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"confirm.required": "Type the app's name to confirm.",
+	})
+}
+
 // StorageLocation returns the rules for an S3 storage location's form
 // (ADR 0034). id is 0 when creating. On update a blank secret key keeps
 // the stored one.

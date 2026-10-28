@@ -72,3 +72,41 @@ type BackupSchedule struct {
 
 	StorageLocation *StorageLocation `json:"-"`
 }
+
+// RestoreStatus is where a restore is, or how it ended.
+type RestoreStatus string
+
+const (
+	RestoreRunning   RestoreStatus = "running"
+	RestoreSucceeded RestoreStatus = "succeeded"
+	RestoreFailed    RestoreStatus = "failed"
+	// RestoreInterrupted was running when Echowa stopped.
+	RestoreInterrupted RestoreStatus = "interrupted"
+)
+
+// Restore is one restore of a dump into a template app's database (ADR
+// 0034), from a backup Echowa has a record of or from a manifest found in
+// the bucket.
+type Restore struct {
+	orm.Model
+	AppID             uint `json:"app_id"`
+	StorageLocationID uint `json:"storage_location_id"`
+	// Key is the dump's whole key, prefix included.
+	Key string `json:"key"`
+	// BackupID is nil for a dump Echowa has no record of.
+	BackupID       *uint         `json:"backup_id"`
+	SafetyBackupID *uint         `json:"safety_backup_id"`
+	NewApp         bool          `json:"new_app"`
+	Status         RestoreStatus `json:"status"`
+	// SizeBytes is the dump's, from its manifest, and ReadBytes how much of
+	// it the restore has read so far.
+	SizeBytes int64 `json:"size_bytes"`
+	ReadBytes int64 `json:"read_bytes"`
+	// Output is the end of the restore command's stderr.
+	Output     string           `json:"output"`
+	Message    *string          `json:"message"`
+	StartedAt  *carbon.DateTime `json:"started_at"`
+	FinishedAt *carbon.DateTime `json:"finished_at"`
+
+	StorageLocation *StorageLocation `json:"-"`
+}

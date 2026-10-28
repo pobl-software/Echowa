@@ -38,6 +38,8 @@ type BackupsTestSuite struct {
 
 	mu    sync.Mutex
 	dumps [][]string
+	// restored holds what each restore read, from restores_test.go.
+	restored []string
 }
 
 func TestBackupsTestSuite(t *testing.T) {
@@ -49,6 +51,7 @@ func (s *BackupsTestSuite) SetupTest() {
 	s.docker = s.FakeDocker()
 	s.storage = s.FakeStorage()
 	s.dumps = nil
+	s.restored = nil
 	s.loc = models.StorageLocation{
 		Name: "R2", Endpoint: "https://abc123.r2.cloudflarestorage.com", Region: "auto", Bucket: "echowa-backups",
 		Prefix: "server-1", AccessKeyID: "AKIAEXAMPLE", SecretKey: models.Secret(storageSecret),
@@ -56,6 +59,7 @@ func (s *BackupsTestSuite) SetupTest() {
 	s.Require().NoError(facades.Orm().Query().Create(&s.loc))
 	s.app = s.templateApp("shop-db", "postgres")
 	s.T().Cleanup(services.WaitForBackups)
+	s.T().Cleanup(services.WaitForRestores)
 }
 
 func (s *BackupsTestSuite) templateApp(name, slug string) *models.App {

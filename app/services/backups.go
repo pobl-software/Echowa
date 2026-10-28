@@ -241,7 +241,11 @@ func dump(ctx context.Context, app *models.App, b *templates.Backup, loc *models
 		gz = gzip.NewWriter(stdout)
 		stdout = gz
 	}
-	stopProgress := saveProgress(rec.ID, counted)
+	stopProgress := saveProgress(func() {
+		if err := updateBackup(rec.ID, map[string]any{"size_bytes": counted.n.Load()}); err != nil {
+			facades.Log().Error(fmt.Errorf("backup %d progress: %w", rec.ID, err))
+		}
+	})
 
 	stderr := &docker.TailBuffer{Limit: MaxBackupOutput}
 	code, dumpErr := Docker().ExecStream(ctx, service, b.Dump, nil, stdout, stderr)
@@ -322,9 +326,10 @@ func (c *countingHash) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// saveProgress saves the size uploaded so far every BackupProgressInterval
-// until the returned func is called.
-func saveProgress(id uint, counted *countingHash) func() {
+// saveProgress calls save every BackupProgressInterval, so the page can
+// show how far a backup or restore has got, until the returned func is
+// called.
+func saveProgress(save func()) func() {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -335,9 +340,7 @@ func saveProgress(id uint, counted *countingHash) func() {
 			case <-done:
 				return
 			case <-tick.C:
-				if err := updateBackup(id, map[string]any{"size_bytes": counted.n.Load()}); err != nil {
-					facades.Log().Error(fmt.Errorf("backup %d progress: %w", id, err))
-				}
+				save()
 			}
 		}
 	})
@@ -454,6 +457,8 @@ type BackupsSection struct {
 	// LastSucceeded is the newest successful backup, or nil.
 	LastSucceeded *BackupSummary  `json:"last_succeeded"`
 	Failures      []BackupFailure `json:"failures"`
+	// Restores are the newest few.
+	Restores []RestoreSummary `json:"restores"`
 }
 
 // AppBackups is the app's Backups section, with its newest limit backups.
@@ -482,6 +487,9 @@ func AppBackups(ctx context.Context, app *models.App, limit int, now time.Time) 
 		return nil, err
 	}
 	if section.Failures, err = backupFailures(ctx, app.ID); err != nil {
+		return nil, err
+	}
+	if section.Restores, err = appRestores(ctx, app.ID, 5); err != nil {
 		return nil, err
 	}
 	var last []models.Backup

@@ -24,5 +24,6 @@ func Migrations() []schema.Migration {
 		&migrations.M20261027180000UpdateRedisHealthcheck{},
 		&migrations.M20261028090000CreateStorageLocationsTable{},
 		&migrations.M20261028120000CreateBackupsTables{},
+		&migrations.M20261028150000CreateRestoresTable{},
 	}
 }

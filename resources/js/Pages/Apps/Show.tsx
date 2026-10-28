@@ -29,6 +29,7 @@ import type { AppLive, AppSeries, DatabaseLive, DatabaseSeries } from '@/types/m
 import {
     type App,
     type AppVolume,
+    type AppWork,
     type BackupsSection,
     type ConnectInfo,
     type DatabaseChoices,
@@ -89,6 +90,9 @@ interface Props {
     // The Backups section's (ADR 0034). Null when the app's template isn't
     // backed up.
     backups: BackupsSection | null;
+    // What holds the app's lock (ADR 0034), so Deploy says what it would
+    // wait for. Empty when nothing does.
+    busy: AppWork;
 }
 
 // The section lives in ?tab= so redirects (e.g. after saving settings) and
@@ -128,10 +132,21 @@ export default function AppsShow({
     scheduledTasks,
     taskFailures,
     backups,
+    busy,
 }: Props) {
     // The nav needs to know whether the template is one Echowa backs up.
     const navApp = { ...app, backups: template?.backups ?? false };
     const [section, setSection] = useState<AppSection>(() => sectionFromUrl(navApp));
+
+    // Deploy says what it would wait for until the backup or restore ends.
+    // The Backups section polls for itself.
+    useEffect(() => {
+        if (!busy || busy === 'deploy' || section === 'backups') {
+            return;
+        }
+        const id = window.setInterval(() => router.reload({ only: ['busy', 'backups'] }), 5000);
+        return () => window.clearInterval(id);
+    }, [busy, section]);
     const volumes = app.volumes ?? [];
 
     // While a deployment runs, refresh its status and the service's.
@@ -194,7 +209,7 @@ export default function AppsShow({
                                 <span className="hidden sm:inline">Open</span>
                             </a>
                         )}
-                        <DeployDialog app={app} />
+                        <DeployDialog app={app} busy={busy} />
                     </>
                 }
             >

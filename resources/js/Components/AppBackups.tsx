@@ -3,6 +3,7 @@ import {
     ArchiveIcon,
     DownloadIcon,
     FileTextIcon,
+    HistoryIcon,
     PencilIcon,
     PlusIcon,
     Trash2Icon,
@@ -11,6 +12,13 @@ import {
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 
+import {
+    RestoreDialog,
+    RestoreFromBucket,
+    RestoreProgress,
+    type RestoreSource,
+    RestoresPanel,
+} from '@/Components/AppRestores';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
 import { Panel } from '@/Components/Panel';
 import { browserZone, type Preset, presetLabel, ScheduleFields, ScheduleText } from '@/Components/ScheduleFields';
@@ -33,6 +41,7 @@ import { Switch } from '@/Components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
 import { formatBytes } from '@/lib/format';
 import { duration, formatDateTime, formatInZone, timeAgo } from '@/lib/time';
+import { cn } from '@/lib/utils';
 import type {
     App,
     BackupDetail,
@@ -60,23 +69,26 @@ const presets: Preset[] = [
 ];
 
 // AppBackups is a template database's Backups section (ADR 0034): back up
-// now to a storage location, and the backups made so far.
+// now to a storage location, the backups made so far, and restores.
 export function AppBackups({ app, section }: { app: App; section: BackupsSection }) {
     const [location, setLocation] = useState<number | null>(() => section.locations[0]?.id ?? null);
     const [starting, setStarting] = useState(false);
     const [opened, setOpened] = useState<BackupSummary | null>(null);
+    const [restoring, setRestoring] = useState<RestoreSource | null>(null);
 
-    // A running backup's size goes up every few seconds, and a schedule's
-    // backup starts on the minute.
+    // A running backup's size and a restore's progress go up every few
+    // seconds, and a schedule's backup starts on the minute.
     const running = section.backups.some((b) => b.status === 'running');
+    const restore = section.restores.find((r) => r.status === 'running');
     const scheduled = section.schedules.some((s) => s.enabled);
+    const busy = running || restore !== undefined;
     useEffect(() => {
-        if (!running && !scheduled) {
+        if (!busy && !scheduled) {
             return;
         }
-        const id = window.setInterval(() => router.reload({ only: ['backups'] }), running ? 3000 : 30_000);
+        const id = window.setInterval(() => router.reload({ only: ['backups', 'busy'] }), busy ? 3000 : 30_000);
         return () => window.clearInterval(id);
-    }, [running, scheduled]);
+    }, [busy, scheduled]);
 
     if (section.locations.length === 0) {
         return (
@@ -105,6 +117,7 @@ export function AppBackups({ app, section }: { app: App; section: BackupsSection
 
     return (
         <div className="space-y-6">
+            {restore && <RestoreProgress restore={restore} />}
             <Panel
                 title="Back up now"
                 description={
@@ -197,7 +210,7 @@ export function AppBackups({ app, section }: { app: App; section: BackupsSection
                                 <TableHead>Started</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead className="hidden md:table-cell">Location</TableHead>
-                                <TableHead className="text-right">Size</TableHead>
+                                <TableHead className="hidden text-right sm:table-cell">Size</TableHead>
                                 <TableHead className="hidden text-right sm:table-cell">Took</TableHead>
                                 <TableHead className="hidden lg:table-cell">Server</TableHead>
                                 <TableHead className="text-right">
@@ -207,29 +220,57 @@ export function AppBackups({ app, section }: { app: App; section: BackupsSection
                         </TableHeader>
                         <TableBody>
                             {section.backups.map((backup) => (
-                                <BackupRow key={backup.id} app={app} backup={backup} onOpen={() => setOpened(backup)} />
+                                <BackupRow
+                                    key={backup.id}
+                                    app={app}
+                                    backup={backup}
+                                    onOpen={() => setOpened(backup)}
+                                    onRestore={restore ? undefined : () => setRestoring({ backup: backup.id })}
+                                />
                             ))}
                         </TableBody>
                     </Table>
                 )}
             </Panel>
 
+            <RestoresPanel app={app} restores={section.restores} />
+            <RestoreFromBucket
+                app={app}
+                locations={section.locations}
+                onRestore={(source) => !restore && setRestoring(source)}
+            />
+
             <BackupOutput app={app} backup={opened} onClose={() => setOpened(null)} />
+            <RestoreDialog app={app} source={restoring} onClose={() => setRestoring(null)} />
         </div>
     );
 }
 
-function BackupRow({ app, backup, onOpen }: { app: App; backup: BackupSummary; onOpen: () => void }) {
+function BackupRow({
+    app,
+    backup,
+    onOpen,
+    onRestore,
+}: {
+    app: App;
+    backup: BackupSummary;
+    onOpen: () => void;
+    // Unset while a restore is running.
+    onRestore?: () => void;
+}) {
     const done = backup.status !== 'running';
     const kept = backup.status === 'succeeded';
+    const size = kept || (!done && backup.size_bytes > 0) ? formatBytes(backup.size_bytes) : null;
 
     return (
         <TableRow>
             <TableCell>
                 <div title={formatDateTime(backup.started_at)}>{timeAgo(backup.started_at)}</div>
                 <div className="text-xs text-muted-foreground">{triggers[backup.trigger]}</div>
+                {/* Phones have no Size column. */}
+                {size && <div className="text-xs text-muted-foreground tabular-nums sm:hidden">{size}</div>}
             </TableCell>
-            <TableCell className="max-w-64">
+            <TableCell className="w-full max-w-0 min-w-24">
                 <RunStatusBadge status={backup.status} />
                 {backup.message && !kept && (
                     <p className="mt-1 truncate text-xs text-muted-foreground" title={backup.message}>
@@ -238,9 +279,7 @@ function BackupRow({ app, backup, onOpen }: { app: App; backup: BackupSummary; o
                 )}
             </TableCell>
             <TableCell className="hidden md:table-cell">{backup.location}</TableCell>
-            <TableCell className="text-right tabular-nums">
-                {kept || (!done && backup.size_bytes > 0) ? formatBytes(backup.size_bytes) : '—'}
-            </TableCell>
+            <TableCell className="hidden text-right tabular-nums sm:table-cell">{size ?? '—'}</TableCell>
             <TableCell className="hidden text-right tabular-nums sm:table-cell">
                 {duration(backup.started_at, backup.finished_at)}
             </TableCell>
@@ -251,12 +290,29 @@ function BackupRow({ app, backup, onOpen }: { app: App; backup: BackupSummary; o
                         <a
                             href={`/apps/${app.id}/backups/${backup.id}/download`}
                             download={backup.name}
-                            className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+                            // Phones have room for three actions; a dump is
+                            // rarely wanted on one.
+                            className={cn(
+                                buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+                                'hidden sm:inline-flex',
+                            )}
                             aria-label={`Download ${backup.name}`}
                             title="Download"
                         >
                             <DownloadIcon />
                         </a>
+                    )}
+                    {kept && (
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={onRestore}
+                            disabled={!onRestore}
+                            aria-label={`Restore ${backup.name}`}
+                            title={onRestore ? 'Restore' : 'A restore is running'}
+                        >
+                            <HistoryIcon />
+                        </Button>
                     )}
                     <Button variant="ghost" size="icon-sm" onClick={onOpen} aria-label="Show output" title="Output">
                         <FileTextIcon />

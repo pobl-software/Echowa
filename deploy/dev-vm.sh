@@ -18,7 +18,8 @@
 #                                    then serve with ECHOWA_SKIP_BUILD=1)
 #   deploy/dev-vm.sh stop            stop Echowa in the machine
 #   deploy/dev-vm.sh artisan <cmd>   run an artisan command against its database
-#   deploy/dev-vm.sh test-docker     run the Docker and S3 integration tests in it
+#   deploy/dev-vm.sh test-docker     run the Docker, S3 and restore integration tests
+#                                    in it
 #   deploy/dev-vm.sh docker-conns    print Echowa's open connections to dockerd
 #                                    every second; each open log stream holds one
 #   deploy/dev-vm.sh shell           open a shell in the machine
@@ -188,6 +189,9 @@ test-docker)
 		GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o "tmp/$pkg.test" "./app/$pkg"
 		in_vm "./tmp/$pkg.test" -test.count=1 -test.v
 	done
+	# Echowa's own restore, from its deploy through the dev S3 server.
+	GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o tmp/feature.test ./tests/feature
+	(cd tests/feature && in_vm ../../tmp/feature.test -test.count=1 -test.v -test.run 'Docker')
 	;;
 docker-conns) docker_conns ;;
 shell) require_vm && orb -m "$VM" ;;
@@ -197,7 +201,7 @@ destroy)
 	[[ $answer == [yY] ]] && orb delete -f "$VM"
 	;;
 *)
-	sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 	;;
 esac

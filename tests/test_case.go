@@ -36,6 +36,9 @@ func init() {
 }
 
 var (
+	// realStorage is the S3 store, kept for the docker integration tests
+	// (real.go) before init swaps in the fake.
+	realStorage = backups.Open
 	fakeDocker  = &docker.Fake{}
 	fakeStorage = backups.NewFake()
 	openedMu    sync.Mutex

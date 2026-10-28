@@ -270,6 +270,8 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 		"status":         services.AppLiveStatus(ctx, &app),
 		"lastDeployment": lastDeployment,
 		"deployments":    deployments,
+		// What holds the app's lock, so Deploy can say what it would wait for.
+		"busy": services.AppBusy(app.ID),
 		// Keys only: values are revealed one at a time by EnvReveal.
 		"envKeys":    append([]string{}, slices.Sorted(maps.Keys(env))...),
 		"registries": registries,
@@ -552,7 +554,11 @@ func (r *AppController) Deploy(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	inertia.Flash(ctx, "success", fmt.Sprintf("Deployment #%d of %s queued.", deployment.ID, ref))
+	if work := services.AppBusy(app.ID); work == services.WorkBackup || work == services.WorkRestore {
+		inertia.Flash(ctx, "info", fmt.Sprintf("Deployment #%d of %s queued. It starts once %s of %s has finished.", deployment.ID, ref, work.Describe(), app.Name))
+	} else {
+		inertia.Flash(ctx, "success", fmt.Sprintf("Deployment #%d of %s queued.", deployment.ID, ref))
+	}
 
 	return inertia.Redirect(ctx, fmt.Sprintf("/apps/%d/deployments/%d", app.ID, deployment.ID))
 }

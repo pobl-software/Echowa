@@ -180,6 +180,73 @@ export interface BackupsSection {
     backups: BackupSummary[];
     last_succeeded: BackupSummary | null;
     failures: BackupFailure[];
+    // The newest few restores.
+    restores: RestoreSummary[];
+}
+
+// services.AppWork: what holds an app's lock, or empty (ADR 0034).
+export type AppWork = '' | 'deploy' | 'backup' | 'restore';
+
+// models.RestoreStatus (ADR 0034).
+export type RestoreStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';
+
+// services.RestoreSummary: a row of the Backups section's restores.
+export interface RestoreSummary {
+    id: number;
+    status: RestoreStatus;
+    location: string;
+    // The dump's file name.
+    name: string;
+    // null for a dump Echowa had no record of.
+    backup_id: number | null;
+    safety_backup_id: number | null;
+    // The dump's size, and how much of it the restore has read.
+    size_bytes: number;
+    read_bytes: number;
+    message: string | null;
+    started_at: string;
+    finished_at: string | null;
+}
+
+// models.Restore, from GET /apps/{app}/restores/{restore}.
+export interface RestoreDetail extends Omit<RestoreSummary, 'location' | 'name'> {
+    key: string;
+    output: string;
+}
+
+// services.RestorePreview, from GET /apps/{app}/restores/preview: what the
+// restore dialog shows before it's confirmed.
+export interface RestorePreview {
+    name: string;
+    location: string;
+    backup_id: number | null;
+    // The backup's database and server version.
+    database: string;
+    server_version: string;
+    size_bytes: number;
+    started_at: string;
+    // What it restores into. app_version is empty when the app isn't running.
+    app_database: string;
+    app_version: string;
+    template: string;
+    // PostgreSQL's restore applies all of a backup or none of it; MySQL's
+    // doesn't.
+    atomic: boolean;
+    // Why it can't go ahead, and what to know before it does.
+    refusal: string;
+    warning: string;
+}
+
+// services.BucketBackup, from GET /apps/{app}/restores/browse: a dump with
+// a manifest in the app's folder of a location.
+export interface BucketBackup {
+    // The manifest's key, which a restore from the bucket names.
+    key: string;
+    name: string;
+    size_bytes: number;
+    modified: string;
+    // null when Echowa has no record of it.
+    backup_id: number | null;
 }
 
 // backups.Step: one stage of a storage location's Test. error is empty

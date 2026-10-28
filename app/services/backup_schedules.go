@@ -87,8 +87,12 @@ func pruneSchedule(ctx context.Context, schedule *models.BackupSchedule) error {
 }
 
 // PruneBackupRecords deletes the records of backups that didn't succeed
-// and finished more than KeepFailedBackups before now.
+// and finished more than KeepFailedBackups before now, and each app's
+// restores past its newest KeepRestores.
 func PruneBackupRecords(ctx context.Context, now time.Time) error {
+	if err := pruneRestores(ctx); err != nil {
+		return err
+	}
 	var ended []models.Backup
 	err := facades.Orm().WithContext(ctx).Query().Select("id", "finished_at").WhereIn("status", unsuccessful).Get(&ended)
 	if err != nil {
