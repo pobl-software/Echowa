@@ -200,6 +200,9 @@ export interface RestoreSummary {
     // null for a dump Echowa had no record of.
     backup_id: number | null;
     safety_backup_id: number | null;
+    // Whether the app was made for this restore. While it waits for the
+    // app's first deploy and server, message says which.
+    new_app: boolean;
     // The dump's size, and how much of it the restore has read.
     size_bytes: number;
     read_bytes: number;
@@ -229,12 +232,31 @@ export interface RestorePreview {
     app_database: string;
     app_version: string;
     template: string;
+    // The template's, for a restore into a new app.
+    default_tag: string;
     // PostgreSQL's restore applies all of a backup or none of it; MySQL's
     // doesn't.
     atomic: boolean;
     // Why it can't go ahead, and what to know before it does.
     refusal: string;
     warning: string;
+}
+
+// services.NewAppPreview, from GET /backups/preview: a backup as the New
+// app page shows it before restoring it into a new app.
+export interface NewAppPreview {
+    name: string;
+    location: string;
+    // The app the backup was taken from.
+    app: string;
+    template: string;
+    template_name: string;
+    database: string;
+    server_version: string;
+    size_bytes: number;
+    started_at: string;
+    atomic: boolean;
+    default_tag: string;
 }
 
 // services.BucketBackup, from GET /apps/{app}/restores/browse: a dump with

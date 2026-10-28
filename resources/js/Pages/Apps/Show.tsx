@@ -449,6 +449,13 @@ export default function AppsShow({
                                             deleted too.
                                         </>
                                     )}
+                                    {backups?.last_succeeded && (
+                                        <>
+                                            {' '}
+                                            Its backups stay in the bucket. New app, From a backup restores one into a
+                                            new app.
+                                        </>
+                                    )}
                                 </p>
                                 <ConfirmDelete
                                     title={`Delete ${app.name}?`}
@@ -464,8 +471,9 @@ export default function AppsShow({
                                             So is its data: <VolumeNames volumes={volumes} /> is deleted for good once
                                             the service has stopped.
                                         </>
-                                    )}{' '}
-                                    This can&apos;t be undone.
+                                    )}
+                                    {backups?.last_succeeded && ' Its backups stay in the bucket.'} This can&apos;t be
+                                    undone.
                                 </ConfirmDelete>
                             </div>
                         </Panel>

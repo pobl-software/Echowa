@@ -103,6 +103,31 @@ func BucketSource(ctx context.Context, app *models.App, loc *models.StorageLocat
 // readSource reads the manifest at key and refuses a dump of another
 // template's database.
 func readSource(ctx context.Context, app *models.App, loc *models.StorageLocation, key string) (*RestoreSource, error) {
+	src, err := readManifest(ctx, loc, key)
+	if err != nil {
+		return nil, err
+	}
+	m := src.Manifest
+	if app.Template == nil || m.Template != *app.Template {
+		return nil, refuse("This is a backup of a %s database, and %s is %s.", templateName(m.Template), app.Name, templateName(deref(app.Template)))
+	}
+
+	var rec models.Backup
+	err = facades.Orm().WithContext(ctx).Query().
+		Where("app_id", app.ID).Where("storage_location_id", loc.ID).Where("key", src.Key).First(&rec)
+	if err != nil {
+		return nil, err
+	}
+	if rec.ID != 0 {
+		src.Backup = &rec
+	}
+
+	return src, nil
+}
+
+// readManifest reads the manifest at key in loc, which names the dump
+// beside it.
+func readManifest(ctx context.Context, loc *models.StorageLocation, key string) (*RestoreSource, error) {
 	body, err := backups.Open(loc).Get(ctx, key)
 	if errors.Is(err, backups.ErrNotFound) {
 		return nil, refuse("The backup's manifest isn't in %s any more.", loc.Name)
@@ -119,22 +144,8 @@ func readSource(ctx context.Context, app *models.App, loc *models.StorageLocatio
 	if err != nil {
 		return nil, refuse("The backup's manifest can't be used: %s.", err)
 	}
-	if app.Template == nil || m.Template != *app.Template {
-		return nil, refuse("This is a backup of a %s database, and %s is %s.", templateName(m.Template), app.Name, templateName(deref(app.Template)))
-	}
 
-	src := &RestoreSource{Location: loc, Key: path.Dir(key) + "/" + m.Object, Manifest: m}
-	var rec models.Backup
-	err = facades.Orm().WithContext(ctx).Query().
-		Where("app_id", app.ID).Where("storage_location_id", loc.ID).Where("key", src.Key).First(&rec)
-	if err != nil {
-		return nil, err
-	}
-	if rec.ID != 0 {
-		src.Backup = &rec
-	}
-
-	return src, nil
+	return &RestoreSource{Location: loc, Key: path.Dir(key) + "/" + m.Object, Manifest: m}, nil
 }
 
 func templateName(slug string) string {
@@ -171,6 +182,8 @@ type RestorePreview struct {
 	AppDatabase string `json:"app_database"`
 	AppVersion  string `json:"app_version"`
 	Template    string `json:"template"`
+	// DefaultTag is the template's, for a restore into a new app.
+	DefaultTag string `json:"default_tag"`
 	// Atomic means the restore applies all of the backup or none of it.
 	Atomic bool `json:"atomic"`
 	// Refusal says why the restore can't go ahead, and Warning what to
@@ -191,6 +204,9 @@ func PreviewRestore(ctx context.Context, app *models.App, src *RestoreSource) (*
 		Name: m.Object, Location: src.Location.Name, Database: m.Database, ServerVersion: m.ServerVersion,
 		SizeBytes: m.Size, StartedAt: m.StartedAt, AppDatabase: env[b.Database], Template: templateName(m.Template),
 		Atomic: b.Atomic,
+	}
+	if tmpl, ok := templates.Find(deref(app.Template)); ok {
+		preview.DefaultTag = tmpl.DefaultTag
 	}
 	if src.Backup != nil {
 		preview.BackupID = &src.Backup.ID
@@ -248,6 +264,16 @@ func StartRestore(app *models.App, src *RestoreSource, safety bool) (*models.Res
 	if !ok {
 		return nil, refuse("%s of %s is running. Restore once it has finished.", upperFirst(holder.Describe()), app.Name)
 	}
+	// A restore into a new app waits for its first deploy without the lock.
+	waiting, err := facades.Orm().Query().Model(&models.Restore{}).
+		Where("app_id", app.ID).Where("status", models.RestoreRunning).Exists()
+	if err != nil || waiting {
+		unlock()
+		if err != nil {
+			return nil, err
+		}
+		return nil, refuse("A restore of %s is running. Restore once it has finished.", app.Name)
+	}
 
 	rec := &models.Restore{
 		AppID:             app.ID,
@@ -277,6 +303,28 @@ func StartRestore(app *models.App, src *RestoreSource, safety bool) (*models.Res
 	return rec, nil
 }
 
+// partly says what a restore that stopped part way leaves.
+func partly(app *models.App, b *templates.Backup, rec *models.Restore) string {
+	atomic := b != nil && b.Atomic
+	switch {
+	case atomic && rec.NewApp:
+		return notRestored(app)
+	case atomic:
+		return " Nothing was restored."
+	case rec.NewApp:
+		return fmt.Sprintf(" %s may hold part of the backup. Delete it and restore into a new app again.", app.Name)
+	case rec.SafetyBackupID != nil:
+		return fmt.Sprintf(" Some tables may have been restored and others not. The safety backup is #%d.", *rec.SafetyBackupID)
+	default:
+		return " Some tables may have been restored and others not, and there's no safety backup."
+	}
+}
+
+// notRestored is what a restore into a new app that never began leaves.
+func notRestored(app *models.App) string {
+	return fmt.Sprintf(" Nothing was restored, so %s's database is empty. Restore into it from its Backups section once it's running, or delete it.", app.Name)
+}
+
 func upperFirst(s string) string {
 	if s == "" {
 		return s
@@ -300,6 +348,9 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 		return restoreResult{status: models.RestoreFailed, message: fmt.Sprintf(format, args...)}
 	}
 	if _, _, err := checkVersion(ctx, app, b, src.Manifest); err != nil {
+		if rec.NewApp {
+			return failed("%s%s", err, notRestored(app))
+		}
 		return failed("%s Nothing was restored.", err)
 	}
 	if safety {
@@ -309,16 +360,7 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 		}
 		rec.SafetyBackupID = &backup.ID
 	}
-	// partly is what a failure part way leaves.
-	partly := func() string {
-		if b.Atomic {
-			return " Nothing was restored."
-		}
-		if rec.SafetyBackupID != nil {
-			return fmt.Sprintf(" Some tables may have been restored and others not. The safety backup is #%d.", *rec.SafetyBackupID)
-		}
-		return " Some tables may have been restored and others not, and there's no safety backup."
-	}
+	partly := func() string { return partly(app, b, rec) }
 
 	body, err := backups.Open(src.Location).Get(ctx, src.Key)
 	if errors.Is(err, backups.ErrNotFound) {
@@ -483,18 +525,14 @@ func RecoverRestores(ctx context.Context) error {
 		if rec.StartedAt != nil && !rec.StartedAt.StdTime().Before(backupStart) {
 			continue
 		}
-		message := "Echowa restarted while this ran."
 		var app models.App
 		if err := facades.Orm().WithContext(ctx).Query().Find(&app, rec.AppID); err != nil {
 			return err
 		}
-		switch b := AppBackup(&app); {
-		case b != nil && b.Atomic:
-			message += " Nothing was restored."
-		case rec.SafetyBackupID != nil:
-			message += fmt.Sprintf(" Some tables may have been restored and others not. The safety backup is #%d.", *rec.SafetyBackupID)
-		default:
-			message += " Some tables may have been restored and others not."
+		// A restore into a new app has a message only while it waits.
+		message := "Echowa restarted while this ran." + partly(&app, AppBackup(&app), rec)
+		if rec.NewApp && rec.Message != nil {
+			message = "Echowa restarted before the restore began." + notRestored(&app)
 		}
 		finishRestore(rec, restoreResult{status: models.RestoreInterrupted, message: message, read: rec.ReadBytes})
 	}
@@ -540,27 +578,10 @@ type BucketBackup struct {
 // ListBucketBackups lists, newest first, the dumps in the app's folder of
 // loc that have a manifest. A dump without one is incomplete.
 func ListBucketBackups(ctx context.Context, app *models.App, loc *models.StorageLocation) ([]BucketBackup, error) {
-	listing, err := backups.Open(loc).List(ctx, AppFolder(loc, app), "/")
+	found, dumps, err := listFolder(ctx, loc, AppFolder(loc, app))
 	if err != nil {
 		return nil, err
 	}
-	keys := map[string]bool{}
-	for _, obj := range listing.Objects {
-		keys[obj.Key] = true
-	}
-	found := []BucketBackup{}
-	dumps := []any{}
-	for _, obj := range listing.Objects {
-		manifest := backups.ManifestKey(obj.Key)
-		if manifest == obj.Key || !keys[manifest] {
-			continue
-		}
-		found = append(found, BucketBackup{Key: manifest, Name: path.Base(obj.Key), SizeBytes: obj.Size, Modified: obj.Modified})
-		dumps = append(dumps, obj.Key)
-	}
-	// Names start with the app and the time, so they sort by time.
-	slices.SortFunc(found, func(a, b BucketBackup) int { return strings.Compare(b.Name, a.Name) })
-
 	if len(dumps) > 0 {
 		var recs []models.Backup
 		err := facades.Orm().WithContext(ctx).Query().Select("id", "key").
@@ -582,6 +603,33 @@ func ListBucketBackups(ctx context.Context, app *models.App, loc *models.Storage
 	return found, nil
 }
 
+// listFolder lists, newest first, the dumps in folder of loc that have a
+// manifest, and the dumps' keys.
+func listFolder(ctx context.Context, loc *models.StorageLocation, folder string) ([]BucketBackup, []any, error) {
+	listing, err := backups.Open(loc).List(ctx, folder, "/")
+	if err != nil {
+		return nil, nil, err
+	}
+	keys := map[string]bool{}
+	for _, obj := range listing.Objects {
+		keys[obj.Key] = true
+	}
+	found := []BucketBackup{}
+	dumps := []any{}
+	for _, obj := range listing.Objects {
+		manifest := backups.ManifestKey(obj.Key)
+		if manifest == obj.Key || !keys[manifest] {
+			continue
+		}
+		found = append(found, BucketBackup{Key: manifest, Name: path.Base(obj.Key), SizeBytes: obj.Size, Modified: obj.Modified})
+		dumps = append(dumps, obj.Key)
+	}
+	// Names start with the app and the time, so they sort by time.
+	slices.SortFunc(found, func(a, b BucketBackup) int { return strings.Compare(b.Name, a.Name) })
+
+	return found, dumps, nil
+}
+
 // RestoreSummary is a row of the Backups section's restores, without the
 // output.
 type RestoreSummary struct {
@@ -591,6 +639,7 @@ type RestoreSummary struct {
 	Name           string               `json:"name"`
 	BackupID       *uint                `json:"backup_id"`
 	SafetyBackupID *uint                `json:"safety_backup_id"`
+	NewApp         bool                 `json:"new_app"`
 	SizeBytes      int64                `json:"size_bytes"`
 	ReadBytes      int64                `json:"read_bytes"`
 	Message        *string              `json:"message"`
@@ -609,7 +658,7 @@ func appRestores(ctx context.Context, appID uint, limit int) ([]RestoreSummary, 
 	list := make([]RestoreSummary, len(rows))
 	for i, rec := range rows {
 		list[i] = RestoreSummary{
-			ID: rec.ID, Status: rec.Status, Name: path.Base(rec.Key), BackupID: rec.BackupID, SafetyBackupID: rec.SafetyBackupID,
+			ID: rec.ID, Status: rec.Status, Name: path.Base(rec.Key), BackupID: rec.BackupID, SafetyBackupID: rec.SafetyBackupID, NewApp: rec.NewApp,
 			SizeBytes: rec.SizeBytes, ReadBytes: rec.ReadBytes, Message: rec.Message, StartedAt: rec.StartedAt, FinishedAt: rec.FinishedAt,
 		}
 		if rec.StorageLocation != nil {

@@ -1,24 +1,28 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { BoxIcon, LayoutTemplateIcon } from 'lucide-react';
+import { BoxIcon, DatabaseBackupIcon, LayoutTemplateIcon } from 'lucide-react';
 
 import { AppForm } from '@/Components/AppForm';
+import { FromBackup } from '@/Components/NewAppRestore';
 import { Page } from '@/Components/Page';
 import { Panel } from '@/Components/Panel';
 import { type AppIcon, templateIcon } from '@/lib/templates';
 import { cn } from '@/lib/utils';
-import type { RegistryOption, TemplateOption } from '@/types/models';
+import type { RegistryOption, StorageChoice, TemplateOption } from '@/types/models';
 
 export default function AppsCreate({
     registries,
     templates,
+    locations,
 }: {
     registries: RegistryOption[];
     templates: TemplateOption[];
+    locations: StorageChoice[];
 }) {
     const { url, props } = usePage();
     // ?template with no value is the Template choice before one is picked.
     const params = new URL(url, window.location.origin).searchParams;
-    const fromTemplate = params.has('template');
+    const fromBackup = params.get('from') === 'backup';
+    const fromTemplate = !fromBackup && params.has('template');
     const template = templates.find((t) => t.slug === params.get('template'));
     const templateError = (props.errors as Record<string, string | undefined>).template;
 
@@ -28,19 +32,21 @@ export default function AppsCreate({
             <Page
                 crumbs={[{ label: 'Apps', href: '/dashboard' }, { label: 'New app' }]}
                 description={
-                    fromTemplate
-                        ? 'Ready to run: Echowa sets the environment and deploys it as soon as it’s created.'
-                        : 'One image, run as a Swarm service. Nothing is deployed until you deploy it.'
+                    fromBackup
+                        ? 'A PostgreSQL or MySQL app with a backup’s data: Echowa deploys it, then restores the backup into it.'
+                        : fromTemplate
+                          ? 'Ready to run: Echowa sets the environment and deploys it as soon as it’s created.'
+                          : 'One image, run as a Swarm service. Nothing is deployed until you deploy it.'
                 }
             >
                 <div className="flex max-w-2xl flex-col gap-4">
-                    <nav aria-label="Start from" className="grid gap-3 sm:grid-cols-2">
+                    <nav aria-label="Start from" className="grid gap-3 sm:grid-cols-3">
                         <Choice
                             href="/apps/create"
                             icon={BoxIcon}
                             title="Your own image"
                             detail="From any registry"
-                            selected={!fromTemplate}
+                            selected={!fromTemplate && !fromBackup}
                         />
                         <Choice
                             href={`/apps/create?template=${template?.slug ?? ''}`}
@@ -49,7 +55,15 @@ export default function AppsCreate({
                             detail={templates.map((t) => t.name).join(', ')}
                             selected={fromTemplate}
                         />
+                        <Choice
+                            href="/apps/create?from=backup"
+                            icon={DatabaseBackupIcon}
+                            title="From a backup"
+                            detail="A database from S3"
+                            selected={fromBackup}
+                        />
                     </nav>
+                    {fromBackup && <FromBackup locations={locations} />}
                     {fromTemplate && (
                         <section aria-labelledby="templates" className="flex flex-col gap-2.5">
                             <h2 id="templates" className="text-sm font-medium">
@@ -71,7 +85,7 @@ export default function AppsCreate({
                         </section>
                     )}
                     {templateError && <p className="text-sm text-destructive">{templateError}</p>}
-                    {(!fromTemplate || template) && (
+                    {!fromBackup && (!fromTemplate || template) && (
                         <Panel title={template?.name} description={template?.description}>
                             <AppForm key={template?.slug ?? 'custom'} registries={registries} template={template} />
                         </Panel>

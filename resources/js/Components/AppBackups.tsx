@@ -12,14 +12,9 @@ import {
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 
-import {
-    RestoreDialog,
-    RestoreFromBucket,
-    RestoreProgress,
-    type RestoreSource,
-    RestoresPanel,
-} from '@/Components/AppRestores';
+import { RestoreDialog, RestoreFromBucket, RestoreProgress, RestoresPanel } from '@/Components/AppRestores';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
+import type { RestoreSource } from '@/Components/NewAppRestore';
 import { Panel } from '@/Components/Panel';
 import { browserZone, type Preset, presetLabel, ScheduleFields, ScheduleText } from '@/Components/ScheduleFields';
 import { RunStatusBadge } from '@/Components/StatusBadge';

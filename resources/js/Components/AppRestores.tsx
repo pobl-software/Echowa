@@ -2,6 +2,7 @@ import { useForm } from '@inertiajs/react';
 import { FileTextIcon, FolderSearchIcon, HistoryIcon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 
+import { NewAppRestoreForm, Refusal, type RestoreSource, sourceQuery } from '@/Components/NewAppRestore';
 import { Panel } from '@/Components/Panel';
 import { RunStatusBadge } from '@/Components/StatusBadge';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
@@ -19,22 +20,15 @@ import { Field, FieldError, FieldLabel } from '@/Components/ui/field';
 import { Input } from '@/Components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import { formatBytes } from '@/lib/format';
 import { duration, formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { App, BucketBackup, RestoreDetail, RestorePreview, RestoreSummary, StorageChoice } from '@/types/models';
 
-// RestoreSource is what a restore reads: a backup in the history, or a
-// manifest found in a location's folder for the app.
-export type RestoreSource = { backup: number } | { location: number; key: string };
-
-const sourceQuery = (source: RestoreSource) =>
-    new URLSearchParams(
-        'backup' in source ? { backup: String(source.backup) } : { location: String(source.location), key: source.key },
-    );
-
 // RestoreDialog checks a backup against the app, says what restoring it
-// replaces, and restores it once the app's name is typed (ADR 0034).
+// replaces, and restores it once the app's name is typed (ADR 0034). Or it
+// restores the backup into a new app, which replaces nothing.
 export function RestoreDialog({
     app,
     source,
@@ -46,12 +40,14 @@ export function RestoreDialog({
 }) {
     const [preview, setPreview] = useState<RestorePreview | null>(null);
     const [problem, setProblem] = useState<string | null>(null);
+    const [mode, setMode] = useState<'here' | 'new'>('here');
     const form = useForm({ backup: 0, location: 0, key: '', safety: true, confirm: '' });
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: a new source resets the form
     useEffect(() => {
         setPreview(null);
         setProblem(null);
+        setMode('here');
         if (source === null) {
             return;
         }
@@ -87,7 +83,7 @@ export function RestoreDialog({
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
-        form.post(`/apps/${app.id}/restores`, { preserveScroll: true, onSuccess: onClose });
+        form.post(`/apps/${app.id}/restores`, { preserveState: true, preserveScroll: true, onSuccess: onClose });
     };
     const errors = form.errors as Record<string, string | undefined>;
     const ready = preview !== null && !preview.refusal && form.data.confirm === app.name;
@@ -95,9 +91,9 @@ export function RestoreDialog({
     return (
         <Dialog open={source !== null} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="sm:max-w-xl">
-                <form onSubmit={submit} className="grid min-w-0 gap-4">
+                <div className="grid min-w-0 gap-4">
                     <DialogHeader>
-                        <DialogTitle>Restore {app.name}</DialogTitle>
+                        <DialogTitle>{mode === 'new' ? 'Restore into a new app' : `Restore ${app.name}`}</DialogTitle>
                         <DialogDescription>
                             {preview
                                 ? `From ${preview.name} in ${preview.location}.`
@@ -106,12 +102,35 @@ export function RestoreDialog({
                                   : 'Checking the backup…'}
                         </DialogDescription>
                     </DialogHeader>
-
                     {problem && <Refusal reason={problem} />}
                     {preview && (
-                        <>
-                            <BackupFacts preview={preview} />
-                            {preview.refusal ? (
+                        <Tabs value={mode} onValueChange={(value) => setMode(value === 'new' ? 'new' : 'here')}>
+                            <TabsList aria-label="Restore into" className="w-full">
+                                <TabsTrigger value="here" className="min-w-0 flex-1">
+                                    <span className="truncate">Into {app.name}</span>
+                                </TabsTrigger>
+                                <TabsTrigger value="new" className="flex-1">
+                                    Into a new app
+                                </TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+                    )}
+                    {preview && <BackupFacts preview={preview} newApp={mode === 'new'} />}
+                    {preview && source && mode === 'new' && (
+                        <NewAppRestoreForm
+                            key={sourceQuery(source).toString()}
+                            source={source}
+                            name={`${app.name}-restored`}
+                            tag={preview.default_tag}
+                            template={preview.template}
+                            onCancel={onClose}
+                        />
+                    )}
+                </div>
+                {mode === 'here' && (
+                    <form onSubmit={submit} className="grid min-w-0 gap-4">
+                        {preview &&
+                            (preview.refusal ? (
                                 <Refusal reason={preview.refusal} />
                             ) : (
                                 <>
@@ -159,38 +178,29 @@ export function RestoreDialog({
                                         {errors.confirm && <FieldError>{errors.confirm}</FieldError>}
                                     </Field>
                                 </>
-                            )}
-                        </>
-                    )}
-                    {errors.source && <Refusal reason={errors.source} />}
+                            ))}
+                        {errors.source && <Refusal reason={errors.source} />}
 
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={onClose}>
-                            Cancel
-                        </Button>
-                        <Button type="submit" variant="destructive" disabled={!ready || form.processing}>
-                            <HistoryIcon />
-                            Restore {app.name}
-                        </Button>
-                    </DialogFooter>
-                </form>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={onClose}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" variant="destructive" disabled={!ready || form.processing}>
+                                <HistoryIcon />
+                                Restore {app.name}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                )}
             </DialogContent>
         </Dialog>
     );
 }
 
-function Refusal({ reason }: { reason: string }) {
-    return (
-        <Alert variant="destructive">
-            <TriangleAlertIcon />
-            <AlertDescription>{reason}</AlertDescription>
-        </Alert>
-    );
-}
-
-// BackupFacts compares the backup with the app it would restore into.
-function BackupFacts({ preview }: { preview: RestorePreview }) {
-    const sameVersion = preview.server_version === preview.app_version;
+// BackupFacts compares the backup with the app it would restore into, or
+// for a new app, just describes it.
+function BackupFacts({ preview, newApp }: { preview: RestorePreview; newApp: boolean }) {
+    const sameVersion = !newApp && preview.server_version === preview.app_version;
 
     return (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
@@ -203,14 +213,14 @@ function BackupFacts({ preview }: { preview: RestorePreview }) {
             <dd className="tabular-nums">{formatBytes(preview.size_bytes)}</dd>
             <dt className="text-muted-foreground">Database</dt>
             <dd className="font-mono text-xs leading-5 break-all">
-                {preview.database === preview.app_database
+                {newApp || preview.database === preview.app_database
                     ? preview.database
                     : `${preview.database} into ${preview.app_database}`}
             </dd>
             <dt className="text-muted-foreground">{preview.template}</dt>
             <dd className="font-mono text-xs leading-5">
                 {preview.server_version}
-                {preview.app_version && !sameVersion && ` into ${preview.app_version}`}
+                {!newApp && preview.app_version && !sameVersion && ` into ${preview.app_version}`}
                 {sameVersion && <span className="font-sans text-muted-foreground"> on both</span>}
             </dd>
             {preview.backup_id === null && (
@@ -396,10 +406,14 @@ export function RestoreProgress({ restore }: { restore: RestoreSummary }) {
                 <p>
                     {restore.read_bytes > 0
                         ? `${formatBytes(restore.read_bytes)} of ${formatBytes(restore.size_bytes)} read.`
-                        : restore.safety_backup_id
-                          ? `Backing up first, as backup #${restore.safety_backup_id}.`
-                          : 'Starting.'}{' '}
-                    Deploys and backups of this app wait until it has finished.
+                        : restore.new_app && restore.message
+                          ? restore.message
+                          : restore.safety_backup_id
+                            ? `Backing up first, as backup #${restore.safety_backup_id}.`
+                            : 'Starting.'}{' '}
+                    {restore.new_app
+                        ? 'This app was made for the restore, which begins once it’s running.'
+                        : 'Deploys and backups of this app wait until it has finished.'}
                 </p>
                 <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                     <div className="h-full bg-warning transition-[width]" style={{ width: `${share * 100}%` }} />
@@ -436,7 +450,11 @@ export function RestoresPanel({ app, restores }: { app: App; restores: RestoreSu
                             <TableCell>
                                 <div title={formatDateTime(r.started_at)}>{timeAgo(r.started_at)}</div>
                                 <div className="text-xs text-muted-foreground">
-                                    {r.safety_backup_id ? `Safety backup #${r.safety_backup_id}` : 'No safety backup'}
+                                    {r.new_app
+                                        ? 'Into this new app'
+                                        : r.safety_backup_id
+                                          ? `Safety backup #${r.safety_backup_id}`
+                                          : 'No safety backup'}
                                 </div>
                             </TableCell>
                             <TableCell className="max-w-72">

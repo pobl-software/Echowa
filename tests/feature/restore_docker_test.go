@@ -2,8 +2,9 @@
 
 // Restores each template app that has backups over changed data, through
 // Echowa's own deploy, backup and restore, on a real Swarm manager and the
-// dev machine's S3 server (deploy/s3). Run it with
-// deploy/dev-vm.sh test-docker. It pulls postgres:18 and mysql:9.7.
+// dev machine's S3 server (deploy/s3), and restores a PostgreSQL 17 backup
+// into a new app on 18. Run it with deploy/dev-vm.sh test-docker. It pulls
+// postgres:17, postgres:18 and mysql:9.7.
 package feature
 
 import (
@@ -91,11 +92,27 @@ func (s *RestoreDockerTestSuite) SetupTest() {
 func (s *RestoreDockerTestSuite) deployed(slug string) *models.App {
 	tmpl, ok := templates.Find(slug)
 	s.Require().True(ok)
+	return s.deployedTag(tmpl, tmpl.DefaultTag)
+}
+
+func (s *RestoreDockerTestSuite) deployedTag(tmpl templates.Template, tag string) *models.App {
 	ctx := context.Background()
-	app, err := services.CreateApp(ctx, services.AppInput{
-		Name:       fmt.Sprintf("it-%s-%d", slug, time.Now().UnixNano()%1_000_000),
-		Repository: tmpl.Repository, DefaultTag: tmpl.DefaultTag, Port: tmpl.Port, Replicas: 1,
-	}, &tmpl)
+	app := s.created(tmpl, tag)
+	d, err := deploy.Request(ctx, app, models.TriggerManual, tag)
+	s.Require().NoError(err)
+	s.Require().NoError(deploy.RunQueued(ctx, app.ID))
+	s.Require().NoError(facades.Orm().Query().Find(d, d.ID))
+	s.Require().Equal(models.DeploymentSucceeded, d.Status, "deploy: %v", d.Error)
+
+	return app
+}
+
+// created makes a template app running tag, and removes its service and
+// volumes when the test ends.
+func (s *RestoreDockerTestSuite) created(tmpl templates.Template, tag string) *models.App {
+	in := services.TemplateInput(tmpl, fmt.Sprintf("it-%s-%d", tmpl.Slug, time.Now().UnixNano()%1_000_000))
+	in.DefaultTag = tag
+	app, err := services.CreateApp(context.Background(), in, &tmpl)
 	s.Require().NoError(err)
 	s.T().Cleanup(func() {
 		_ = s.engine.RemoveService(context.Background(), app.ServiceName())
@@ -108,12 +125,6 @@ func (s *RestoreDockerTestSuite) deployed(slug string) *models.App {
 			}
 		}
 	})
-
-	d, err := deploy.Request(ctx, app, models.TriggerManual, tmpl.DefaultTag)
-	s.Require().NoError(err)
-	s.Require().NoError(deploy.RunQueued(ctx, app.ID))
-	s.Require().NoError(facades.Orm().Query().Find(d, d.ID))
-	s.Require().Equal(models.DeploymentSucceeded, d.Status, "deploy: %v", d.Error)
 
 	return app
 }
@@ -131,21 +142,13 @@ func (s *RestoreDockerTestSuite) sql(app *models.App, statement string) string {
 	return strings.TrimSpace(out.String())
 }
 
-// ready is a query that answers "1" only from the real server, not the
-// temporary one each image's entrypoint runs, without networking, to set
-// the database up.
-var ready = map[string]string{
-	"postgres": "SELECT (current_setting('listen_addresses') <> '')::int",
-	"mysql":    "SELECT 1 - @@skip_networking",
-}
-
-// waitForSQL waits until the app's real server answers.
+// waitForSQL waits until the app's real server answers, as a restore into
+// a new app does.
 func (s *RestoreDockerTestSuite) waitForSQL(app *models.App) {
-	cmd := append(append([]string{}, probes[*app.Template]...), ready[*app.Template])
+	ready := services.AppBackup(app).Ready
 	s.Require().Eventually(func() bool {
-		var out bytes.Buffer
-		code, err := s.engine.ExecStream(context.Background(), app.ServiceName(), cmd, nil, &out, io.Discard)
-		return err == nil && code == 0 && strings.TrimSpace(out.String()) == "1"
+		out, err := s.engine.Exec(context.Background(), app.ServiceName(), ready)
+		return err == nil && strings.TrimSpace(string(out)) == "1"
 	}, 2*time.Minute, time.Second, "%s answers", app.Name)
 }
 
@@ -236,4 +239,41 @@ func (s *RestoreDockerTestSuite) TestAPostgresDumpThatDoesntMatchItsManifestChan
 	s.Equal(models.RestoreFailed, restore.Status)
 	s.Contains(*restore.Message, "doesn't match its manifest")
 	s.Equal("changed", s.sql(app, "SELECT note FROM kept"), "pg_restore rolled back")
+}
+
+// A backup restores into a new app on a newer major version, made and
+// deployed by Echowa, which waits for its real server before restoring.
+func (s *RestoreDockerTestSuite) TestAPostgres17BackupRestoresIntoANewAppOn18() {
+	tmpl, _ := templates.Find("postgres")
+	old := s.deployedTag(tmpl, "17")
+	s.waitForSQL(old)
+	s.sql(old, "CREATE TABLE kept (id int PRIMARY KEY, note text)")
+	s.sql(old, "INSERT INTO kept VALUES (1, 'from 17'), (2, 'naïve ☃')")
+	rec, err := services.BackUpNow(old, &s.loc)
+	s.Require().NoError(err)
+	services.WaitForBackups()
+	s.Require().NoError(facades.Orm().Query().Find(rec, rec.ID))
+	s.Require().Equal(models.BackupSucceeded, rec.Status, "backup: %v %s", rec.Message, rec.Output)
+
+	src, err := services.FolderSource(context.Background(), &s.loc, backups.ManifestKey(rec.Key))
+	s.Require().NoError(err)
+	s.Require().NoError(services.CheckRestoreTag(tmpl, src.Manifest, "18"))
+	app := s.created(tmpl, "18")
+	restore, err := services.StartNewAppRestore(app, src, func() (uint, error) {
+		d, err := deploy.Request(context.Background(), app, models.TriggerManual, "18")
+		if err != nil {
+			return 0, err
+		}
+		return d.ID, nil
+	})
+	s.Require().NoError(err)
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+	services.WaitForRestores()
+	s.Require().NoError(facades.Orm().Query().Find(restore, restore.ID))
+	s.T().Logf("%s restore: %s in %s; %v; output %q", app.Name, restore.Status,
+		restore.FinishedAt.StdTime().Sub(restore.StartedAt.StdTime()), restore.Message, restore.Output)
+
+	s.Require().Equal(models.RestoreSucceeded, restore.Status)
+	s.Equal("18", strings.SplitN(s.sql(app, "SHOW server_version"), ".", 2)[0])
+	s.Equal("1\tfrom 17\n2\tnaïve ☃", s.sql(app, "SELECT id, note FROM kept ORDER BY id"))
 }

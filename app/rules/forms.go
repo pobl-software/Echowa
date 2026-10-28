@@ -292,6 +292,27 @@ func Restore() map[string]any {
 	}
 }
 
+// NewAppRestore returns the rules for restoring a backup into a new app:
+// the backup's record, or a location and a manifest's key, and the new
+// app's name and tag.
+func NewAppRestore() map[string]any {
+	return map[string]any{
+		"backup":   "integer",
+		"location": "integer",
+		"key":      "string|max:1024",
+		"name":     "required|string|slug|" + unique("apps", "name", 0),
+		"tag":      "required|string|image_tag",
+	}
+}
+
+// NewAppRestoreFilters normalises the new app's name and tag.
+func NewAppRestoreFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name": "trim|lower",
+		"tag":  "trim",
+	})
+}
+
 // RestoreMessages are the restore form's errors in words.
 func RestoreMessages() validation.Option {
 	return frameworkvalidation.Messages(map[string]string{

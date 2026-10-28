@@ -132,8 +132,14 @@ func (r *AppController) Create(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
+	locations, err := services.StorageChoices(ctx)
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
 
-	return inertia.Render(ctx, "Apps/Create", gonertia.Props{"registries": registries, "templates": templateOptions()})
+	return inertia.Render(ctx, "Apps/Create", gonertia.Props{
+		"registries": registries, "templates": templateOptions(), "locations": locations,
+	})
 }
 
 // Store creates an app. One made from a template has everything it needs,

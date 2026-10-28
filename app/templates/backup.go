@@ -15,6 +15,10 @@ type Backup struct {
 	Database string
 	// Version prints the server's version, which ServerVersion reads.
 	Version []string
+	// Ready prints 1 once the real server takes connections, not the
+	// temporary one each image's entrypoint runs, without networking, to
+	// set the database up. A restore into a new app waits for it.
+	Ready []string
 	// Dump writes the app's database to stdout.
 	Dump []string
 	// Restore reads a dump on stdin into the app's database, and exits
@@ -93,7 +97,9 @@ func versionParts(v string, n int) ([]int, bool) {
 var postgresBackup = &Backup{
 	Database: "POSTGRES_DB",
 	Version:  []string{"postgres", "-V"},
-	Dump:     []string{"sh", "-c", `exec pg_dump -Fc -w -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
+	Ready: []string{"sh", "-c", `exec psql -w -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA ` +
+		`-c "SELECT (current_setting('listen_addresses') <> '')::int"`},
+	Dump: []string{"sh", "-c", `exec pg_dump -Fc -w -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
 	Restore: []string{"sh", "-c", `exec pg_restore -w -U "$POSTGRES_USER" -d "$POSTGRES_DB" ` +
 		`--clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error`},
 	Extension:  "dump",
@@ -106,6 +112,8 @@ var postgresBackup = &Backup{
 var mysqlBackup = &Backup{
 	Database: "MYSQL_DATABASE",
 	Version:  []string{"mysqld", "--version"},
+	Ready: []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root -N -B ` +
+		`-e "SELECT 1 - @@skip_networking"`},
 	Dump: []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysqldump -u root ` +
 		`--single-transaction --routines --triggers --events --set-gtid-purged=OFF --no-tablespaces --hex-blob "$MYSQL_DATABASE"`},
 	Restore:    []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root "$MYSQL_DATABASE"`},
