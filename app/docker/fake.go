@@ -160,7 +160,9 @@ func (f *Fake) DeployService(_ context.Context, spec ServiceSpec) error {
 		f.services = map[string]fakeService{}
 	}
 	svc := fakeService{spec: spec, state: UpdateUpdating}
-	generation := uint64(1)
+	// Swarm creates a service with ForceUpdate 0, so its first deploy is
+	// generation 0.
+	generation := uint64(0)
 	if current, ok := f.services[spec.Name]; ok {
 		svc.previous = &current.spec
 		svc.tasks = current.tasks

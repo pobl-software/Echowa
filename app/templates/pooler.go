@@ -49,7 +49,8 @@ const PoolerServerEnv = "POOLER_SERVER"
 // to sign in to PostgreSQL with SCRAM; printf is the shell's own, so the
 // password is never an argument, and a `"` in it is doubled, as the file's
 // format wants. Connections and disconnections aren't logged: the healthcheck and apps that connect per
-// request would fill the log with them.
+// request would fill the log with them. Nor is a stats line a minute, which would push
+// failed logins, what the Logs tab is for, out of its tail.
 var pgbouncer = &Pooler{
 	Image: "edoburu/pgbouncer:v1.26.1-p0@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624",
 	Port:  6432,
@@ -75,6 +76,7 @@ max_prepared_statements = 200
 ignore_startup_parameters = extra_float_digits
 log_connections = 0
 log_disconnections = 0
+log_stats = 0
 EOF
 unset POSTGRES_PASSWORD
 exec pgbouncer "$dir/pgbouncer.ini"`},

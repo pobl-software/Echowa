@@ -19,14 +19,15 @@ func NewStreamController() *StreamController {
 	return &StreamController{}
 }
 
-// AppLogs follows the logs of one of the app's deploys (services.FollowAppLogs).
+// AppLogs follows the logs of one of the app's deploys, or of its pooler's
+// (services.FollowAppLogs).
 func (r *StreamController) AppLogs(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findOr404(ctx, "app", &app); resp != nil {
 		return resp
 	}
 	req := ctx.Request()
-	query, err := services.ParseLogQuery(req.Query("tail"), req.Query("since"), req.Query("deploy"), req.Header("Last-Event-ID"), time.Now())
+	query, err := services.ParseLogQuery(req.Query("tail"), req.Query("since"), req.Query("source"), req.Query("deploy"), req.Header("Last-Event-ID"), time.Now())
 	if err != nil {
 		return ctx.Response().String(http.StatusUnprocessableEntity, err.Error())
 	}

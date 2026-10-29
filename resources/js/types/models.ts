@@ -336,7 +336,15 @@ export interface LinkedDatabase {
     template: string;
     host: string;
     port: number;
+    // Its connection pooler, while pooling is on (ADR 0035).
+    pooler: Endpoint | null;
     status: LiveStatus;
+}
+
+// services.Endpoint: a host and port on Echowa's network.
+export interface Endpoint {
+    host: string;
+    port: number;
 }
 
 // services.DatabaseChoice: a template app that isn't linked yet.

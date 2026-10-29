@@ -11,12 +11,21 @@ import (
 // LinkedDatabase is a row of an app's Databases tab: a template app it's
 // linked to (ADR 0028), and where other apps reach it.
 type LinkedDatabase struct {
-	ID       uint       `json:"id"`
-	Name     string     `json:"name"`
-	Template string     `json:"template"`
-	Host     string     `json:"host"`
-	Port     int        `json:"port"`
-	Status   LiveStatus `json:"status"`
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	Template string `json:"template"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	// Pooler is where apps reach it through its connection pooler, while
+	// pooling is on (ADR 0035).
+	Pooler *Endpoint  `json:"pooler"`
+	Status LiveStatus `json:"status"`
+}
+
+// Endpoint is a host and port on Echowa's network.
+type Endpoint struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
 // DatabaseChoice is a template app the Databases tab offers to link.
@@ -39,10 +48,14 @@ func LinkedDatabases(ctx context.Context, appID uint) ([]LinkedDatabase, error) 
 
 	rows := make([]LinkedDatabase, 0, len(apps))
 	for _, app := range apps {
-		rows = append(rows, LinkedDatabase{
+		row := LinkedDatabase{
 			ID: app.ID, Name: app.Name, Template: *app.Template,
 			Host: app.ServiceName(), Port: app.Port, Status: AppLiveStatus(ctx, &app),
-		})
+		}
+		if tmpl, ok := templates.Find(*app.Template); ok && tmpl.Pooler != nil && app.Pooling {
+			row.Pooler = &Endpoint{Host: app.PoolerServiceName(), Port: tmpl.Pooler.Port}
+		}
+		rows = append(rows, row)
 	}
 
 	return rows, nil

@@ -355,3 +355,25 @@ func (s *PoolingTestSuite) TestTheConnectionTabShowsThePoolerAndRevealsItsURL() 
 	_, show = b.visit(fmt.Sprintf("/apps/%d?tab=connection", mysql.ID))
 	s.Nil(show.Props["pooler"])
 }
+
+func (s *PoolingTestSuite) TestTheDatabasesTabShowsALinkedDatabasesPooler() {
+	ctx := context.Background()
+	db := s.deployed("postgres", "shop-db")
+	web := createTestApp(s.T(), "shop", nil)
+	s.Require().NoError(services.LinkApps(ctx, web.ID, db.ID))
+	b := signedIn(s.T(), &s.TestCase)
+	linked := func() map[string]any {
+		_, page := b.visit(fmt.Sprintf("/apps/%d?tab=databases", web.ID))
+		rows := page.Props["linkedDatabases"].([]any)
+		s.Require().Len(rows, 1)
+		return rows[0].(map[string]any)
+	}
+
+	s.Nil(linked()["pooler"], "no pooler while pooling is off")
+
+	s.Require().NoError(services.SetPooling(ctx, db, true))
+	services.WaitForPoolers()
+	row := linked()
+	s.Equal("echowa-shop-db", row["host"])
+	s.Equal(map[string]any{"host": "echowa-shop-db-pooler", "port": float64(6432)}, row["pooler"])
+}

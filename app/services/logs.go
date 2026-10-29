@@ -30,23 +30,35 @@ const (
 	deploymentPoll = 500 * time.Millisecond
 )
 
-// LogQuery is what an app log stream sends: Docker's options, the deploy
-// whose lines to show, plus where a reconnecting browser left off.
+// LogQuery is what an app log stream sends: Docker's options, whose logs
+// and which deploy's lines to show, plus where a reconnecting browser left
+// off.
 type LogQuery struct {
 	docker.LogOptions
-	// Deploy is a LogDeploy's Generation. Zero is the current deploy.
-	Deploy uint64
+	// Pooler shows the app's connection pooler's logs rather than its own
+	// (ADR 0035).
+	Pooler bool
+	// Deploy is a LogDeploy's Generation, or nil for the current deploy.
+	// A service's first deploy is generation 0.
+	Deploy *uint64
 	// After skips lines at or before this time. Docker's since is
 	// inclusive, so a resumed stream would repeat the last line without it.
 	After time.Time
 }
 
 // ParseLogQuery reads an app log stream's ?tail= (lines per task), ?since=
-// (a duration such as 15m) and ?deploy= (a LogDeploy's Generation), and the
-// Last-Event-ID header a reconnecting browser sends: the time of the last
-// line it got.
-func ParseLogQuery(tail, since, deploy, lastEventID string, now time.Time) (LogQuery, error) {
+// (a duration such as 15m), ?source= (pooler, or empty for the app itself)
+// and ?deploy= (a LogDeploy's Generation), and the Last-Event-ID header a
+// reconnecting browser sends: the time of the last line it got.
+func ParseLogQuery(tail, since, source, deploy, lastEventID string, now time.Time) (LogQuery, error) {
 	q := LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: DefaultLogTail}}
+	switch source {
+	case "":
+	case "pooler":
+		q.Pooler = true
+	default:
+		return LogQuery{}, errors.New("source must be pooler, or left out for the app's own logs")
+	}
 	if tail != "" {
 		n, err := strconv.Atoi(tail)
 		if err != nil || n < 1 || n > MaxLogTail {
@@ -63,10 +75,10 @@ func ParseLogQuery(tail, since, deploy, lastEventID string, now time.Time) (LogQ
 	}
 	if deploy != "" {
 		n, err := strconv.ParseUint(deploy, 10, 64)
-		if err != nil || n == 0 {
+		if err != nil {
 			return LogQuery{}, errors.New("deploy must be a deploy's generation")
 		}
-		q.Deploy = n
+		q.Deploy = &n
 	}
 	if lastEventID != "" {
 		last, err := time.Parse(time.RFC3339Nano, lastEventID)
@@ -196,7 +208,8 @@ func matchDeployment(d LogDeploy, newestFirst []models.Deployment) *LogDeploymen
 	return nil
 }
 
-// FollowAppLogs sends one deploy's service logs as "line" events. The
+// FollowAppLogs sends one deploy's service logs as "line" events, the
+// app's own or, with q.Pooler, its connection pooler's. The
 // current deploy's are followed until ctx ends, and ending ctx cancels the
 // Docker log request. An older deploy's tasks have stopped, so its lines
 // are sent once, then "end". If the service doesn't exist, or its log
@@ -204,9 +217,16 @@ func matchDeployment(d LogDeploy, newestFirst []models.Deployment) *LogDeploymen
 // stream breaks, it returns the error, and the browser reconnects and
 // resumes.
 func FollowAppLogs(ctx context.Context, app *models.App, q LogQuery, send func(sse.Event) error) error {
-	tasks, err := Docker().ServiceTasks(ctx, app.ServiceName())
+	service, missing := app.ServiceName(), app.Name+" has no running service yet. Deploy it to see its logs."
+	if q.Pooler {
+		if !app.Pooling {
+			return send(endEvent("not_deployed", "Connection pooling is off for "+app.Name+", so there's no pooler to show."))
+		}
+		service, missing = app.PoolerServiceName(), app.Name+"'s connection pooler isn't running yet. The Connection tab says why."
+	}
+	tasks, err := Docker().ServiceTasks(ctx, service)
 	if errors.Is(err, docker.ErrServiceNotFound) {
-		return send(endEvent("not_deployed", app.Name+" has no running service yet. Deploy it to see its logs."))
+		return send(endEvent("not_deployed", missing))
 	}
 	if err != nil {
 		return send(endEvent("error", err.Error()))
@@ -218,9 +238,9 @@ func FollowAppLogs(ctx context.Context, app *models.App, q LogQuery, send func(s
 	opts := q.LogOptions
 	opts.Follow = opts.Follow && !past
 
-	lines, err := Docker().StreamServiceLogs(ctx, app.ServiceName(), opts)
+	lines, err := Docker().StreamServiceLogs(ctx, service, opts)
 	if errors.Is(err, docker.ErrServiceNotFound) {
-		return send(endEvent("not_deployed", app.Name+" has no running service yet. Deploy it to see its logs."))
+		return send(endEvent("not_deployed", missing))
 	}
 	if err != nil {
 		return send(endEvent("error", err.Error()))
@@ -260,21 +280,21 @@ func FollowAppLogs(ctx context.Context, app *models.App, q LogQuery, send func(s
 }
 
 // deployFilter says which tasks' lines belong to the deploy of generation,
-// zero for the current one, whether it's a past deploy, and whether it's
+// nil for the current one, whether it's a past deploy, and whether it's
 // there at all. A task it doesn't know started after the list was read, so
 // it's the current deploy's, or a newer one's.
-func deployFilter(deploys []LogDeploy, generation uint64) (keep func(task string) bool, past, found bool) {
+func deployFilter(deploys []LogDeploy, generation *uint64) (keep func(task string) bool, past, found bool) {
 	byTask := map[string]uint64{}
-	target := LogDeploy{Current: true}
+	target, found := LogDeploy{Current: true}, generation == nil
 	for _, d := range deploys {
 		for _, task := range d.tasks {
 			byTask[task] = d.Generation
 		}
-		if d.Generation == generation || generation == 0 && d.Current {
-			target = d
+		if generation == nil && d.Current || generation != nil && d.Generation == *generation {
+			target, found = d, true
 		}
 	}
-	if generation != 0 && target.Generation != generation {
+	if !found {
 		return nil, false, false
 	}
 

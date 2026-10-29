@@ -6,6 +6,7 @@ import { type LogEntry, LogView } from '@/Components/LogView';
 import { NativeSelect } from '@/Components/NativeSelect';
 import { StreamIndicator } from '@/Components/StreamIndicator';
 import { Button } from '@/Components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import { useEventStream } from '@/lib/eventStream';
 import { timeAgo } from '@/lib/time';
 import type { LogDeploy } from '@/types/models';
@@ -39,9 +40,15 @@ function deployLabel(deploy: LogDeploy): string {
         .join(' · ');
 }
 
+// Whose logs to show: the app's own, or, while pooling is on, its
+// connection pooler's (ADR 0035).
+type LogSource = 'app' | 'pooler';
+
 // AppLogs follows the app's logs, stdout and stderr, for the Logs tab: the
-// current deploy's by default, or a past one's from deploys.
-export function AppLogs({ appId, deploys }: { appId: number; deploys?: LogDeploy[] }) {
+// current deploy's by default, or a past one's from deploys. While pooling
+// is on, it can follow the pooler's instead.
+export function AppLogs({ appId, deploys, pooling }: { appId: number; deploys?: LogDeploy[]; pooling: boolean }) {
+    const [source, setSource] = useState<LogSource>('app');
     // A past deploy's generation, or null for the current one, which stays
     // live across a new deploy.
     const [deploy, setDeploy] = useState<number | null>(null);
@@ -86,7 +93,12 @@ export function AppLogs({ appId, deploys }: { appId: number; deploys?: LogDeploy
         loadDeploys();
     }, []);
 
-    const query = deploy === null ? `tail=${tail}` : `tail=${tail}&deploy=${deploy}`;
+    const query = new URLSearchParams({ tail: String(tail) });
+    if (source === 'pooler') {
+        query.set('source', 'pooler');
+    } else if (deploy !== null) {
+        query.set('deploy', String(deploy));
+    }
     const stream = useEventStream(`/apps/${appId}/logs/stream?${query}`, {
         line: (data) => {
             const line = data as LogLineEvent;
@@ -108,6 +120,10 @@ export function AppLogs({ appId, deploys }: { appId: number; deploys?: LogDeploy
         startOver();
         setTail(value);
     };
+    const changeSource = (value: LogSource) => {
+        startOver();
+        setSource(value);
+    };
     const changeDeploy = (value: string) => {
         startOver();
         setDeploy(value === 'current' ? null : Number(value));
@@ -127,7 +143,19 @@ export function AppLogs({ appId, deploys }: { appId: number; deploys?: LogDeploy
     return (
         <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-                {deploys && deploys.length > 0 && (
+                {pooling && (
+                    <Tabs value={source} onValueChange={(value) => changeSource(value as LogSource)}>
+                        <TabsList aria-label="Logs of">
+                            <TabsTrigger value="app" className="px-2.5">
+                                Database
+                            </TabsTrigger>
+                            <TabsTrigger value="pooler" className="px-2.5">
+                                Pooler
+                            </TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                )}
+                {source === 'app' && deploys && deploys.length > 0 && (
                     <NativeSelect
                         aria-label="Deploy"
                         className="w-auto max-w-full"

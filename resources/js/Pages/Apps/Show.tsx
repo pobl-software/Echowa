@@ -419,11 +419,19 @@ export default function AppsShow({
                             description={
                                 <>
                                     Output of <code className="font-mono">{serviceName}</code>, one deploy at a time:
-                                    the current one live, or one of the two before it. Errors (stderr) are in red.
+                                    the current one live, or one of the two before it.
+                                    {app.pooling && pooler && (
+                                        <>
+                                            {' '}
+                                            Pooler shows its connection pooler,{' '}
+                                            <code className="font-mono">{pooler.connect.host}</code>, live.
+                                        </>
+                                    )}{' '}
+                                    Errors (stderr) are in red.
                                 </>
                             }
                         >
-                            <AppLogs appId={app.id} deploys={logDeploys} />
+                            <AppLogs appId={app.id} deploys={logDeploys} pooling={app.pooling} />
                         </Panel>
                     )}
 
