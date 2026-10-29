@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Stack+Sans+Notch:wght@500;600&display=block" rel="stylesheet">
+<style>
+	:root {
+		--ink: #0a0a0a;
+		--line: #2a2a2a;
+		--text: #ededed;
+		--text-secondary: #b5b5b5;
+		--muted: #8f8f8f;
+		--ember: #d14400;
+		--ember-text: #f0601a;
+	}
+
+	* { box-sizing: border-box; margin: 0; }
+
+	html, body { background: transparent; }
+
+	.banner {
+		position: relative;
+		width: 1280px;
+		height: 800px;
+		overflow: hidden;
+		border-radius: 28px;
+		background: var(--ink);
+		box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+		font-family: "Geist", sans-serif;
+		color: var(--text);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	.glow {
+		position: absolute;
+		inset: 0;
+		background:
+			radial-gradient(48% 52% at 50% 0%, rgb(255 255 255 / 0.11), transparent 70%),
+			radial-gradient(40% 46% at 50% 46%, rgb(209 68 0 / 0.26), transparent 72%);
+	}
+
+	.glow::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+		opacity: 0.1;
+		mix-blend-mode: overlay;
+	}
+
+	.grid {
+		position: absolute;
+		inset: 0;
+		background-image:
+			linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px),
+			linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+		background-size: 64px 64px;
+		background-position: center -1px;
+		-webkit-mask-image: radial-gradient(60% 55% at 50% 30%, #000, transparent 75%);
+	}
+
+	.copy {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		padding-top: 64px;
+		text-align: center;
+	}
+
+	.logo { height: 30px; color: var(--ember-text); }
+
+	h1 {
+		margin-top: 36px;
+		font-family: "Stack Sans Notch", sans-serif;
+		font-size: 76px;
+		font-weight: 500;
+		line-height: 0.98;
+		letter-spacing: -0.035em;
+		background: linear-gradient(180deg, #fff 30%, #a8a8a8);
+		-webkit-background-clip: text;
+		color: transparent;
+	}
+
+	.sub {
+		max-width: 46ch;
+		margin-top: 24px;
+		font-size: 20px;
+		line-height: 1.5;
+		color: var(--text-secondary);
+	}
+
+	.product {
+		position: absolute;
+		left: 50%;
+		top: 420px;
+		width: 1120px;
+		transform: translateX(-50%);
+		border-radius: 18px;
+		box-shadow:
+			0 0 0 1px rgb(240 96 26 / 0.28),
+			0 -24px 80px -20px rgb(209 68 0 / 0.45),
+			0 40px 120px rgb(0 0 0 / 0.6);
+	}
+
+	.fade {
+		position: absolute;
+		inset: auto 0 0;
+		height: 220px;
+		background: linear-gradient(to bottom, transparent, var(--ink) 92%);
+	}
+
+	.product img { display: block; width: 100%; border-radius: 18px; }
+
+	/* GitHub's social preview: 1280 x 640, the product only peeking in. */
+	.social .banner { height: 640px; border-radius: 0; box-shadow: none; }
+	.social .copy { padding-top: 80px; }
+	.social h1 { font-size: 84px; }
+	.social .product { top: 470px; }
+	.social .fade { height: 110px; }
+</style>
+</head>
+<body>
+<div class="banner">
+	<div class="glow"></div>
+	<div class="grid"></div>
+	<div class="copy">
+		<svg class="logo" viewBox="0 0 510 86" fill="currentColor" aria-label="Echowa">
+			<path d="M79.8615 45.5077L50.5269 74.8423L40.9346 65.25L56.2154 49.9692L57.6654 53.5384H9.53674e-07V37.4769H57.6654L56.2154 41.0461L40.9346 25.7653L50.5269 16.173L79.8615 45.5077Z"/>
+			<path id="wordmark"/>
+		</svg>
+		<h1>Deploy Docker apps<br>to your own server</h1>
+		<p class="sub">Pre-built images and the databases beside them, on one Linux server, with TLS, zero-downtime rollouts and metrics built in.</p>
+	</div>
+	<div class="product"><img id="product" alt=""></div>
+	<div class="fade"></div>
+</div>
+</body>
+</html>

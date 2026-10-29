@@ -1,5 +1,5 @@
 import { useForm } from '@inertiajs/react';
-import { RocketIcon } from 'lucide-react';
+import { HourglassIcon, RocketIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import { TextField } from '@/Components/TextField';
@@ -14,10 +14,13 @@ import {
     DialogTrigger,
 } from '@/Components/ui/dialog';
 import { FieldDescription } from '@/Components/ui/field';
-import type { App } from '@/types/models';
+import type { App, AppWork } from '@/types/models';
 
-// Deploys the default tag, or a tag or digest typed in.
-export function DeployDialog({ app }: { app: App }) {
+// Deploys the default tag, or a tag or digest typed in. While a backup,
+// restore or export holds the app (ADR 0034), it says the deploy will wait
+// for it.
+export function DeployDialog({ app, busy = '' }: { app: App; busy?: AppWork }) {
+    const waitsFor = !busy || busy === 'deploy' ? null : busy === 'export' ? 'An export' : `A ${busy}`;
     const [open, setOpen] = useState(false);
     const form = useForm({ ref: app.default_tag });
 
@@ -28,8 +31,14 @@ export function DeployDialog({ app }: { app: App }) {
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger render={<Button />}>
-                <RocketIcon />
+            <DialogTrigger
+                render={
+                    <Button
+                        title={waitsFor ? `${waitsFor} of ${app.name} is running. A deploy waits for it.` : undefined}
+                    />
+                }
+            >
+                {waitsFor ? <HourglassIcon /> : <RocketIcon />}
                 Deploy
             </DialogTrigger>
             <DialogContent>
@@ -56,6 +65,15 @@ export function DeployDialog({ app }: { app: App }) {
                             <span className="font-mono">sha256:…</span>
                         </FieldDescription>
                     </div>
+                    {waitsFor && (
+                        <p className="flex gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                            <HourglassIcon className="mt-0.5 size-4 shrink-0 text-warning" />
+                            <span>
+                                {waitsFor} of {app.name} is running. This deploy is queued now and starts once it has
+                                finished.
+                            </span>
+                        </p>
+                    )}
                     <DialogFooter>
                         <Button type="submit" disabled={form.processing}>
                             Deploy {form.data.ref || app.default_tag}

@@ -15,8 +15,10 @@ type Reading struct {
 	Network []Interface `json:"network"`
 	// Apps sums the tasks of each Echowa app.
 	Apps []App `json:"apps"`
-	// Others are the running containers Echowa doesn't manage, such as
-	// Traefik. Only their latest reading is ever shown.
+	// Others are the running containers that aren't an app's own tasks:
+	// those Echowa doesn't manage, such as Traefik, and those that run
+	// beside an app, such as its pooler. Only their latest reading is ever
+	// shown.
 	Others []Container `json:"other_containers"`
 	// Took is how long the reading took, for checking its overhead.
 	Took Timing `json:"-"`
@@ -96,9 +98,13 @@ type App struct {
 	BlockWriteBytesPerSec *float64 `json:"block_write_bytes_per_sec"`
 }
 
-// Container is a running container Echowa doesn't manage.
+// Container is a running container that isn't an app's own task.
 type Container struct {
-	Name        string   `json:"name"`
+	Name string `json:"name"`
+	// App and Role say which app the container runs beside, and as what.
+	// Both are empty for a container Echowa doesn't manage.
+	App         string   `json:"app"`
+	Role        string   `json:"role"`
 	CPUPercent  *float64 `json:"cpu_percent"` // of one core
 	MemoryUsed  uint64   `json:"memory_used_bytes"`
 	MemoryLimit uint64   `json:"memory_limit_bytes"`

@@ -14,6 +14,7 @@ public/hot
 
 # SQLite database and its WAL/shm files
 database/*.sqlite*
+database/uploads/
 
 # Internal docs and agent config: kept locally, never published
 /docs/

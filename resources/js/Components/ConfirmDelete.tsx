@@ -13,8 +13,11 @@ import {
 } from '@/Components/ui/alert-dialog';
 
 interface ConfirmDeleteProps {
-    // The button that opens the dialog.
-    trigger: ReactElement;
+    // The button that opens the dialog. Without one, open and onOpenChange
+    // control it, as from a menu item.
+    trigger?: ReactElement;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
     title: string;
     children: ReactNode;
     confirmLabel?: string;
@@ -31,12 +34,15 @@ export function ConfirmDelete({
     confirmLabel = 'Delete',
     variant = 'destructive',
     onConfirm,
+    ...controlled
 }: ConfirmDeleteProps) {
-    const [open, setOpen] = useState(false);
+    const [own, setOwn] = useState(false);
+    const open = controlled.open ?? own;
+    const setOpen = controlled.onOpenChange ?? setOwn;
 
     return (
         <AlertDialog open={open} onOpenChange={setOpen}>
-            <AlertDialogTrigger render={trigger} />
+            {trigger && <AlertDialogTrigger render={trigger} />}
             <AlertDialogContent>
                 <AlertDialogHeader>
                     <AlertDialogTitle>{title}</AlertDialogTitle>

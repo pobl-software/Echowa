@@ -43,12 +43,18 @@ func WithValidationErrors(ctx http.Context, errors validation.Errors) {
 	if errors == nil {
 		return
 	}
+	WithErrors(ctx, ValidationMessages(errors))
+}
 
+// ValidationMessages is each field's first message, the shape useForm's
+// errors have. Plain JSON endpoints answer with it too.
+func ValidationMessages(errors validation.Errors) map[string]string {
 	messages := map[string]string{}
 	for field := range errors.All() {
 		messages[field] = errors.One(field)
 	}
-	WithErrors(ctx, messages)
+
+	return messages
 }
 
 // Flash stores a value for the next page render, where it appears on

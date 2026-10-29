@@ -67,6 +67,8 @@ type TemplateOption struct {
 	// they're switched on, "always" when it lists them anyway, and empty
 	// when it can't (ADR 0027).
 	SlowQueries string `json:"slow_queries"`
+	// Backups says the app has a Backups section (ADR 0034).
+	Backups bool `json:"backups"`
 }
 
 type TemplateEnvOption struct {
@@ -87,7 +89,7 @@ func templateOption(t templates.Template) TemplateOption {
 	option := TemplateOption{
 		Slug: t.Slug, Name: t.Name, Description: t.Description, Repository: t.Repository,
 		DefaultTag: t.DefaultTag, Port: t.Port, HTTP: t.HTTP, Healthcheck: t.Healthcheck,
-		Env: []TemplateEnvOption{}, Volumes: []string{},
+		Env: []TemplateEnvOption{}, Volumes: []string{}, Backups: t.Backup != nil,
 	}
 	for _, e := range t.Env {
 		option.Env = append(option.Env, TemplateEnvOption{Key: e.Key, Source: e.Value.Source()})
@@ -118,6 +120,15 @@ type ConnectInfo struct {
 	Preview string `json:"preview"`
 }
 
+// PoolerInfo is the Connection tab's pooling section, for an app whose
+// template runs a connection pooler (ADR 0035).
+type PoolerInfo struct {
+	// Connect is how other apps reach the database through the pooler.
+	// ConnectReveal returns its URL as pooled_url while pooling is on.
+	Connect ConnectInfo           `json:"connect"`
+	Status  services.PoolerStatus `json:"status"`
+}
+
 // DatabaseChoices is what the Databases tab can add: a new database from a
 // template, or an existing one not linked yet.
 type DatabaseChoices struct {
@@ -130,8 +141,14 @@ func (r *AppController) Create(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
+	locations, err := services.StorageChoices(ctx)
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
 
-	return inertia.Render(ctx, "Apps/Create", gonertia.Props{"registries": registries, "templates": templateOptions()})
+	return inertia.Render(ctx, "Apps/Create", gonertia.Props{
+		"registries": registries, "templates": templateOptions(), "locations": locations,
+	})
 }
 
 // Store creates an app. One made from a template has everything it needs,
@@ -268,12 +285,28 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 		"status":         services.AppLiveStatus(ctx, &app),
 		"lastDeployment": lastDeployment,
 		"deployments":    deployments,
+		// What holds the app's lock, so Deploy can say what it would wait for.
+		"busy": services.AppBusy(app.ID),
 		// Keys only: values are revealed one at a time by EnvReveal.
 		"envKeys":    append([]string{}, slices.Sorted(maps.Keys(env))...),
 		"registries": registries,
 		"resources":  resourcesProps(ctx),
 		"template":   templateProp,
 		"connect":    connect,
+		// The Connection section polls it while the pooler starts or goes.
+		"pooler": func(c context.Context) (any, error) {
+			tmpl := appTemplate(&app)
+			if tmpl == nil || tmpl.Pooler == nil || connect == nil {
+				return nil, nil
+			}
+			return PoolerInfo{
+				Connect: ConnectInfo{
+					Host: app.PoolerServiceName(), Port: tmpl.Pooler.Port, User: connect.User,
+					Preview: tmpl.ConnectPreview(app.PoolerServiceName(), tmpl.Pooler.Port),
+				},
+				Status: services.AppPoolerStatus(c, &app),
+			}, nil
+		},
 		// The Metrics section's, worked out only when asked for, like the
 		// Server page's (ADR 0024).
 		"ranges": metricRanges(),
@@ -309,6 +342,11 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 		"slowQueries": gonertia.Optional(func(c context.Context) (any, error) {
 			return services.SlowQueries(c, &app), nil
 		}),
+		// The Backups section's, for a template whose database Echowa backs
+		// up (ADR 0034).
+		"backups": func(c context.Context) (any, error) {
+			return services.AppBackups(c, &app, 50, time.Now())
+		},
 		// The Databases section's, for a custom app (ADR 0028).
 		"linkedDatabases": func(c context.Context) (any, error) {
 			if app.Template != nil {
@@ -545,20 +583,36 @@ func (r *AppController) Deploy(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	inertia.Flash(ctx, "success", fmt.Sprintf("Deployment #%d of %s queued.", deployment.ID, ref))
+	if work := services.AppBusy(app.ID); work != "" && work != services.WorkDeploy {
+		inertia.Flash(ctx, "info", fmt.Sprintf("Deployment #%d of %s queued. It starts once %s of %s has finished.", deployment.ID, ref, work.Describe(), app.Name))
+	} else {
+		inertia.Flash(ctx, "success", fmt.Sprintf("Deployment #%d of %s queued.", deployment.ID, ref))
+	}
 
 	return inertia.Redirect(ctx, fmt.Sprintf("/apps/%d/deployments/%d", app.ID, deployment.ID))
 }
 
-// Destroy removes the Swarm service first, so a failure there leaves the
-// app in place to try again rather than an orphaned service. Its volumes go
-// last, in the background, once Swarm has stopped the tasks using them.
+// Destroy removes the Swarm services first, the pooler's then the app's,
+// so a failure there leaves the app in place to try again rather than an
+// orphaned service. Its volumes go last, in the background, once Swarm has
+// stopped the tasks using them.
 func (r *AppController) Destroy(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findOr404(ctx, "app", &app, "Volumes"); resp != nil {
 		return resp
 	}
+	// A dump or restore would fail part way, and a restore could leave the
+	// new app's data half written.
+	if work := services.AppBusy(app.ID); work != "" && work != services.WorkDeploy {
+		inertia.Flash(ctx, "error", fmt.Sprintf("%s of %s is running. Wait for it to finish, then delete the app.", capitalise(work.Describe()), app.Name))
+		return inertia.Back(ctx)
+	}
 
+	if err := services.RemovePooler(ctx, &app); err != nil {
+		facades.Log().Error(fmt.Errorf("delete app %s: %w", app.Name, err))
+		inertia.Flash(ctx, "error", "Couldn't remove the connection pooler "+app.PoolerServiceName()+", so the app was kept: "+err.Error())
+		return inertia.Back(ctx)
+	}
 	if err := services.Docker().RemoveService(ctx, app.ServiceName()); err != nil {
 		facades.Log().Error(fmt.Errorf("delete app %s: %w", app.Name, err))
 		inertia.Flash(ctx, "error", "Couldn't remove the Swarm service "+app.ServiceName()+", so the app was kept: "+err.Error())
@@ -688,8 +742,9 @@ func (r *AppController) EnvReveal(ctx http.Context) http.Response {
 }
 
 // ConnectReveal returns the URL other apps connect to a template app with,
-// password included, and the password on its own. Like EnvReveal, it's
-// plain JSON, never a page prop.
+// password included, and the password on its own. While pooling is on, it
+// also returns the URL through the pooler. Like EnvReveal, it's plain JSON,
+// never a page prop.
 func (r *AppController) ConnectReveal(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findOr404(ctx, "app", &app); resp != nil {
@@ -705,9 +760,14 @@ func (r *AppController) ConnectReveal(ctx http.Context) http.Response {
 	}
 
 	_, password := tmpl.ConnectCredentials(app.ServiceName(), app.Port, env)
+	var pooled *string
+	if app.Pooling && tmpl.Pooler != nil {
+		url := tmpl.Connect(app.PoolerServiceName(), tmpl.Pooler.Port, env)
+		pooled = &url
+	}
 
 	return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, http.Json{
-		"url": tmpl.Connect(app.ServiceName(), app.Port, env), "password": password,
+		"url": tmpl.Connect(app.ServiceName(), app.Port, env), "password": password, "pooled_url": pooled,
 	})
 }
 

@@ -82,9 +82,10 @@ func Recover(ctx context.Context) error {
 	return nil
 }
 
-// RecoveryRunner runs Recover, and services.RecoverTaskRuns for scheduled
-// tasks (ADR 0032), once when Echowa starts serving, alongside Goravel's
-// queue worker.
+// RecoveryRunner runs Recover, services.RecoverTaskRuns for scheduled
+// tasks (ADR 0032), services.RecoverBackups, RecoverRestores and
+// RemoveUploads (ADR 0034), and SyncPoolers (ADR 0035), once when Echowa
+// starts serving, alongside Goravel's queue worker.
 type RecoveryRunner struct {
 	done chan struct{}
 }
@@ -109,6 +110,18 @@ func (r *RecoveryRunner) Run() error {
 	}
 	if err := services.RecoverTaskRuns(context.Background()); err != nil {
 		facades.Log().Error(fmt.Errorf("scheduled task recovery: %w", err))
+	}
+	if err := services.RecoverBackups(context.Background()); err != nil {
+		facades.Log().Error(fmt.Errorf("backup recovery: %w", err))
+	}
+	if err := services.RecoverRestores(context.Background()); err != nil {
+		facades.Log().Error(fmt.Errorf("restore recovery: %w", err))
+	}
+	if err := services.RemoveUploads(); err != nil {
+		facades.Log().Error(fmt.Errorf("remove uploads: %w", err))
+	}
+	if err := services.SyncPoolers(context.Background()); err != nil {
+		facades.Log().Error(fmt.Errorf("connection poolers: %w", err))
 	}
 	<-r.done
 

@@ -88,6 +88,214 @@ export interface RegistryRow extends Registry {
     apps_count: number;
 }
 
+// models.StorageLocation. The secret key never leaves the server.
+export interface StorageLocation {
+    id: number;
+    name: string;
+    endpoint: string;
+    region: string;
+    bucket: string;
+    prefix: string;
+    access_key_id: string;
+    path_style: boolean;
+    // How many backup records use it, which Echowa forgets if it's deleted.
+    backups: number;
+    // How many backup schedules use it. While any do, it can't be deleted.
+    schedules: number;
+}
+
+// models.BackupStatus and BackupTrigger (ADR 0034).
+export type BackupStatus = 'running' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';
+export type BackupTrigger = 'schedule' | 'manual' | 'before_restore';
+
+// services.BackupSummary: a row of the Backups section's history.
+export interface BackupSummary {
+    id: number;
+    trigger: BackupTrigger;
+    status: BackupStatus;
+    location: string;
+    // The dump's file name; empty until the backup names it.
+    name: string;
+    // Uploaded so far while running.
+    size_bytes: number;
+    server_version: string;
+    message: string | null;
+    started_at: string;
+    finished_at: string | null;
+}
+
+// models.Backup, from GET /apps/{app}/backups/{backup}.
+export interface BackupDetail extends Omit<BackupSummary, 'location' | 'name'> {
+    key: string;
+    sha256: string;
+    // The end of the dump's stderr.
+    output: string;
+}
+
+// services.StorageChoice: a location Back up now offers.
+export interface StorageChoice {
+    id: number;
+    name: string;
+    bucket: string;
+    prefix: string;
+}
+
+// services.BackupScheduleSummary: a row of the Backups section's schedules.
+export interface BackupSchedule {
+    id: number;
+    storage_location_id: number;
+    location: string;
+    // Five-field cron, read in timezone.
+    schedule: string;
+    timezone: string;
+    // How many of its successful backups it keeps.
+    keep: number;
+    // How many it has now.
+    kept: number;
+    enabled: boolean;
+    // null while it's off.
+    next_run_at: string | null;
+    last_backup: BackupSummary | null;
+}
+
+// services.BackupFailure: a schedule's newest backup that didn't succeed,
+// until it's dismissed on Overview.
+export interface BackupFailure {
+    schedule_id: number;
+    schedule: string;
+    timezone: string;
+    backup: BackupSummary;
+    // When a later backup of the schedule succeeded, if one has.
+    succeeded_at: string | null;
+}
+
+// services.BackupsSection: a template app's Backups section, and its
+// Overview's line and alerts.
+export interface BackupsSection {
+    // The one database a backup covers.
+    database: string;
+    // The one the app last backed up to comes first.
+    locations: StorageChoice[];
+    schedules: BackupSchedule[];
+    backups: BackupSummary[];
+    last_succeeded: BackupSummary | null;
+    failures: BackupFailure[];
+    // The newest few restores.
+    restores: RestoreSummary[];
+    // The formats the database downloads in, the first by default.
+    exports: ExportFormat[];
+}
+
+// templates.Export: a format the database downloads in (ADR 0034).
+export interface ExportFormat {
+    format: string;
+    label: string;
+    // What reads it.
+    hint: string;
+    extension: string;
+}
+
+// services.AppWork: what holds an app's lock, or empty (ADR 0034).
+export type AppWork = '' | 'deploy' | 'backup' | 'restore' | 'export';
+
+// models.RestoreStatus (ADR 0034).
+export type RestoreStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';
+
+// services.RestoreSummary: a row of the Backups section's restores.
+export interface RestoreSummary {
+    id: number;
+    status: RestoreStatus;
+    // Empty for an uploaded file.
+    location: string;
+    uploaded: boolean;
+    // The dump's file name.
+    name: string;
+    // null for a dump Echowa had no record of.
+    backup_id: number | null;
+    safety_backup_id: number | null;
+    // Whether the app was made for this restore. While it waits for the
+    // app's first deploy and server, message says which.
+    new_app: boolean;
+    // The dump's size, and how much of it the restore has read.
+    size_bytes: number;
+    read_bytes: number;
+    message: string | null;
+    started_at: string;
+    finished_at: string | null;
+}
+
+// models.Restore, from GET /apps/{app}/restores/{restore}.
+export interface RestoreDetail extends Omit<RestoreSummary, 'location' | 'name' | 'uploaded'> {
+    // null for an uploaded file, whose name is the key.
+    storage_location_id: number | null;
+    key: string;
+    output: string;
+}
+
+// services.RestorePreview, from GET /apps/{app}/restores/preview: what the
+// restore dialog shows before it's confirmed.
+export interface RestorePreview {
+    name: string;
+    // Empty for an uploaded file.
+    location: string;
+    uploaded: boolean;
+    backup_id: number | null;
+    // The backup's database and server version.
+    database: string;
+    server_version: string;
+    size_bytes: number;
+    // null for an uploaded dump that doesn't say when it was made.
+    started_at: string | null;
+    // What it restores into. app_version is empty when the app isn't running.
+    app_database: string;
+    app_version: string;
+    template: string;
+    // The template's, for a restore into a new app.
+    default_tag: string;
+    // PostgreSQL's restore applies all of a backup or none of it; MySQL's
+    // doesn't.
+    atomic: boolean;
+    // Why it can't go ahead, and what to know before it does.
+    refusal: string;
+    warning: string;
+}
+
+// services.NewAppPreview, from GET /backups/preview: a backup as the New
+// app page shows it before restoring it into a new app.
+export interface NewAppPreview {
+    name: string;
+    location: string;
+    // The app the backup was taken from.
+    app: string;
+    template: string;
+    template_name: string;
+    database: string;
+    server_version: string;
+    size_bytes: number;
+    started_at: string;
+    atomic: boolean;
+    default_tag: string;
+}
+
+// services.BucketBackup, from GET /apps/{app}/restores/browse: a dump with
+// a manifest in the app's folder of a location.
+export interface BucketBackup {
+    // The manifest's key, which a restore from the bucket names.
+    key: string;
+    name: string;
+    size_bytes: number;
+    modified: string;
+    // null when Echowa has no record of it.
+    backup_id: number | null;
+}
+
+// backups.Step: one stage of a storage location's Test. error is empty
+// when it passed.
+export interface StorageCheckStep {
+    name: string;
+    error: string;
+}
+
 // controllers.RegistryOption
 export interface RegistryOption {
     id: number;
@@ -116,6 +324,8 @@ export interface TemplateOption {
     // 'switch' when it lists its slow queries once they're switched on,
     // 'always' when it lists them anyway, empty when it can't (ADR 0027).
     slow_queries: '' | 'switch' | 'always';
+    // The app has a Backups section (ADR 0034).
+    backups: boolean;
 }
 
 // services.LinkedDatabase: a template app a custom app is linked to (ADR
@@ -126,7 +336,15 @@ export interface LinkedDatabase {
     template: string;
     host: string;
     port: number;
+    // Its connection pooler, while pooling is on (ADR 0035).
+    pooler: Endpoint | null;
     status: LiveStatus;
+}
+
+// services.Endpoint: a host and port on Echowa's network.
+export interface Endpoint {
+    host: string;
+    port: number;
 }
 
 // services.DatabaseChoice: a template app that isn't linked yet.
@@ -179,6 +397,23 @@ export interface ConnectInfo {
     preview: string;
 }
 
+// services.PoolerStatus: an app's connection pooler (ADR 0035).
+export interface PoolerStatus {
+    // Echowa is starting, updating or removing it.
+    syncing: boolean;
+    // Why the last start, update or removal failed, until one succeeds.
+    error: string;
+    // The pooler's service as Docker reports it; null while pooling is off.
+    service: LiveStatus | null;
+}
+
+// controllers.PoolerInfo: the Connection section's pooling, for a
+// PostgreSQL app. The pooled URL comes from POST /apps/{id}/connect/reveal.
+export interface PoolerInfo {
+    connect: ConnectInfo;
+    status: PoolerStatus;
+}
+
 // models.App. The webhook secret is never sent.
 export interface App {
     id: number;
@@ -204,6 +439,8 @@ export interface App {
     // Whether a template database that needs a switch for it collects its
     // slow queries (ADR 0027).
     slow_queries: boolean;
+    // Whether a PostgreSQL app runs its connection pooler (ADR 0035).
+    pooling: boolean;
     // Each task's limits; null uses the default.
     cpu_millicores: number | null;
     memory_mib: number | null;

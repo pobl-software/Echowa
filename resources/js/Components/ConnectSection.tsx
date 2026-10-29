@@ -7,30 +7,31 @@ import { toast } from '@/Components/ui/toast';
 import { postJson } from '@/lib/http';
 import type { ConnectInfo } from '@/types/models';
 
-// What POST /apps/{id}/connect/reveal answers with.
-type Secrets = { url: string; password: string };
+// What POST /apps/{id}/connect/reveal answers with. pooled_url is the URL
+// through the connection pooler, while pooling is on (ADR 0035).
+export type Secrets = { url: string; password: string; pooled_url: string | null };
 
-const masked = '••••••••••••';
+export interface ConnectSecrets {
+    // Fetches the secrets the first time, then returns the same ones.
+    get: () => Promise<Secrets | null>;
+    busy: boolean;
+}
 
-// ConnectSection shows how other apps reach a template app (ADR 0025), in
-// its Connection section. The page only has the URL's shape, with env keys
-// where the values go. Reveal, and copying the password or URL, fetch the
-// real ones from the server.
-export function ConnectSection({ appId, connect }: { appId: number; connect: ConnectInfo }) {
-    // Fetched once, then kept; shown says whether the page shows them.
-    const [secrets, setSecrets] = useState<Secrets | null>(null);
-    const [shown, setShown] = useState(false);
+// useConnectSecrets fetches the app's secrets once, for every section of
+// the Connection tab. Turning pooling on or off fetches them again, since
+// pooled_url changes.
+export function useConnectSecrets(appId: number, pooling: boolean): ConnectSecrets {
+    const [cached, setCached] = useState<{ pooling: boolean; secrets: Secrets } | null>(null);
     const [busy, setBusy] = useState(false);
-    const [copied, setCopied] = useState<string | null>(null);
 
-    const fetchSecrets = async () => {
-        if (secrets) {
-            return secrets;
+    const get = async () => {
+        if (cached?.pooling === pooling) {
+            return cached.secrets;
         }
         setBusy(true);
         try {
             const fetched = await postJson<Secrets>(`/apps/${appId}/connect/reveal`, {});
-            setSecrets(fetched);
+            setCached({ pooling, secrets: fetched });
             return fetched;
         } catch (error) {
             toast.add({ type: 'error', title: 'Couldn’t get the password', description: String(error) });
@@ -40,8 +41,38 @@ export function ConnectSection({ appId, connect }: { appId: number; connect: Con
         }
     };
 
+    return { get, busy };
+}
+
+const masked = '••••••••••••';
+
+// ConnectSection shows how other apps reach a template app (ADR 0025), in
+// its Connection section.
+export function ConnectSection({ connect, secrets }: { connect: ConnectInfo; secrets: ConnectSecrets }) {
+    return (
+        <ConfigSection icon={PlugIcon} title="Connect" description="How other apps on this server reach it.">
+            <ConnectDetails connect={connect} secrets={secrets} url={(s) => s.url} />
+        </ConfigSection>
+    );
+}
+
+// ConnectDetails lists a host, port, user, password and URL. The page only
+// has the URL's shape, with env keys where the values go. Reveal, and
+// copying the password or URL, fetch the real ones from the server.
+export function ConnectDetails({
+    connect,
+    secrets,
+    url,
+}: {
+    connect: ConnectInfo;
+    secrets: ConnectSecrets;
+    url: (secrets: Secrets) => string | null;
+}) {
+    const [shown, setShown] = useState<Secrets | null>(null);
+    const [copied, setCopied] = useState<string | null>(null);
+
     const toggle = async () => {
-        setShown(!shown && (await fetchSecrets()) != null);
+        setShown(shown ? null : await secrets.get());
     };
 
     const copy = async (label: string, value: string | null | undefined) => {
@@ -56,7 +87,7 @@ export function ConnectSection({ appId, connect }: { appId: number; connect: Con
             setCopied(label);
             setTimeout(() => setCopied((current) => (current === label ? null : current)), 2000);
         } catch {
-            setShown(true);
+            setShown(await secrets.get());
             toast.add({
                 type: 'info',
                 title: 'Copy it from the page',
@@ -64,10 +95,13 @@ export function ConnectSection({ appId, connect }: { appId: number; connect: Con
             });
         }
     };
-    const revealed = shown ? secrets : null;
+    const fetched = async () => {
+        const got = await secrets.get();
+        return got && { password: got.password, url: url(got) };
+    };
 
     return (
-        <ConfigSection icon={PlugIcon} title="Connect" description="How other apps on this server reach it.">
+        <>
             <dl className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg border bg-muted/40 py-2 pr-2 pl-3 text-sm">
                 <Row label="Internal Hostname" copied={copied} onCopy={() => copy('Internal Hostname', connect.host)}>
                     {connect.host}
@@ -79,18 +113,18 @@ export function ConnectSection({ appId, connect }: { appId: number; connect: Con
                 <Row
                     label="Password"
                     copied={copied}
-                    busy={busy}
-                    onCopy={async () => copy('Password', (await fetchSecrets())?.password)}
+                    busy={secrets.busy}
+                    onCopy={async () => copy('Password', (await fetched())?.password)}
                 >
-                    {revealed ? revealed.password : <span className="text-muted-foreground">{masked}</span>}
+                    {shown ? shown.password : <span className="text-muted-foreground">{masked}</span>}
                 </Row>
                 <Row
                     label="URL"
                     copied={copied}
-                    busy={busy}
-                    onCopy={async () => copy('URL', (await fetchSecrets())?.url)}
+                    busy={secrets.busy}
+                    onCopy={async () => copy('URL', (await fetched())?.url)}
                 >
-                    {revealed?.url ?? connect.preview}
+                    {(shown && url(shown)) ?? connect.preview}
                 </Row>
             </dl>
             <div className="flex">
@@ -98,14 +132,14 @@ export function ConnectSection({ appId, connect }: { appId: number; connect: Con
                     variant="outline"
                     size="sm"
                     onClick={toggle}
-                    disabled={busy}
+                    disabled={secrets.busy}
                     aria-label={shown ? 'Hide password' : 'Reveal password'}
                 >
                     {shown ? <EyeOffIcon /> : <EyeIcon />}
                     {shown ? 'Hide' : 'Reveal'}
                 </Button>
             </div>
-        </ConfigSection>
+        </>
     );
 }
 

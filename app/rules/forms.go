@@ -32,7 +32,7 @@ func Registry(id uint) map[string]any {
 func App(hasVolumes bool) map[string]any {
 	rules := AppDocker(hasVolumes)
 	maps.Copy(rules, AppDomain(0))
-	rules["name"] = "required|string|slug|" + unique("apps", "name", 0)
+	rules["name"] = "required|string|slug|" + unique("apps", "name", 0) + "|not_pooler_name"
 
 	return rules
 }
@@ -160,7 +160,7 @@ func AppDatabases() map[string]any {
 	return map[string]any{
 		"databases":            "array|max:" + strconv.Itoa(MaxNewDatabases),
 		"databases.*.template": "string",
-		"databases.*.name":     "string|slug|distinct|" + unique("apps", "name", 0),
+		"databases.*.name":     "string|slug|distinct|" + unique("apps", "name", 0) + "|not_pooler_name",
 		"link":                 "array|max:100",
 		"link.*":               "integer|distinct",
 	}
@@ -243,6 +243,135 @@ func ScheduledTaskMessages() validation.Option {
 		"timeout_minutes.min":     "Give it at least a minute.",
 		"timeout_minutes.max":     fmt.Sprintf("At most %d minutes (24 hours).", tasks.MaxTimeoutMinutes),
 		"timeout_minutes.integer": "Use a whole number of minutes.",
+	})
+}
+
+// MaxBackupKeep is the most successful backups a schedule keeps.
+const MaxBackupKeep = 100
+
+// BackupSchedule returns the rules for a backup schedule's form (ADR 0034).
+func BackupSchedule() map[string]any {
+	return map[string]any{
+		"storage_location_id": "required|integer|exists:storage_locations,id",
+		"schedule":            "required|string|cron",
+		"timezone":            "required|string|iana_timezone",
+		"keep":                fmt.Sprintf("required|integer|min:1|max:%d", MaxBackupKeep),
+		"enabled":             "boolean",
+	}
+}
+
+// BackupScheduleFilters normalises the backup schedule form before
+// validation.
+func BackupScheduleFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"schedule": "trim",
+		"timezone": "trim",
+	})
+}
+
+// BackupScheduleMessages words the form's limits.
+func BackupScheduleMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"storage_location_id.required": "Choose a storage location.",
+		"storage_location_id.exists":   "That storage location doesn't exist any more.",
+		"keep.min":                     "Keep at least one.",
+		"keep.max":                     fmt.Sprintf("At most %d.", MaxBackupKeep),
+		"keep.integer":                 "Use a whole number.",
+	})
+}
+
+// Restore returns the rules for restoring into an app (ADR 0034). The
+// source is a backup's record, a location and a manifest's key in it, or
+// an upload, whose safety backup goes to safety_location.
+func Restore() map[string]any {
+	return map[string]any{
+		"backup":          "integer",
+		"location":        "integer",
+		"key":             "string|max:1024",
+		"upload":          "string|max:64",
+		"safety":          "boolean",
+		"safety_location": "integer",
+		"confirm":         "required|string",
+	}
+}
+
+// RestoreUpload returns the rules for starting the upload of a file to
+// restore from: its name and size, before any of it is sent.
+func RestoreUpload() map[string]any {
+	return map[string]any{
+		"name": "required|string|max:255",
+		"size": "required|integer|min:1",
+	}
+}
+
+// NewAppRestore returns the rules for restoring a backup into a new app:
+// the backup's record, or a location and a manifest's key, and the new
+// app's name and tag.
+func NewAppRestore() map[string]any {
+	return map[string]any{
+		"backup":   "integer",
+		"location": "integer",
+		"key":      "string|max:1024",
+		"name":     "required|string|slug|" + unique("apps", "name", 0) + "|not_pooler_name",
+		"tag":      "required|string|image_tag",
+	}
+}
+
+// NewAppRestoreFilters normalises the new app's name and tag.
+func NewAppRestoreFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name": "trim|lower",
+		"tag":  "trim",
+	})
+}
+
+// RestoreMessages are the restore form's errors in words.
+func RestoreMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"confirm.required": "Type the app's name to confirm.",
+	})
+}
+
+// StorageLocation returns the rules for an S3 storage location's form
+// (ADR 0034). id is 0 when creating. On update a blank secret key keeps
+// the stored one.
+func StorageLocation(id uint) map[string]any {
+	rules := StorageLocationCheck(id)
+	rules["name"] = "required|string|max:100|" + unique("storage_locations", "name", id)
+
+	return rules
+}
+
+// StorageLocationCheck returns the rules for testing a location's form
+// before it's saved: everything but its name.
+func StorageLocationCheck(id uint) map[string]any {
+	secret := "required|string|max:500"
+	if id != 0 {
+		secret = "nullable|string|max:500"
+	}
+
+	return map[string]any{
+		"endpoint":      "required|string|max:255|storage_endpoint",
+		"region":        "required|string|max:50|alpha_dash",
+		"bucket":        "required|string|s3_bucket",
+		"prefix":        "nullable|string|key_prefix",
+		"access_key_id": "required|string|max:200",
+		"secret_key":    secret,
+		"path_style":    "boolean",
+	}
+}
+
+// StorageLocationFilters normalises the storage location form before
+// validation.
+func StorageLocationFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name":          "trim",
+		"endpoint":      "trim",
+		"region":        "trim|lower",
+		"bucket":        "trim",
+		"prefix":        "trim",
+		"access_key_id": "trim",
+		"secret_key":    "trim",
 	})
 }
 

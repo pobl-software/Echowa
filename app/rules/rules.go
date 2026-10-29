@@ -2,10 +2,12 @@ package rules
 
 import (
 	"context"
+	"strings"
 
 	"github.com/goravel/framework/contracts/validation"
 
 	"goravel/app/facades"
+	"goravel/app/models"
 )
 
 // All lists the custom rules, registered in bootstrap/rules.go.
@@ -21,11 +23,28 @@ func All() []validation.Rule {
 		&stringRule{"registry_host", IsRegistryHost, "The :attribute must be a registry host such as ghcr.io, with an optional :port."},
 		&stringRule{"cron", IsCron, "The :attribute must be five cron fields, such as */5 * * * *, that run at some point."},
 		&stringRule{"iana_timezone", IsTimezone, "The :attribute must be a time zone such as Europe/London or UTC."},
+		&stringRule{"storage_endpoint", IsStorageEndpoint, "The :attribute must be an https:// URL with no path, such as https://<account>.r2.cloudflarestorage.com. Plain http:// works only for localhost."},
+		&stringRule{"s3_bucket", IsBucket, "The :attribute must be 3 to 63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit."},
+		&stringRule{"key_prefix", IsKeyPrefix, "The :attribute may only contain letters, digits, slashes and !_.*'()-, up to 200 characters."},
+		&stringRule{"not_pooler_name", isNotPoolerName, "Another app's connection pooler already uses this name. Pick another."},
 	}
 }
 
 func isNotUIHost(domain string) bool {
 	return IsOtherHost(domain, facades.Config().GetString("http.url"))
+}
+
+// isNotPoolerName: not <app>-pooler for an app with pooling on, since that
+// app's pooler has the service name this one would (ADR 0035). It fails
+// when the database can't say.
+func isNotPoolerName(name string) bool {
+	owner, ok := strings.CutSuffix(name, models.PoolerSuffix)
+	if !ok {
+		return true
+	}
+	taken, err := facades.Orm().Query().Model(&models.App{}).Where("name", owner).Where("pooling", true).Exists()
+
+	return err == nil && !taken
 }
 
 // stringRule adapts an Is* check to a Goravel rule. Non-strings fail.

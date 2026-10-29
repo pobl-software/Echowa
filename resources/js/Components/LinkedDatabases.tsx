@@ -101,15 +101,15 @@ export function LinkedDatabases({
                                             <div className="truncate text-xs text-muted-foreground sm:hidden">
                                                 {templateName(db.template)}
                                             </div>
-                                            <div className="hidden truncate font-mono text-xs text-muted-foreground sm:block xl:hidden">
-                                                {db.host}:{db.port}
+                                            <div className="hidden font-mono text-xs text-muted-foreground sm:block xl:hidden">
+                                                <Hosts db={db} />
                                             </div>
                                         </div>
                                     </div>
                                 </TableCell>
                                 <TableCell className="hidden sm:table-cell">{templateName(db.template)}</TableCell>
                                 <TableCell className="hidden font-mono text-xs xl:table-cell">
-                                    {db.host}:{db.port}
+                                    <Hosts db={db} />
                                 </TableCell>
                                 <TableCell>
                                     <LiveStatusBadge status={db.status} />
@@ -148,6 +148,23 @@ export function LinkedDatabases({
                 </TableBody>
             </Table>
         </Panel>
+    );
+}
+
+// Hosts is where apps reach a database: itself, and its connection pooler
+// while pooling is on.
+function Hosts({ db }: { db: LinkedDatabase }) {
+    return (
+        <>
+            <div className="truncate">
+                {db.host}:{db.port}
+            </div>
+            {db.pooler && (
+                <div className="truncate">
+                    {db.pooler.host}:{db.pooler.port} <span className="font-sans text-muted-foreground">pooled</span>
+                </div>
+            )}
+        </>
     );
 }
 

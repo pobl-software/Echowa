@@ -29,6 +29,11 @@ var (
 	envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	tagPattern    = regexp.MustCompile(`^` + reference.TagRegexp.String() + `$`)
 	digestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+	// S3's rules for new buckets: lowercase letters, digits, dots and
+	// hyphens, starting and ending with a letter or digit.
+	bucketPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+	// Characters S3 calls safe in a key, in segments split by slashes.
+	keySegmentPattern = regexp.MustCompile(`^[A-Za-z0-9!_.*'()-]+$`)
 )
 
 // IsSlug: an app name. Lowercase letters, digits and inner hyphens, at most
@@ -112,4 +117,60 @@ func IsCron(s string) bool {
 func IsTimezone(s string) bool {
 	_, err := tasks.LoadZone(s)
 	return err == nil
+}
+
+// IsStorageEndpoint: an S3 endpoint URL with no path, query or user, such
+// as https://<account>.r2.cloudflarestorage.com (ADR 0034). Plain http is
+// only for a loopback host, like the dev machine's S3 server.
+func IsStorageEndpoint(s string) bool {
+	u, err := url.Parse(strings.TrimSuffix(s, "/"))
+	if err != nil || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return false
+	}
+	host := u.Hostname()
+	if !IsDomain(strings.ToLower(host)) && net.ParseIP(host) == nil {
+		return false
+	}
+	if p := u.Port(); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || !IsPort(n) {
+			return false
+		}
+	}
+
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		ip := net.ParseIP(host)
+		return host == "localhost" || (ip != nil && ip.IsLoopback())
+	}
+
+	return false
+}
+
+// IsBucket: an S3 bucket name, 3 to 63 characters, that isn't an IP
+// address.
+func IsBucket(s string) bool {
+	return bucketPattern.MatchString(s) && !strings.Contains(s, "..") && net.ParseIP(s) == nil
+}
+
+// IsKeyPrefix: an optional folder for a storage location's keys, such as
+// "backups/server-1". Slashes at either end are allowed and dropped when
+// it's saved. "." and ".." segments aren't.
+func IsKeyPrefix(s string) bool {
+	s = strings.Trim(s, "/")
+	if s == "" {
+		return true
+	}
+	if len(s) > 200 {
+		return false
+	}
+	for _, segment := range strings.Split(s, "/") {
+		if segment == "." || segment == ".." || !keySegmentPattern.MatchString(segment) {
+			return false
+		}
+	}
+
+	return true
 }

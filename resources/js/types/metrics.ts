@@ -143,8 +143,12 @@ export interface Reading {
         block_read_bytes_per_sec: number | null;
         block_write_bytes_per_sec: number | null;
     }[];
+    // Containers that aren't an app's own tasks. app and role are set for
+    // one that runs beside an app, such as its pooler, and empty otherwise.
     other_containers: {
         name: string;
+        app: string;
+        role: string;
         cpu_percent: number | null;
         memory_used_bytes: number;
         memory_limit_bytes: number;

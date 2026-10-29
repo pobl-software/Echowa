@@ -1,14 +1,15 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
-import { ExternalLinkIcon } from 'lucide-react';
+import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react';
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 
+import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
 import { AppMetrics } from '@/Components/AppMetrics';
 import { AppNavAside, AppNavTabs, type AppSection, appSections, sectionsFor } from '@/Components/AppNav';
 import { ConfigPanel } from '@/Components/ConfigPanel';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
-import { ConnectSection } from '@/Components/ConnectSection';
+import { ConnectSection, useConnectSecrets } from '@/Components/ConnectSection';
 import { DatabaseGlance, DatabaseMetrics, DatabaseWarnings } from '@/Components/DatabaseMetrics';
 import { DeployDialog } from '@/Components/DeployDialog';
 import { DeploymentsTable } from '@/Components/DeploymentsTable';
@@ -18,9 +19,11 @@ import { ExternalAccessSection } from '@/Components/ExternalAccessSection';
 import { LinkedDatabases } from '@/Components/LinkedDatabases';
 import { Page } from '@/Components/Page';
 import { Panel, Stats } from '@/Components/Panel';
+import { PoolingSection } from '@/Components/PoolingSection';
 import { OOMAlert, ResourceLimits } from '@/Components/ResourceLimits';
 import { ScheduledTaskAlert, ScheduledTasks } from '@/Components/ScheduledTasks';
 import { DeploymentStatusBadge, LiveStatusBadge } from '@/Components/StatusBadge';
+import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button, buttonVariants } from '@/Components/ui/button';
 import { formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -28,6 +31,8 @@ import type { AppLive, AppSeries, DatabaseLive, DatabaseSeries } from '@/types/m
 import {
     type App,
     type AppVolume,
+    type AppWork,
+    type BackupsSection,
     type ConnectInfo,
     type DatabaseChoices,
     type DeploymentSummary,
@@ -35,6 +40,7 @@ import {
     type LinkedDatabase,
     type LiveStatus,
     type LogDeploy,
+    type PoolerInfo,
     type RegistryOption,
     type ResourcesInfo,
     runningStatuses,
@@ -58,6 +64,8 @@ interface Props {
     // Null for a custom app.
     template: TemplateOption | null;
     connect: ConnectInfo | null;
+    // The Connection section's pooling, for a PostgreSQL app (ADR 0035).
+    pooler: PoolerInfo | null;
     // The Metrics section's: range picker choices, charts and the newest
     // reading (null before the first, or while no task runs).
     ranges: string[];
@@ -84,6 +92,12 @@ interface Props {
     // a template app.
     scheduledTasks: ScheduledTask[];
     taskFailures: TaskFailure[];
+    // The Backups section's (ADR 0034). Null when the app's template isn't
+    // backed up.
+    backups: BackupsSection | null;
+    // What holds the app's lock (ADR 0034), so Deploy says what it would
+    // wait for. Empty when nothing does.
+    busy: AppWork;
 }
 
 // The section lives in ?tab= so redirects (e.g. after saving settings) and
@@ -91,7 +105,7 @@ interface Props {
 // links working.
 const movedSections: Record<string, AppSection> = { database: 'metrics', settings: 'docker' };
 
-function sectionFromUrl(app: App): AppSection {
+function sectionFromUrl(app: Parameters<typeof sectionsFor>[0]): AppSection {
     const param = new URLSearchParams(window.location.search).get('tab');
     const tab = (param && movedSections[param]) ?? param;
     return sectionsFor(app).some((s) => s.id === tab) ? (tab as AppSection) : 'overview';
@@ -110,6 +124,7 @@ export default function AppsShow({
     resources,
     template,
     connect,
+    pooler,
     ranges,
     series,
     metrics,
@@ -122,9 +137,25 @@ export default function AppsShow({
     databaseChoices,
     scheduledTasks,
     taskFailures,
+    backups,
+    busy,
 }: Props) {
-    const [section, setSection] = useState<AppSection>(() => sectionFromUrl(app));
+    // The nav needs to know whether the template is one Echowa backs up.
+    const navApp = { ...app, backups: template?.backups ?? false };
+    const [section, setSection] = useState<AppSection>(() => sectionFromUrl(navApp));
+
+    // Deploy says what it would wait for until the backup or restore ends.
+    // The Backups section polls for itself.
+    useEffect(() => {
+        if (!busy || busy === 'deploy' || section === 'backups') {
+            return;
+        }
+        const id = window.setInterval(() => router.reload({ only: ['busy', 'backups'] }), 5000);
+        return () => window.clearInterval(id);
+    }, [busy, section]);
     const volumes = app.volumes ?? [];
+    // The Connection section's Connect and pooling share one fetch.
+    const connectSecrets = useConnectSecrets(app.id, app.pooling);
 
     // While a deployment runs, refresh its status and the service's.
     const deploying = deployments.some((d) => runningStatuses.includes(d.status));
@@ -165,13 +196,13 @@ export default function AppsShow({
                 status={<LiveStatusBadge status={status} />}
                 aside={
                     <AppNavAside
-                        app={app}
+                        app={navApp}
                         current={section}
                         onSelect={show}
                         subtitle={`${app.repository}:${app.default_tag}`}
                     />
                 }
-                tabs={<AppNavTabs app={app} current={section} onSelect={show} />}
+                tabs={<AppNavTabs app={navApp} current={section} onSelect={show} />}
                 actions={
                     <>
                         {url && (
@@ -186,7 +217,7 @@ export default function AppsShow({
                                 <span className="hidden sm:inline">Open</span>
                             </a>
                         )}
-                        <DeployDialog app={app} />
+                        <DeployDialog app={app} busy={busy} />
                     </>
                 }
             >
@@ -197,6 +228,10 @@ export default function AppsShow({
                             {taskFailures.map((failure) => (
                                 <ScheduledTaskAlert key={failure.task_id} app={app} failure={failure} />
                             ))}
+                            {backups?.failures.map((failure) => (
+                                <BackupAlert key={failure.schedule_id} app={app} failure={failure} />
+                            ))}
+                            {pooler && <PoolerAlert app={app} pooler={pooler} onSelect={show} />}
                             {database && <DatabaseWarnings database={database} />}
                             <Stats
                                 items={[
@@ -273,6 +308,26 @@ export default function AppsShow({
                                             </SectionLink>
                                         </Detail>
                                     )}
+                                    {pooler && (
+                                        <Detail label="Pooling">
+                                            <SectionLink app={app} section="connection" onSelect={show}>
+                                                {app.pooling ? (
+                                                    <span title={`${pooler.connect.host}:${pooler.connect.port}`}>
+                                                        On, port {pooler.connect.port}
+                                                    </span>
+                                                ) : (
+                                                    'Off'
+                                                )}
+                                            </SectionLink>
+                                        </Detail>
+                                    )}
+                                    {backups && (
+                                        <Detail label="Last backup">
+                                            <SectionLink app={app} section="backups" onSelect={show}>
+                                                <LastBackup section={backups} />
+                                            </SectionLink>
+                                        </Detail>
+                                    )}
                                     <Detail label="Replicas">{app.replicas}</Detail>
                                     <Detail label="Image">
                                         <span className="font-mono break-all">
@@ -339,10 +394,13 @@ export default function AppsShow({
 
                     {section === 'connection' && template && (
                         <ConfigPanel>
-                            {connect && <ConnectSection appId={app.id} connect={connect} />}
+                            {connect && <ConnectSection connect={connect} secrets={connectSecrets} />}
+                            {pooler && <PoolingSection app={app} pooler={pooler} secrets={connectSecrets} />}
                             {!template.http && <ExternalAccessSection app={app} template={template} />}
                         </ConfigPanel>
                     )}
+
+                    {section === 'backups' && backups && <AppBackups app={app} section={backups} held={busy} />}
 
                     {section === 'docker' && (
                         <DockerConfig app={app} registries={registries} template={template ?? undefined} />
@@ -376,11 +434,19 @@ export default function AppsShow({
                             description={
                                 <>
                                     Output of <code className="font-mono">{serviceName}</code>, one deploy at a time:
-                                    the current one live, or one of the two before it. Errors (stderr) are in red.
+                                    the current one live, or one of the two before it.
+                                    {app.pooling && pooler && (
+                                        <>
+                                            {' '}
+                                            Pooler shows its connection pooler,{' '}
+                                            <code className="font-mono">{pooler.connect.host}</code>, live.
+                                        </>
+                                    )}{' '}
+                                    Errors (stderr) are in red.
                                 </>
                             }
                         >
-                            <AppLogs appId={app.id} deploys={logDeploys} />
+                            <AppLogs appId={app.id} deploys={logDeploys} pooling={app.pooling} />
                         </Panel>
                     )}
 
@@ -414,6 +480,13 @@ export default function AppsShow({
                                             deleted too.
                                         </>
                                     )}
+                                    {backups?.last_succeeded && (
+                                        <>
+                                            {' '}
+                                            Its backups stay in the bucket. New app, From a backup restores one into a
+                                            new app.
+                                        </>
+                                    )}
                                 </p>
                                 <ConfirmDelete
                                     title={`Delete ${app.name}?`}
@@ -429,8 +502,9 @@ export default function AppsShow({
                                             So is its data: <VolumeNames volumes={volumes} /> is deleted for good once
                                             the service has stopped.
                                         </>
-                                    )}{' '}
-                                    This can&apos;t be undone.
+                                    )}
+                                    {backups?.last_succeeded && ' Its backups stay in the bucket.'} This can&apos;t be
+                                    undone.
                                 </ConfirmDelete>
                             </div>
                         </Panel>
@@ -438,6 +512,38 @@ export default function AppsShow({
                 </div>
             </Page>
         </>
+    );
+}
+
+// PoolerAlert says on Overview that the connection pooler didn't start, or
+// wasn't removed, as its Connection section does.
+function PoolerAlert({
+    app,
+    pooler,
+    onSelect,
+}: {
+    app: App;
+    pooler: PoolerInfo;
+    onSelect: (section: AppSection) => void;
+}) {
+    const { status } = pooler;
+    if (!status.error || status.syncing) {
+        return null;
+    }
+
+    return (
+        <Alert variant="destructive">
+            <TriangleAlertIcon />
+            <AlertTitle>
+                {app.pooling ? 'The connection pooler didn’t start' : 'The connection pooler wasn’t removed'}
+            </AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-2 [&_p:not(:last-child)]:mb-0">
+                <p>{status.error}. Echowa tries again when it restarts, or turn pooling off and on.</p>
+                <SectionLink app={app} section="connection" onSelect={onSelect}>
+                    See connection pooling
+                </SectionLink>
+            </AlertDescription>
+        </Alert>
     );
 }
 

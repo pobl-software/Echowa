@@ -171,6 +171,22 @@ func (e *Engine) DeployService(ctx context.Context, spec ServiceSpec) error {
 	}
 }
 
+func (e *Engine) ServiceMatches(ctx context.Context, spec ServiceSpec) (bool, error) {
+	current, err := e.inspect(ctx, spec.Name)
+	if errors.Is(err, ErrServiceNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	desired, err := swarmSpec(spec, e.cfg, 0)
+	if err != nil {
+		return false, err
+	}
+
+	return managed(current) && current.Spec.Labels[LabelSpec] == desired.Labels[LabelSpec], nil
+}
+
 func (e *Engine) ServiceStatus(ctx context.Context, name string) (ServiceStatus, error) {
 	svc, err := e.inspect(ctx, name)
 	if err != nil {
@@ -354,6 +370,24 @@ func (e *Engine) RemoveService(ctx context.Context, name string) error {
 	}
 
 	return nil
+}
+
+func (e *Engine) ServicesWithRole(ctx context.Context, role string) ([]ServiceRef, error) {
+	if role == "" {
+		return nil, errors.New("list services: no role given")
+	}
+	list, err := e.api.ServiceList(ctx, client.ServiceListOptions{
+		Filters: make(client.Filters).Add("label", LabelManaged+"=true", LabelRole+"="+role),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list %s services: %w", role, err)
+	}
+	refs := make([]ServiceRef, 0, len(list.Items))
+	for _, svc := range list.Items {
+		refs = append(refs, ServiceRef{Name: svc.Spec.Name, App: svc.Spec.Labels[LabelApp]})
+	}
+
+	return refs, nil
 }
 
 // RemoveVolume never forces: Docker refuses while a container uses the

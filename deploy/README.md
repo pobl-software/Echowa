@@ -3,7 +3,7 @@
 Everything a server needs to run Echowa: Docker Engine, a single-node
 Swarm, the `echowa-public` network, Traefik with Let's Encrypt, and Echowa
 itself as a systemd service. One command sets it all up on a fresh Ubuntu
-server:
+or Debian server:
 
 ```bash
 curl -fsSL https://get.echowa.dev/install.sh | sudo bash
@@ -24,7 +24,9 @@ stack) is compiled into the binary, in `app/setup/files/`.
 
 You need:
 
-- a fresh Ubuntu 24.04 server with a public IPv4 address and root or sudo.
+- a fresh Ubuntu 24.04 or 26.04, Debian 12 or Debian 13 server with a public
+  IPv4 address and root or sudo. Other Ubuntu releases, and distributions built on
+  Ubuntu, install with a warning that they aren't tested.
   Echowa owns the server: Traefik takes ports 80 and 443, and setup refuses
   to start if anything already listens there;
 - a domain whose DNS you control.
@@ -108,8 +110,9 @@ it did once it's done. `NO_COLOR` drops the colour. Without a terminal it
 writes plain lines: one when a step starts something slow, and one when
 each step is done. In order, `echowa setup`:
 
-1. checks this is a fresh Ubuntu server, with nothing on ports 80 and 443;
-2. installs Docker Engine from Docker's apt repository;
+1. checks this is a fresh Ubuntu or Debian server, with nothing on ports 80
+   and 443;
+2. installs Docker Engine from Docker's apt repository for that OS;
 3. creates a single-node Swarm and the `echowa-public` network;
 4. deploys Traefik with Let's Encrypt (no contact email needed), and with
    HTTPS, port 8192 and a route from your domain on it to Echowa;
@@ -281,12 +284,86 @@ Deployed apps keep running throughout; Echowa only manages them.
 
 ### Backing up template apps
 
-Echowa's backup holds its own database, not your apps' data. A PostgreSQL,
-MySQL or Redis app made from a template keeps its data in a Docker volume,
-`echowa-<app>-data`, which survives deploys but not deleting the app.
-Back it up yourself, and before deleting the app if you want the data.
+Echowa's own backup holds its database, not your apps' data. A
+PostgreSQL, MySQL or Redis app made from a template keeps its data in a
+Docker volume, `echowa-<app>-data`, which survives deploys but not
+deleting the app.
 
-Each command below runs in the app's container. Find it with:
+**PostgreSQL and MySQL apps** have a **Backups** section that dumps the
+app's database (the one its connection URL names) to S3-compatible
+storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, Hetzner or your
+own. Other databases you made by hand in the same server aren't
+included. Redis apps have no Backups section; use the commands further
+down.
+
+1. **Add a storage location.** In **Settings, S3 storage**, click **Add
+   location** and fill in the endpoint, region, bucket, an optional
+   folder (the server's host name is a good one), and an access key.
+   For R2 the region is `auto`. Turn on path-style addressing only for
+   a provider that needs it (most self-hosted servers). Click **Test**,
+   which writes, reads, lists and deletes a small object, and names the
+   step that failed.
+2. **Back up now** from the app's Backups section, or **Add schedule**:
+   a schedule, a time zone and how many successful backups to keep (7
+   by default). After each success, the schedule deletes its oldest
+   backups past that number. Backups made by hand, and the ones taken
+   before a restore, are never deleted for you. If a scheduled backup
+   fails or is skipped, the app's Overview says so until you dismiss it.
+3. **Restore** from a backup's menu in the History, or from **Restore
+   from the bucket**, which lists the backups in the location's folder
+   for this app, including ones another server made. You type the app's
+   name to confirm. By default, Echowa first backs up the current data,
+   so you can go back. PostgreSQL restores all or nothing; MySQL restores
+   one table at a time and stops at the first error, which is when that
+   first backup matters. A backup never restores into an older server.
+   **Into a new app** creates a new app on the tag you choose (the same
+   major version or newer) and restores into it once it's running.
+
+Each backup is two objects in the bucket,
+`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL) and a
+`.json` manifest beside it with the app, template, server version, size
+and SHA-256. A restore checks the dump against its manifest as it reads
+it, and stops before the end if they differ. Echowa needs nothing else to find them again:
+after losing the server, install Echowa on a new one, add a location
+with the same bucket and folder, then **New app, From a backup**.
+
+Set the bucket up so a leak or a mistake costs little:
+
+- **A key for this bucket only,** allowed `s3:PutObject`,
+  `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket`,
+  `s3:ListBucketMultipartUploads` and `s3:AbortMultipartUpload`. On R2,
+  an API token with Object Read & Write on the one bucket. The key is
+  stored encrypted with `APP_KEY`, and never shown again.
+- **A lifecycle rule that aborts incomplete multipart uploads after a
+  day.** Echowa aborts its own when a backup fails or it restarts, but
+  not if the server is gone.
+- **Server-side encryption** from the provider. Echowa doesn't encrypt
+  backups itself, so anyone with the bucket's keys can read them.
+- **Versioning**, if you want backups that a stolen key can't delete,
+  with a lifecycle rule that expires noncurrent versions after a few
+  weeks. On a versioned bucket a schedule's deletes only add delete
+  markers: the schedule still keeps to its number, but every dump it
+  prunes stays as an older version, and is billed, until the rule
+  expires it. The key above has no `s3:DeleteObjectVersion`, so it
+  can't remove them.
+- **No default retention from Object Lock.** With one, AWS wants a
+  checksum on every upload, which Echowa doesn't send: Test fails at
+  "Write a test object" with "Content-MD5 OR x-amz-checksum- HTTP
+  header is required for Put Object requests with Object Lock
+  parameters", and so does every backup.
+
+**Export** downloads the database straight to your browser, with nothing
+kept on the server or in S3: PostgreSQL's custom format (for
+`pg_restore` or pgAdmin) or plain SQL, and gzipped SQL for MySQL.
+Deploys of the app wait until the download ends, so for a big database
+on a slow connection, back up to S3 and download that instead.
+**Restore from a file** takes a file Export or a backup's download made
+and restores it into the app, with the same checks as a restore from
+the bucket. The upload needs its size plus 1 GiB free beside Echowa's
+database (`/var/lib/echowa`), and is deleted when the restore ends.
+
+**When Echowa is down,** or for a Redis app, use these. Each command
+runs in the app's container. Find it with:
 
 ```bash
 c=$(sudo docker ps -q -f label=com.docker.swarm.service.name=echowa-<app>)
@@ -373,6 +450,46 @@ for TLS, so set the client to require it as above.
 
 Turning it off, or changing the port, redeploys the database too: a few
 seconds without it.
+
+### Connection pooling for PostgreSQL
+
+A PostgreSQL app can run PgBouncer beside it, so many app processes
+share a few database connections. On the app's Connection tab, click
+**Enable connection pooling**. Echowa starts `echowa-<app>-pooler` on
+port 6432 (0.5 CPU, 128 MiB) and shows its connection details under
+Connect's: the same user, password and database, on the pooler's host.
+Copy the pooled URL into the apps that should use it. Nothing changes
+for an app until you do, and the direct URL keeps working.
+
+The pooler runs in transaction mode: a client holds a connection to
+PostgreSQL only while a transaction runs, which is how up to 1,000
+clients share 50 connections. Anything that relies on a session can
+fail through it, so test an app on the pooled URL before you move it
+over:
+
+| Feature | Through the pooler |
+|---|---|
+| Migrations | Run them on the direct URL. |
+| `LISTEN` and `NOTIFY` | Notifications are lost. Point listeners at the direct URL. For PostgREST, set `PGRST_DB_CHANNEL_ENABLED=false`. |
+| Advisory locks | A session lock stays with whichever connection took it. Use `pg_advisory_xact_lock`, which ends with the transaction. |
+| `SET` | Can reach other clients. Use `SET LOCAL` inside a transaction, or `ALTER ROLE <user> SET …`. `search_path` is kept per client. |
+| Prepared statements | Work with drivers that prepare in the protocol (libpq, pgx, PostgREST). Laravel on PHP 8.3, or on an image built against libpq older than 17, fails with `prepared statement "pdo_stmt_…" does not exist`: set `PDO::ATTR_EMULATE_PREPARES => true` in the `pgsql` connection's `options`. |
+
+The pooler opens at most 50 connections to PostgreSQL, out of its 100,
+which leaves the rest for direct connections, migrations and backups.
+It's only reachable from apps on the server; External access still
+publishes the database itself.
+
+A redeploy of the database interrupts queries for a few seconds through
+the pooler too, about as long as on the direct URL, and apps reconnect
+as they would to PostgreSQL. The pooler itself isn't restarted.
+
+If an app can't connect, open the database's Logs tab and pick
+**Pooler**: failed logins show there, such as `password authentication
+failed`. Connections that succeed aren't logged.
+
+**Turn off** removes the pooler, and apps still on the pooled URL lose
+their connection, so move them to the direct URL first.
 
 ### Upgrading Echowa
 

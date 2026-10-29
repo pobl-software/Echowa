@@ -168,9 +168,14 @@ const run: Record<RunStatus, { label: string; tone: Tone; pulse?: boolean }> = {
     interrupted: { label: 'Interrupted', tone: 'neutral' },
 };
 
-// How a scheduled task's run went (ADR 0032).
-export function RunStatusBadge({ status }: { status: RunStatus }) {
+// How a scheduled task's run, a backup or a restore went (ADRs 0032, 0034).
+// quiet shows one that succeeded as a dot alone.
+export function RunStatusBadge({ status, quiet }: { status: RunStatus; quiet?: boolean }) {
     const { label, tone, pulse } = run[status];
+
+    if (quiet && status === 'succeeded') {
+        return <StatusDot tone={tone} label={label} />;
+    }
 
     return (
         <StatusPill tone={tone} pulse={pulse}>

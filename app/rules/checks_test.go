@@ -77,6 +77,27 @@ func TestChecks(t *testing.T) {
 			valid: []string{"UTC", "Europe/London", "America/New_York", "Asia/Kathmandu"},
 			bad:   []string{"", "Local", "Mars/Olympus", "Europe/Nowhere", "../etc/passwd"},
 		},
+		{
+			name:  "IsStorageEndpoint",
+			check: IsStorageEndpoint,
+			valid: []string{"https://abc123.r2.cloudflarestorage.com", "https://s3.eu-central-003.backblazeb2.com/",
+				"https://s3.example.com:9000", "https://10.0.0.5", "http://localhost:7070", "http://127.0.0.1:9000", "http://[::1]:9000"},
+			bad: []string{"", "s3.amazonaws.com", "http://s3.amazonaws.com", "http://10.0.0.5:9000", "ftp://localhost",
+				"https://s3.amazonaws.com/bucket", "https://s3.amazonaws.com?x=1", "https://key:secret@s3.amazonaws.com",
+				"https://", "https://bad host.com", "https://s3.example.com:99999", "http://localhost.evil.com"},
+		},
+		{
+			name:  "IsBucket",
+			check: IsBucket,
+			valid: []string{"echowa-backups", "abc", "my.bucket.1", strings.Repeat("a", 63)},
+			bad:   []string{"", "ab", "Echowa", "my_bucket", "-bucket", "bucket-", "my..bucket", "192.168.1.1", strings.Repeat("a", 64)},
+		},
+		{
+			name:  "IsKeyPrefix",
+			check: IsKeyPrefix,
+			valid: []string{"", "server-1", "backups/server-1", "/server-1/", "a.b_c(d)"},
+			bad:   []string{"a//b", "../etc", "a/./b", "has space", "é", "a\\b", strings.Repeat("a", 201)},
+		},
 	}
 
 	for _, tt := range tests {

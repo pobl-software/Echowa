@@ -21,6 +21,7 @@ import (
 	"goravel/app/models"
 	"goravel/app/services"
 	"goravel/app/sse"
+	"goravel/app/templates"
 	"goravel/tests"
 )
 
@@ -189,6 +190,44 @@ func (s *StreamTestSuite) TestAppLogsShowOneDeploy() {
 	s.Equal(0, s.docker.OpenLogStreams())
 }
 
+func (s *StreamTestSuite) TestAppLogsShowThePoolersWhilePoolingIsOn() {
+	ctx := context.Background()
+	b := signedIn(s.T(), &s.TestCase)
+	tmpl, _ := templates.Find("postgres")
+	app, err := services.CreateApp(ctx, services.TemplateInput(tmpl, "shop"), &tmpl)
+	s.Require().NoError(err)
+	start := time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
+	s.deployed(app, docker.LogLine{Time: start, Stream: docker.Stderr, Text: "database system is ready"})
+	logs := "/apps/" + id(app.ID) + "/logs/stream?source=pooler"
+	ended := func(want string) {
+		stream := s.open(b, logs, nil)
+		end := stream.next()
+		s.Equal("end", end.name)
+		s.Contains(end.data, want)
+		stream.closed()
+	}
+
+	ended("Connection pooling is off for shop")
+
+	pull := make(chan struct{})
+	s.docker.Pull = func(ref string, _ *docker.RegistryAuth) (string, error) {
+		<-pull
+		return ref, nil
+	}
+	s.Require().NoError(services.SetPooling(ctx, app, true))
+	ended("connection pooler isn't running yet")
+	close(pull)
+	services.WaitForPoolers()
+
+	s.docker.WriteLog(app.PoolerServiceName(), docker.LogLine{Time: start.Add(time.Second), Stream: docker.Stderr, Text: "password authentication failed"})
+	pooler := s.open(b, logs, nil)
+	s.Contains(pooler.next().data, "password authentication failed")
+	s.docker.WriteLog(app.ServiceName(), docker.LogLine{Time: start.Add(2 * time.Second), Stream: docker.Stderr, Text: "checkpoint starting"})
+	s.docker.WriteLog(app.PoolerServiceName(), docker.LogLine{Time: start.Add(3 * time.Second), Stream: docker.Stderr, Text: "pooler error"})
+	s.Contains(pooler.next().data, "pooler error", "the pooler's lines only, followed")
+	pooler.close()
+}
+
 func (s *StreamTestSuite) TestTheLogsTabListsTheNewestDeploys() {
 	b := signedIn(s.T(), &s.TestCase)
 	app := createTestApp(s.T(), "blog", nil)
@@ -209,7 +248,7 @@ func (s *StreamTestSuite) TestTheLogsTabListsTheNewestDeploys() {
 	deploys, _ := gonertia.AssertFromString(s.T(), body).Props["logDeploys"].([]any)
 	s.Require().Len(deploys, services.MaxLogDeploys)
 	newest := deploys[0].(map[string]any)
-	s.InDelta(services.MaxLogDeploys+1, newest["generation"], 0)
+	s.InDelta(services.MaxLogDeploys, newest["generation"], 0, "the first deploy is generation 0")
 	s.Equal(true, newest["current"])
 	s.Equal(false, deploys[1].(map[string]any)["current"])
 }

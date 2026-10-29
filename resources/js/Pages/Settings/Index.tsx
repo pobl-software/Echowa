@@ -4,15 +4,26 @@ import { type ReactNode, useEffect, useState } from 'react';
 
 import { Page } from '@/Components/Page';
 import { Panel, Stats } from '@/Components/Panel';
+import { StorageLocations } from '@/Components/StorageLocations';
 import { UpdatesPanel } from '@/Components/UpdatesPanel';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
 import { formatDateTime, timeAgo } from '@/lib/time';
-import type { PruneRun, PruneSettings, UpdateSettings } from '@/types/models';
+import type { PruneRun, PruneSettings, StorageLocation, UpdateSettings } from '@/types/models';
 
 const bytes = new Intl.NumberFormat(undefined, { style: 'unit', unit: 'megabyte', maximumFractionDigits: 1 });
 
-export default function SettingsIndex({ prune, update }: { prune: PruneSettings; update: UpdateSettings }) {
+export default function SettingsIndex({
+    prune,
+    update,
+    storageLocations,
+    storagePrefix,
+}: {
+    prune: PruneSettings;
+    update: UpdateSettings;
+    storageLocations: StorageLocation[];
+    storagePrefix: string;
+}) {
     const [sending, setSending] = useState(false);
 
     // A prune runs in the background. Watch it until it's done.
@@ -35,6 +46,7 @@ export default function SettingsIndex({ prune, update }: { prune: PruneSettings;
             <Page crumbs={[{ label: 'Settings' }]}>
                 <div className="space-y-6">
                     <UpdatesPanel update={update} />
+                    <StorageLocations locations={storageLocations} prefix={storagePrefix} />
                     <Panel
                         title="Image pruning"
                         description={`Every day at midnight (UTC), Echowa removes its apps' images that no container uses and that were built more than ${prune.min_age} ago. Images from other repositories are never touched.`}

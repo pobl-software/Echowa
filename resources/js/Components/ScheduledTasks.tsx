@@ -4,18 +4,11 @@ import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
 import { Panel } from '@/Components/Panel';
+import { browserZone, type Preset, presetLabel, ScheduleFields, ScheduleText } from '@/Components/ScheduleFields';
 import { RunStatusBadge } from '@/Components/StatusBadge';
 import { TextField } from '@/Components/TextField';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
-import {
-    Combobox,
-    ComboboxContent,
-    ComboboxEmpty,
-    ComboboxInput,
-    ComboboxItem,
-    ComboboxList,
-} from '@/Components/ui/combobox';
 import {
     Dialog,
     DialogContent,
@@ -26,9 +19,7 @@ import {
     DialogTrigger,
 } from '@/Components/ui/dialog';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
-import { Input } from '@/Components/ui/input';
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/Components/ui/input-group';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/Components/ui/sheet';
 import { Switch } from '@/Components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
@@ -37,21 +28,14 @@ import { duration, formatDateTime, formatInZone, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { App, ScheduledTask, TaskFailure, TaskRun, TaskRunDetail } from '@/types/models';
 
-// The schedules the form offers by name. Go only sees the expressions.
-const presets = [
+// The schedules the form offers by name.
+const presets: Preset[] = [
     { value: '* * * * *', label: 'Every minute' },
     { value: '0 * * * *', label: 'Every hour' },
     { value: '0 0 * * *', label: 'Every day at midnight' },
     { value: '0 0 * * 0', label: 'Every Sunday at midnight' },
     { value: '0 0 1 * *', label: 'The 1st of every month' },
 ];
-const presetLabel = (schedule: string) => presets.find((p) => p.value === schedule)?.label;
-
-const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-const zones = (() => {
-    const list = Intl.supportedValuesOf('timeZone');
-    return list.includes('UTC') ? list : ['UTC', ...list];
-})();
 
 const noSpinner =
     '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
@@ -200,12 +184,6 @@ function NewTaskButton(props: React.ComponentProps<typeof Button>) {
     );
 }
 
-function ScheduleText({ task }: { task: ScheduledTask }) {
-    const label = presetLabel(task.schedule);
-
-    return label ?? <span className="font-mono">{task.schedule}</span>;
-}
-
 function TaskRow({ app, task, onOpen }: { app: App; task: ScheduledTask; onOpen: () => void }) {
     const last = task.last_run;
     const base = `/apps/${app.id}/tasks/${task.id}`;
@@ -218,7 +196,7 @@ function TaskRow({ app, task, onOpen }: { app: App; task: ScheduledTask; onOpen:
                 <div className="truncate font-mono text-xs text-muted-foreground">{task.command}</div>
                 {/* Phones have no Schedule column, and the smallest no Last run either. */}
                 <div className="truncate text-xs text-muted-foreground md:hidden">
-                    <ScheduleText task={task} />
+                    <ScheduleText presets={presets} schedule={task.schedule} />
                 </div>
                 {last && (
                     <div className="mt-1 sm:hidden">
@@ -228,7 +206,7 @@ function TaskRow({ app, task, onOpen }: { app: App; task: ScheduledTask; onOpen:
             </TableCell>
             <TableCell className="hidden md:table-cell">
                 <div className="text-sm">
-                    <ScheduleText task={task} />
+                    <ScheduleText presets={presets} schedule={task.schedule} />
                 </div>
                 <div className="text-xs text-muted-foreground">{task.timezone}</div>
             </TableCell>
@@ -332,15 +310,14 @@ function TaskDialog({ app, task, trigger }: { app: App; task?: ScheduledTask; tr
               enabled: true,
           };
     const form = useForm<TaskForm>(defaults);
-    const [custom, setCustom] = useState(() => !presetLabel(defaults.schedule));
-    const preview = useSchedulePreview(form.data.schedule, form.data.timezone, open);
+    const [custom, setCustom] = useState(() => !presetLabel(presets, defaults.schedule));
     const timeout = Number(form.data.timeout_minutes) || 0;
 
     const reset = () => {
         form.setDefaults(defaults);
         form.reset();
         form.clearErrors();
-        setCustom(!presetLabel(defaults.schedule));
+        setCustom(!presetLabel(presets, defaults.schedule));
     };
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -351,8 +328,6 @@ function TaskDialog({ app, task, trigger }: { app: App; task?: ScheduledTask; tr
             form.post(`/apps/${app.id}/tasks`, options);
         }
     };
-
-    const scheduleItems = [...presets, { value: 'custom', label: 'Custom cron expression' }];
 
     return (
         <Dialog
@@ -384,71 +359,17 @@ function TaskDialog({ app, task, trigger }: { app: App; task?: ScheduledTask; tr
                             error={form.errors.name}
                         />
 
-                        <Field data-invalid={!!form.errors.schedule || undefined}>
-                            <FieldLabel htmlFor="schedule">Schedule</FieldLabel>
-                            <Select
-                                items={scheduleItems}
-                                value={custom ? 'custom' : form.data.schedule}
-                                onValueChange={(value) => {
-                                    if (value === 'custom') {
-                                        setCustom(true);
-                                    } else if (value) {
-                                        setCustom(false);
-                                        form.setData('schedule', value);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger id="schedule" className="w-full">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {scheduleItems.map((item) => (
-                                        <SelectItem key={item.value} value={item.value}>
-                                            {item.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {custom && (
-                                <Input
-                                    aria-label="Cron expression"
-                                    className="font-mono"
-                                    placeholder="*/5 * * * *"
-                                    value={form.data.schedule}
-                                    onChange={(e) => form.setData('schedule', e.target.value)}
-                                    aria-invalid={!!form.errors.schedule || undefined}
-                                />
-                            )}
-                            {form.errors.schedule && <FieldError>{form.errors.schedule}</FieldError>}
-                            <NextRuns preview={preview} zone={form.data.timezone} custom={custom} />
-                        </Field>
-
-                        <Field data-invalid={!!form.errors.timezone || undefined}>
-                            <FieldLabel htmlFor="timezone">Time zone</FieldLabel>
-                            <Combobox
-                                items={zones}
-                                value={form.data.timezone}
-                                onValueChange={(value) => value && form.setData('timezone', value as string)}
-                            >
-                                <ComboboxInput
-                                    id="timezone"
-                                    className="w-full"
-                                    placeholder="Search time zones"
-                                    aria-invalid={!!form.errors.timezone || undefined}
-                                />
-                                <ComboboxContent>
-                                    <ComboboxEmpty>No time zone matches.</ComboboxEmpty>
-                                    <ComboboxList>
-                                        {(zone: string) => (
-                                            <ComboboxItem key={zone} value={zone}>
-                                                {zone}
-                                            </ComboboxItem>
-                                        )}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
-                            {form.errors.timezone && <FieldError>{form.errors.timezone}</FieldError>}
-                        </Field>
+                        <ScheduleFields
+                            presets={presets}
+                            schedule={form.data.schedule}
+                            timezone={form.data.timezone}
+                            onScheduleChange={(schedule) => form.setData('schedule', schedule)}
+                            onTimezoneChange={(timezone) => form.setData('timezone', timezone)}
+                            custom={custom}
+                            onCustomChange={setCustom}
+                            errors={form.errors}
+                            active={open}
+                        />
 
                         <Field data-invalid={!!form.errors.command || undefined}>
                             <FieldLabel htmlFor="command">Command</FieldLabel>
@@ -515,57 +436,6 @@ function TaskDialog({ app, task, trigger }: { app: App; task?: ScheduledTask; tr
                 </form>
             </DialogContent>
         </Dialog>
-    );
-}
-
-type Preview = { next: string[]; error: string | null };
-
-// useSchedulePreview asks the server when a schedule would next run, as
-// it's typed, so a typo shows before it's saved.
-function useSchedulePreview(schedule: string, zone: string, active: boolean): Preview | null {
-    const [preview, setPreview] = useState<Preview | null>(null);
-    useEffect(() => {
-        if (!active) {
-            return;
-        }
-        const controller = new AbortController();
-        const timer = window.setTimeout(async () => {
-            try {
-                const query = new URLSearchParams({ schedule, timezone: zone });
-                const response = await fetch(`/scheduled-tasks/preview?${query}`, {
-                    headers: { Accept: 'application/json' },
-                    signal: controller.signal,
-                });
-                if (response.ok) {
-                    setPreview(await response.json());
-                }
-            } catch {
-                // Aborted by the next keystroke, or offline: keep the last one.
-            }
-        }, 250);
-        return () => {
-            window.clearTimeout(timer);
-            controller.abort();
-        };
-    }, [schedule, zone, active]);
-
-    return preview;
-}
-
-function NextRuns({ preview, zone, custom }: { preview: Preview | null; zone: string; custom: boolean }) {
-    if (!preview) {
-        return custom ? <FieldDescription>Minute, hour, day of month, month and day of week.</FieldDescription> : null;
-    }
-    if (preview.error) {
-        // Go errors start lower case.
-        return <FieldError>{preview.error[0].toUpperCase() + preview.error.slice(1)}.</FieldError>;
-    }
-
-    return (
-        <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Next runs</span> in {zone}:{' '}
-            {preview.next.map((t) => formatInZone(t, zone)).join(', ')}
-        </div>
     );
 }
 
@@ -640,7 +510,7 @@ function TaskRunsSheet({
                 <SheetHeader className="border-b">
                     <SheetTitle>{task.name}</SheetTitle>
                     <SheetDescription>
-                        <ScheduleText task={task} /> in {task.timezone}
+                        <ScheduleText presets={presets} schedule={task.schedule} /> in {task.timezone}
                         {!task.enabled && ', off'}
                     </SheetDescription>
                     <div className="mt-2 flex items-start gap-2">

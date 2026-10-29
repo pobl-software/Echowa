@@ -14,7 +14,8 @@ import (
 	"goravel/app/services"
 )
 
-// SettingsController is the Settings page: updates and image pruning.
+// SettingsController is the Settings page: updates, S3 storage and image
+// pruning.
 type SettingsController struct{}
 
 func NewSettingsController() *SettingsController {
@@ -24,9 +25,15 @@ func NewSettingsController() *SettingsController {
 func (r *SettingsController) Index(ctx http.Context) http.Response {
 	cfg := services.PruneSettings()
 	current, last := services.PruneState()
+	locations, err := services.StorageLocations(ctx)
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
 
 	return inertia.Render(ctx, "Settings/Index", gonertia.Props{
-		"update": updateProps(),
+		"update":           updateProps(),
+		"storageLocations": locations,
+		"storagePrefix":    services.SuggestedStoragePrefix(),
 		"prune": map[string]any{
 			"keep":    cfg.Keep,
 			"min_age": humanDuration(cfg.MinAge),

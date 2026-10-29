@@ -2,6 +2,7 @@ package routes
 
 import (
 	"fmt"
+	nethttp "net/http"
 	"runtime/debug"
 
 	"github.com/goravel/framework/contracts/http"
@@ -23,6 +24,11 @@ func Web() {
 	// default logs the request's headers and body too, which carry the
 	// session cookie and any password, token or env value being submitted.
 	facades.Route().Recover(func(ctx http.Context, err any) {
+		// A stream that can't finish cuts the connection off this way,
+		// so the browser sees a failed download rather than a whole one.
+		if err == nethttp.ErrAbortHandler {
+			panic(err)
+		}
 		facades.Log().Error(fmt.Errorf("panic serving %s %s: %v\n%s", ctx.Request().Method(), ctx.Request().OriginPath(), err, debug.Stack()))
 		ctx.Request().Abort(http.StatusInternalServerError)
 	})
@@ -95,6 +101,9 @@ func Web() {
 			router.Post("/apps/{app}/slow-queries", slowQueries.Store)
 			router.Delete("/apps/{app}/slow-queries", slowQueries.Destroy)
 			router.Post("/apps/{app}/slow-queries/reset", slowQueries.Reset)
+			pooling := controllers.NewPoolingController()
+			router.Post("/apps/{app}/pooling", pooling.Store)
+			router.Delete("/apps/{app}/pooling", pooling.Destroy)
 			tasks := controllers.NewScheduledTaskController()
 			router.Post("/apps/{app}/tasks", tasks.Store)
 			router.Put("/apps/{app}/tasks/{task}", tasks.Update)
@@ -105,6 +114,29 @@ func Web() {
 			router.Get("/apps/{app}/tasks/{task}/runs", tasks.Runs)
 			router.Get("/apps/{app}/tasks/{task}/runs/{run}", tasks.ShowRun)
 			router.Get("/scheduled-tasks/preview", tasks.Preview)
+			appBackups := controllers.NewBackupController()
+			router.Post("/apps/{app}/backups", appBackups.Store)
+			router.Get("/apps/{app}/backups/{backup}", appBackups.Show)
+			router.Delete("/apps/{app}/backups/{backup}", appBackups.Destroy)
+			backupSchedules := controllers.NewBackupScheduleController()
+			router.Post("/apps/{app}/backup-schedules", backupSchedules.Store)
+			router.Put("/apps/{app}/backup-schedules/{schedule}", backupSchedules.Update)
+			router.Put("/apps/{app}/backup-schedules/{schedule}/enabled", backupSchedules.Enabled)
+			router.Delete("/apps/{app}/backup-schedules/{schedule}", backupSchedules.Destroy)
+			router.Post("/apps/{app}/backup-schedules/{schedule}/dismiss", backupSchedules.Dismiss)
+			restores := controllers.NewRestoreController()
+			router.Post("/apps/{app}/restores", restores.Store)
+			router.Get("/apps/{app}/restores/browse", restores.Browse)
+			router.Get("/apps/{app}/restores/preview", restores.Preview)
+			router.Get("/apps/{app}/restores/{restore}", restores.Show)
+			// The chunks of an upload are in routes/streams.go.
+			uploads := controllers.NewRestoreUploadController()
+			router.Post("/apps/{app}/restores/uploads", uploads.Store)
+			router.Get("/apps/{app}/restores/uploads/{upload}", uploads.Show)
+			router.Delete("/apps/{app}/restores/uploads/{upload}", uploads.Destroy)
+			router.Post("/apps/restore", restores.NewApp)
+			router.Get("/backups/browse", restores.BrowseLocation)
+			router.Get("/backups/preview", restores.PreviewNewApp)
 			deployments := controllers.NewDeploymentController()
 			router.Get("/apps/{app}/deployments/{deployment}", deployments.Show)
 			router.Post("/apps/{app}/deployments/{deployment}/redeploy", deployments.Redeploy)
@@ -123,6 +155,12 @@ func Web() {
 			router.Post("/settings/prune", settings.Prune)
 			router.Post("/settings/update/check", settings.CheckForUpdate)
 			router.Post("/settings/update", settings.Update)
+
+			storage := controllers.NewStorageLocationController()
+			router.Post("/settings/storage", storage.Store)
+			router.Post("/settings/storage/test", storage.Check)
+			router.Put("/settings/storage/{location}", storage.Update)
+			router.Delete("/settings/storage/{location}", storage.Destroy)
 		})
 	})
 

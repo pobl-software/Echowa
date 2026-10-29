@@ -1,4 +1,4 @@
-// Package setup is `echowa setup`: it turns a fresh Ubuntu server into one
+// Package setup is `echowa setup`: it turns a fresh Ubuntu or Debian server into one
 // running Echowa, Traefik included, or upgrades the Echowa on it (ADR 0021). The one-line
 // install.sh downloads the binary and runs it. Every step checks before it
 // changes anything, so running it again is safe, and is how you upgrade.
@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -106,7 +107,7 @@ func parse(args []string, out io.Writer) (Options, error) {
 		fmt.Fprint(out, `Usage: sudo echowa setup [options]
 
 Installs Docker, a single-node Swarm, Traefik and Echowa as a systemd service
-on a fresh Ubuntu server, or upgrades them. Safe to run again.
+on a fresh Ubuntu or Debian server, or upgrades them. Safe to run again.
 
 On a first install it asks how the UI should be reached (HTTP on port `+UIPort+`,
 HTTPS on a domain on port `+UIPort+`, or a Cloudflare Tunnel), unless --access or --tunnel-token
@@ -276,6 +277,10 @@ func (s *steps) output(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// tested are the releases the installer is checked on (docs/verification.md,
+// "Installer"), as os-release's ID and VERSION_ID.
+var tested = []string{"ubuntu 24.04", "ubuntu 26.04", "debian 12", "debian 13"}
+
 func (s *steps) preflight() error {
 	s.ui.begin("Server")
 	if os.Geteuid() != 0 {
@@ -289,11 +294,11 @@ func (s *steps) preflight() error {
 		return err
 	}
 	info := parseOSRelease(string(osRelease))
-	if info["ID"] != "ubuntu" {
-		return fmt.Errorf("this supports Ubuntu (found %s)", info["PRETTY_NAME"])
+	if _, _, ok := dockerRepo(info); !ok {
+		return fmt.Errorf("this supports Ubuntu and Debian (found %s)", info["PRETTY_NAME"])
 	}
-	if info["VERSION_ID"] != "24.04" {
-		s.ui.warn("Echowa is tested on Ubuntu 24.04, and this is %s", info["VERSION_ID"])
+	if !slices.Contains(tested, info["ID"]+" "+info["VERSION_ID"]) {
+		s.ui.warn("Echowa is tested on Ubuntu 24.04 and 26.04 and Debian 12 and 13, and this is %s", info["PRETTY_NAME"])
 	}
 	// Before Docker is even installed, so a server that isn't fresh is
 	// refused before anything changes. The Traefik step checks again for

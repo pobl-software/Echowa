@@ -14,9 +14,12 @@ import { duration, formatDateTime, timeAgo } from '@/lib/time';
 import { type Deployment, runningStatuses } from '@/types/models';
 
 interface Props {
-    app: { id: number; name: string; current_deployment_id: number | null; template: string | null };
+    app: { id: number; name: string; current_deployment_id: number | null; template: string | null; backups: boolean };
     serviceName: string;
     deployment: Deployment;
+    // What a queued deployment waits for, such as a backup of the app, or
+    // empty when it's only a worker (ADR 0034).
+    waitingFor: string;
 }
 
 // services.DeploymentStatusEvent
@@ -29,7 +32,7 @@ function toEntries(log: string): LogEntry[] {
         .map((text, key) => ({ key, text }));
 }
 
-export default function DeploymentShow({ app, serviceName, deployment: loaded }: Props) {
+export default function DeploymentShow({ app, serviceName, deployment: loaded, waitingFor }: Props) {
     // While the deployment runs, its log and status come live from the
     // deployment stream. Once it finishes, the page reloads its props.
     const [live, setLive] = useState<StatusEvent | null>(null);
@@ -89,7 +92,7 @@ export default function DeploymentShow({ app, serviceName, deployment: loaded }:
                             {
                                 label: 'Started',
                                 value: deployment.started_at ? timeAgo(deployment.started_at) : 'Queued',
-                                hint: formatDateTime(deployment.started_at) || 'Waiting for a worker',
+                                hint: formatDateTime(deployment.started_at) || waitingFor || 'Waiting for a worker',
                             },
                             {
                                 label: 'Took',
@@ -116,7 +119,11 @@ export default function DeploymentShow({ app, serviceName, deployment: loaded }:
                             ) : undefined
                         }
                     >
-                        <LogView lines={lines} fitTo={512} empty={stillRunning ? 'Waiting for a worker…' : 'No log.'} />
+                        <LogView
+                            lines={lines}
+                            fitTo={512}
+                            empty={stillRunning ? waitingFor || 'Waiting for a worker…' : 'No log.'}
+                        />
                     </Panel>
                 </div>
             </Page>

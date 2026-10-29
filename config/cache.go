@@ -1,6 +1,9 @@
 package config
 
 import (
+	contractscache "github.com/goravel/framework/contracts/cache"
+
+	"goravel/app/cache"
 	"goravel/app/facades"
 )
 
@@ -20,9 +23,15 @@ func init() {
 		// well as their drivers. You may even define multiple stores for the
 		// same cache driver to group types of items stored in your caches.
 		// Available Drivers: "memory", "custom"
+		//
+		// "memory" is the app's own store (app/cache): Goravel's memory driver
+		// forgets keys written again early, which resets the login limiter.
 		"stores": map[string]any{
 			"memory": map[string]any{
-				"driver": "memory",
+				"driver": "custom",
+				"via": func() (contractscache.Driver, error) {
+					return cache.NewMemory(), nil
+				},
 			},
 		},
 

@@ -6,6 +6,7 @@ import (
 	nethttp "net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -57,7 +58,7 @@ func (s *steps) installDocker() error {
 		}
 	}
 	if len(conflicting) > 0 {
-		s.ui.say("Removing Ubuntu's Docker packages, which conflict with Docker's: %s", strings.Join(conflicting, " "))
+		s.ui.say("Removing the distribution's Docker packages, which conflict with Docker's: %s", strings.Join(conflicting, " "))
 		if err := s.quiet(apt, "apt-get", append([]string{"remove", "-y", "-qq"}, conflicting...)...); err != nil {
 			return err
 		}
@@ -73,18 +74,19 @@ func (s *steps) installDocker() error {
 	if err := os.MkdirAll("/etc/apt/keyrings", 0o755); err != nil {
 		return err
 	}
-	key, err := download("https://download.docker.com/linux/ubuntu/gpg")
+	osRelease, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return err
+	}
+	repo, suite, _ := dockerRepo(parseOSRelease(string(osRelease)))
+	key, err := download("https://download.docker.com/linux/" + repo + "/gpg")
 	if err != nil {
 		return fmt.Errorf("Docker's apt key: %w", err)
 	}
 	if err := writeAtomic("/etc/apt/keyrings/docker.asc", key, 0o644); err != nil {
 		return err
 	}
-	osRelease, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return err
-	}
-	if err := writeAtomic("/etc/apt/sources.list.d/docker.sources", []byte(dockerSources(parseOSRelease(string(osRelease)))), 0o644); err != nil {
+	if err := writeAtomic("/etc/apt/sources.list.d/docker.sources", []byte(dockerSources(repo, suite)), 0o644); err != nil {
 		return err
 	}
 
@@ -97,13 +99,23 @@ func (s *steps) installDocker() error {
 		"docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin")
 }
 
-func dockerSources(osRelease map[string]string) string {
-	suite := osRelease["UBUNTU_CODENAME"]
-	if suite == "" {
-		suite = osRelease["VERSION_CODENAME"]
+// dockerRepo picks Docker's apt repository for this OS and the release in
+// it: Ubuntu's for Ubuntu and the distributions built on it, which name the
+// Ubuntu release they follow, and Debian's for Debian. ok is false for
+// anything else, which setup doesn't support.
+func dockerRepo(osRelease map[string]string) (repo, suite string, ok bool) {
+	switch {
+	case osRelease["ID"] == "debian" && osRelease["VERSION_CODENAME"] != "":
+		return "debian", osRelease["VERSION_CODENAME"], true
+	case osRelease["UBUNTU_CODENAME"] != "" && (osRelease["ID"] == "ubuntu" || slices.Contains(strings.Fields(osRelease["ID_LIKE"]), "ubuntu")):
+		return "ubuntu", osRelease["UBUNTU_CODENAME"], true
 	}
 
-	return "Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: " + suite +
+	return "", "", false
+}
+
+func dockerSources(repo, suite string) string {
+	return "Types: deb\nURIs: https://download.docker.com/linux/" + repo + "\nSuites: " + suite +
 		"\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n"
 }
 

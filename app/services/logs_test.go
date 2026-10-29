@@ -19,10 +19,10 @@ func TestParseLogQuery(t *testing.T) {
 	last := time.Date(2026, 10, 24, 11, 59, 30, 123456789, time.UTC)
 
 	tests := []struct {
-		name                             string
-		tail, since, deploy, lastEventID string
-		want                             LogQuery
-		wantErr                          string
+		name                                     string
+		tail, since, source, deploy, lastEventID string
+		want                                     LogQuery
+		wantErr                                  string
 	}{
 		{name: "defaults", want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: DefaultLogTail}}},
 		{name: "tail", tail: "500", want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: 500}}},
@@ -31,19 +31,22 @@ func TestParseLogQuery(t *testing.T) {
 			name: "resume after the last line, up to the cap", tail: "100", lastEventID: last.Format(time.RFC3339Nano),
 			want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Since: last, Tail: MaxLogTail}, After: last},
 		},
-		{name: "deploy", deploy: "11", want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: DefaultLogTail}, Deploy: 11}},
+		{name: "deploy", deploy: "11", want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: DefaultLogTail}, Deploy: generation(11)}},
+		{name: "a service's first deploy", deploy: "0", want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: DefaultLogTail}, Deploy: generation(0)}},
+		{name: "pooler", source: "pooler", want: LogQuery{LogOptions: docker.LogOptions{Follow: true, Tail: DefaultLogTail}, Pooler: true}},
 		{name: "tail zero", tail: "0", wantErr: "tail must be"},
 		{name: "tail too big", tail: "10001", wantErr: "tail must be"},
 		{name: "tail not a number", tail: "all", wantErr: "tail must be"},
 		{name: "negative since", since: "-1h", wantErr: "since must be"},
 		{name: "since not a duration", since: "yesterday", wantErr: "since must be"},
 		{name: "bad last event ID", lastEventID: "42", wantErr: "Last-Event-ID"},
-		{name: "deploy zero", deploy: "0", wantErr: "deploy must be"},
+		{name: "negative deploy", deploy: "-1", wantErr: "deploy must be"},
 		{name: "deploy not a number", deploy: "latest", wantErr: "deploy must be"},
+		{name: "unknown source", source: "server", wantErr: "source must be"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseLogQuery(tt.tail, tt.since, tt.deploy, tt.lastEventID, now)
+			got, err := ParseLogQuery(tt.tail, tt.since, tt.source, tt.deploy, tt.lastEventID, now)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 				return
@@ -116,14 +119,18 @@ func TestMatchDeployment(t *testing.T) {
 	}
 }
 
+func generation(n uint64) *uint64 { return &n }
+
 func TestDeployFilter(t *testing.T) {
+	// Swarm creates a service with ForceUpdate 0, so its first deploy is
+	// generation 0.
 	deploys := []LogDeploy{
-		{Generation: 3, tasks: []string{"c"}},
-		{Generation: 2, Current: true, tasks: []string{"b1", "b2"}},
-		{Generation: 1, tasks: []string{"a"}},
+		{Generation: 2, tasks: []string{"c"}},
+		{Generation: 1, Current: true, tasks: []string{"b1", "b2"}},
+		{Generation: 0, tasks: []string{"a"}},
 	}
 
-	keep, past, found := deployFilter(deploys, 0)
+	keep, past, found := deployFilter(deploys, nil)
 	require.True(t, found)
 	assert.False(t, past)
 	assert.True(t, keep("b1"))
@@ -132,20 +139,22 @@ func TestDeployFilter(t *testing.T) {
 	assert.False(t, keep("a"))
 	assert.False(t, keep("c"), "a rolled back deploy isn't the current one")
 
-	keep, past, found = deployFilter(deploys, 1)
+	keep, past, found = deployFilter(deploys, generation(0))
 	require.True(t, found)
 	assert.True(t, past)
 	assert.True(t, keep("a"))
 	assert.False(t, keep("b1"))
 	assert.False(t, keep("new"))
 
-	_, past, found = deployFilter(deploys, 2)
+	_, past, found = deployFilter(deploys, generation(1))
 	assert.True(t, found)
 	assert.False(t, past, "asking for the current deploy by number follows it")
 
-	_, _, found = deployFilter(deploys, 9)
+	_, _, found = deployFilter(deploys, generation(9))
 	assert.False(t, found)
+	_, _, found = deployFilter(nil, generation(0))
+	assert.False(t, found, "generation 0 is a deploy like any other, not the current one")
 
-	keep, past, found = deployFilter(nil, 0)
+	keep, past, found = deployFilter(nil, nil)
 	assert.True(t, found && !past && keep("anything"), "with no tasks listed, every line is the current deploy's")
 }

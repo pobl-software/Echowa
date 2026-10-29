@@ -51,6 +51,7 @@ func containerStats(summary container.Summary, s container.StatsResponse) Contai
 	stats := ContainerStats{
 		ID:          summary.ID,
 		App:         summary.Labels[LabelApp],
+		Role:        summary.Labels[LabelRole],
 		Read:        s.Read,
 		CPUNanos:    s.CPUStats.CPUUsage.TotalUsage,
 		MemoryUsed:  memoryUsed(s.MemoryStats),

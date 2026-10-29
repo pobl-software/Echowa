@@ -41,6 +41,9 @@ type App struct {
 	// SlowQueries has a template database that needs a flag for it collect
 	// its slow queries (ADR 0027).
 	SlowQueries bool `json:"slow_queries"`
+	// Pooling runs a connection pooler beside a PostgreSQL app, as its own
+	// Swarm service (ADR 0035). It always runs in transaction mode.
+	Pooling bool `json:"pooling"`
 	// CPUMillicores caps each task's CPU, 1000 to a core. Nil uses
 	// Echowa's default, half the server (services.AppLimits).
 	CPUMillicores *int `gorm:"column:cpu_millicores" json:"cpu_millicores"`
@@ -58,4 +61,15 @@ type App struct {
 // ServiceName is the app's Swarm service name.
 func (a *App) ServiceName() string {
 	return ServicePrefix + a.Name
+}
+
+// PoolerSuffix ends the name of an app's connection pooler's service (ADR
+// 0035), so an app called <name>-pooler has the service name <name>'s
+// pooler would.
+const PoolerSuffix = "-pooler"
+
+// PoolerServiceName is the Swarm service name of the app's connection
+// pooler.
+func (a *App) PoolerServiceName() string {
+	return a.ServiceName() + PoolerSuffix
 }

@@ -8,16 +8,22 @@
 //	go test -tags docker ./app/templates/...
 //
 // It pulls postgres:18, mysql:9.7 and redis:8, and needs the docker CLI to
-// exec into the tasks.
+// exec into the tasks. PostgreSQL and MySQL are also backed up and
+// restored, as ADR 0034 does.
 package templates
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +52,176 @@ func TestPostgresTemplate(t *testing.T) {
 	out, err = psql(run.seed.Env["POSTGRES_PASSWORD"], "SELECT x FROM kept")
 	require.NoError(t, err)
 	assert.Equal(t, "42", strings.TrimSpace(out), "the table survived the redeploy")
+}
+
+// The pooler signs in to PostgreSQL as the app's user, shares at most 50
+// server connections in transaction mode, and keeps serving across a
+// database redeploy (ADR 0035). It's deployed as services.PoolerSpec
+// builds it.
+func TestPostgresPooler(t *testing.T) {
+	run := deployTemplate(t, "postgres", false)
+	tmpl, _ := Find("postgres")
+	pooler := tmpl.Pooler
+	image, err := run.engine.PullImage(run.ctx, pooler.Image, nil)
+	require.NoError(t, err)
+	_, digest, _ := strings.Cut(image, "@")
+	assert.True(t, strings.HasSuffix(pooler.Image, "@"+digest), "the pull resolved to the pinned digest: %s", image)
+
+	env, err := pooler.EnvFrom(run.spec.Name, run.seed.Env)
+	require.NoError(t, err)
+	pool := &templateRun{t: t, ctx: run.ctx, engine: run.engine, seed: run.seed, spec: docker.ServiceSpec{
+		Name:        run.spec.Name + "-pooler",
+		App:         run.spec.App,
+		Role:        docker.RolePooler,
+		Image:       image,
+		Env:         env,
+		Replicas:    1,
+		Entrypoint:  pooler.Command,
+		Healthcheck: &docker.Healthcheck{Command: pooler.Healthcheck},
+		Limits:      pooler.Limits,
+	}}
+	t.Cleanup(func() { _ = run.engine.RemoveService(context.Background(), pool.spec.Name) })
+	pool.deploy()
+
+	user, password := run.seed.Env["POSTGRES_USER"], run.seed.Env["POSTGRES_PASSWORD"]
+	port := strconv.Itoa(pooler.Port)
+	psql := func(password, sql string) (string, error) {
+		return run.client("env", "PGPASSWORD="+password, "psql", "-h", pool.spec.Name, "-p", port, "-U", user, "-d", user, "-tAc", sql)
+	}
+	out, err := psql(password, "SELECT current_user")
+	require.NoError(t, err, out)
+	assert.Equal(t, user, strings.TrimSpace(out), "signed in through the pooler")
+	out, err = psql("wrong", "SELECT 1")
+	assert.Error(t, err, "a wrong password is refused")
+	assert.Contains(t, out, "authentication failed")
+
+	config, err := exec.Command("docker", "inspect", "-f", "{{json .Config.Cmd}}", pool.container()).Output()
+	require.NoError(t, err)
+	assert.Contains(t, []string{"null", "[]"}, strings.TrimSpace(string(config)), "Docker dropped the image's CMD")
+	cmdline, err := pool.exec("cat", "/proc/1/cmdline")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(cmdline, "pgbouncer"), "sh execs into PgBouncer: %q", cmdline)
+	assert.NotContains(t, cmdline, password)
+	environ, err := pool.exec("cat", "/proc/1/environ")
+	require.NoError(t, err)
+	assert.NotContains(t, environ, password, "the script unsets it before PgBouncer starts")
+	status, err := pool.exec("cat", "/proc/1/status")
+	require.NoError(t, err)
+	assert.NotRegexp(t, `(?m)^Uid:\s+0\s`, status, "the image's user, not root")
+
+	poolers, err := run.engine.ServicesWithRole(run.ctx, docker.RolePooler)
+	require.NoError(t, err)
+	assert.Contains(t, poolers, docker.ServiceRef{Name: pool.spec.Name, App: run.spec.App})
+	assert.NotContains(t, poolers, docker.ServiceRef{Name: run.spec.Name, App: run.spec.App}, "the database has no role")
+
+	// Named prepared statements from 60 clients on each of two databases,
+	// which PgBouncer pools apart, so 120 clients share the 50 server
+	// connections. A thread per client, since pgbench's prepare blocks its
+	// thread (ADR 0035).
+	databases := []string{user, "postgres"}
+	for _, db := range databases {
+		out, err := run.client("env", "PGPASSWORD="+password, "pgbench", "-q", "-i", "-s", "1", "-h", run.spec.Name, "-U", user, db)
+		require.NoError(t, err, out)
+	}
+	results := make([]string, len(databases))
+	errs := make([]error, len(databases))
+	done := make(chan int)
+	for i, db := range databases {
+		go func() {
+			results[i], errs[i] = run.client("env", "PGPASSWORD="+password, "timeout", "90", "pgbench",
+				"-M", "prepared", "-c", "60", "-j", "60", "-T", "5", "-h", pool.spec.Name, "-p", port, "-U", user, db)
+			done <- i
+		}()
+	}
+	for range databases {
+		i := <-done
+		require.NoError(t, errs[i], results[i])
+		assert.Contains(t, results[i], "number of failed transactions: 0 ", results[i])
+		assert.NotContains(t, results[i], "aborted", results[i])
+	}
+	out, err = run.client("env", "PGPASSWORD="+password, "psql", "-h", run.spec.Name, "-U", user, "-d", user, "-tAc",
+		"SELECT count(*) FROM pg_stat_activity WHERE usename = current_user AND backend_type = 'client backend' AND pid <> pg_backend_pid()")
+	require.NoError(t, err, out)
+	servers, err := strconv.Atoi(strings.TrimSpace(out))
+	require.NoError(t, err, out)
+	t.Logf("server connections the pooler kept open: %d", servers)
+	assert.LessOrEqual(t, servers, 50, "the pooler's server connections, over both databases")
+	assert.GreaterOrEqual(t, servers, 25, "the load went through the pool")
+
+	logs, err := exec.Command("docker", "service", "logs", "--raw", pool.spec.Name).CombinedOutput()
+	require.NoError(t, err)
+	assert.NotContains(t, string(logs), "login attempt", "connections aren't logged")
+
+	// An app keeps querying through the pooler while the database
+	// redeploys. Between its tasks Docker's DNS doesn't know the
+	// database's name, so the pooler's logins fail, and on PgBouncer's
+	// defaults it then refuses everyone for up to 15 s after PostgreSQL is
+	// back (server_login_retry and dns_nxdomain_ttl).
+	type probe struct {
+		at         time.Time
+		direct, ok bool
+	}
+	var (
+		mu     sync.Mutex
+		probes []probe
+	)
+	before := pool.container()
+	query := func(direct bool) {
+		host, p := "127.0.0.1", port
+		if direct {
+			host, p = run.spec.Name, "5432"
+		}
+		out, err := exec.Command("docker", "exec", "-e", "PGPASSWORD="+password, "-e", "PGCONNECT_TIMEOUT=2", before,
+			"psql", "-h", host, "-p", p, "-U", user, "-d", user, "-tAc", "SELECT 1").CombinedOutput()
+		mu.Lock()
+		defer mu.Unlock()
+		probes = append(probes, probe{time.Now(), direct, err == nil && strings.TrimSpace(string(out)) == "1"})
+	}
+	querying, stop := context.WithCancel(run.ctx)
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			for querying.Err() == nil {
+				query(i == 0)
+			}
+		})
+	}
+	run.redeploy()
+	time.Sleep(20 * time.Second)
+	stop()
+	wg.Wait()
+	slices.SortFunc(probes, func(a, b probe) int { return a.at.Compare(b.at) })
+	var down, back, lastFailed time.Time
+	for _, p := range probes {
+		switch {
+		case p.direct && !p.ok && down.IsZero():
+			down = p.at
+		case p.direct && p.ok && !down.IsZero() && back.IsZero():
+			back = p.at
+		case !p.direct && !p.ok:
+			lastFailed = p.at
+		}
+	}
+	require.False(t, back.IsZero(), "PostgreSQL went away and came back during the redeploy")
+	t.Logf("PostgreSQL was unreachable for %s, and the pooler failed until %s after it was back",
+		back.Sub(down).Round(100*time.Millisecond), lastFailed.Sub(back).Round(100*time.Millisecond))
+	assert.Less(t, lastFailed.Sub(back), 3*time.Second, "the pooler signs in again as soon as PostgreSQL answers")
+	out, err = psql(password, "SELECT count(*) FROM pgbench_branches")
+	require.NoError(t, err, "a query after the database's redeploy: %s", out)
+	assert.Equal(t, "1", strings.TrimSpace(out))
+	assert.Equal(t, before, pool.container(), "Swarm didn't replace the pooler's task")
+
+	// With no PostgreSQL at all, the pooler is still healthy, so Swarm
+	// never restarts it for the database's sake.
+	out2, err := exec.Command("docker", "service", "scale", "--detach=false", run.spec.Name+"=0").CombinedOutput()
+	require.NoError(t, err, string(out2))
+	// scale returns while the task is still stopping.
+	require.Eventually(t, func() bool {
+		ids, err := exec.Command("docker", "ps", "-q", "--filter", "label=com.docker.swarm.service.name="+run.spec.Name).Output()
+		return err == nil && strings.TrimSpace(string(ids)) == ""
+	}, time.Minute, 200*time.Millisecond, "the database's container stopped")
+	out, err = pool.exec("sh", "-c", pooler.Healthcheck)
+	assert.NoError(t, err, "the healthcheck passes without the database: %s", out)
 }
 
 func TestMySQLTemplate(t *testing.T) {
@@ -394,4 +570,150 @@ func TestTemplatesListTheirSlowQueries(t *testing.T) {
 			}
 		})
 	}
+}
+
+// backupProbes make and read the data a backup test restores: kept has
+// UTF-8 text, binary data and enough rows that a cut-off dump ends inside
+// a statement, and kept_count is a view.
+var backupProbes = map[string]struct {
+	sql    func(r *templateRun, statements string) (string, error)
+	create string
+	// binary prints row 1's data as hex.
+	binary string
+	// load reads an export that isn't the backup's own dump on stdin, as
+	// someone loading it elsewhere would.
+	load []string
+}{
+	"postgres": {
+		sql: func(r *templateRun, statements string) (string, error) {
+			return r.exec("sh", "-c", `psql -X -q -A -t -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"`, "sh", statements)
+		},
+		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data bytea);
+			INSERT INTO kept VALUES (1, 'café', '\x00ff'), (2, 'naïve ☃', NULL);
+			INSERT INTO kept SELECT n, encode(sha256(n::text::bytea), 'hex'), sha256(n::text::bytea) FROM generate_series(3, 5000) n;
+			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
+		binary: "SELECT encode(data, 'hex') FROM kept WHERE id = 1",
+		load:   []string{"sh", "-c", `exec psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
+	},
+	"mysql": {
+		sql: func(r *templateRun, statements string) (string, error) {
+			return r.exec("sh", "-c", `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root -N -B -e "$1" "$MYSQL_DATABASE"`, "sh", statements)
+		},
+		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data varbinary(32));
+			INSERT INTO kept VALUES (1, 'café', 0x00ff), (2, 'naïve ☃', NULL);
+			SET SESSION cte_max_recursion_depth = 10000;
+			INSERT INTO kept WITH RECURSIVE s (n) AS (SELECT 3 UNION ALL SELECT n + 1 FROM s WHERE n < 5000)
+				SELECT n, SHA2(n, 256), UNHEX(SHA2(n, 256)) FROM s;
+			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
+		binary: "SELECT HEX(data) FROM kept WHERE id = 1",
+	},
+}
+
+func TestTemplatesBackUpAndRestore(t *testing.T) {
+	for _, tmpl := range All() {
+		if tmpl.Backup == nil {
+			continue
+		}
+		t.Run(tmpl.Slug, func(t *testing.T) {
+			b := tmpl.Backup
+			probe, ok := backupProbes[tmpl.Slug]
+			require.True(t, ok, "add a probe for %s", tmpl.Slug)
+			sql := func(r *templateRun, statements string) string {
+				t.Helper()
+				out, err := probe.sql(r, statements)
+				require.NoError(t, err, out)
+				return strings.TrimSpace(out)
+			}
+			assertKept := func(r *templateRun, msg string) {
+				t.Helper()
+				assert.Equal(t, "café\nnaïve ☃", sql(r, "SELECT note FROM kept WHERE id <= 2 ORDER BY id"), msg)
+				assert.Equal(t, "5000", sql(r, "SELECT n FROM kept_count"), msg)
+				assert.Equal(t, "00ff", strings.ToLower(sql(r, probe.binary)), msg)
+			}
+
+			// Reading the slow queries leaves pg_stat_statements in the
+			// database, so a real dump carries it, and the target has it.
+			inspected := func(r *templateRun) {
+				t.Helper()
+				if tmpl.Inspect != nil && tmpl.Inspect.SlowQueryFlags == "" {
+					_, err := r.engine.Exec(r.ctx, r.spec.Name, tmpl.Inspect.SlowQueries)
+					require.NoError(t, err)
+				}
+			}
+
+			source := deployTemplate(t, tmpl.Slug, false)
+			sql(source, probe.create)
+			inspected(source)
+			out, err := source.engine.Exec(source.ctx, source.spec.Name, b.Version)
+			require.NoError(t, err)
+			version, err := ServerVersion(out)
+			require.NoError(t, err)
+			t.Logf("server version %s (%s)", version, strings.TrimSpace(string(out)))
+			assert.True(t, b.Compatible(version, version))
+
+			start := time.Now()
+			dump, code, stderr := source.stream(b.Dump, nil)
+			require.Equal(t, 0, code, stderr)
+			t.Logf("dumped %d bytes in %s", len(dump), time.Since(start))
+			assert.Empty(t, stderr, "a clean dump writes nothing to stderr")
+
+			target := deployTemplate(t, tmpl.Slug, false)
+			inspected(target)
+			_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump))
+			require.Equal(t, 0, code, stderr)
+			assertKept(target, "restored into a fresh app, with its own database and passwords")
+
+			sql(source, "UPDATE kept SET note = 'changed' WHERE id = 1; DELETE FROM kept WHERE id = 2")
+			_, code, stderr = source.stream(b.Restore, bytes.NewReader(dump))
+			require.Equal(t, 0, code, stderr)
+			assertKept(source, "restored over changed data")
+
+			for _, export := range b.Exports {
+				if slices.Equal(export.Dump, b.Dump) {
+					continue
+				}
+				require.NotNil(t, probe.load, "add a load for %s's %s export", tmpl.Slug, export.Format)
+				out, code, stderr := source.stream(export.Dump, nil)
+				require.Equal(t, 0, code, stderr)
+				assert.NotContains(t, string(out), "OWNER TO", "the %s export names no owners", export.Format)
+				elsewhere := deployTemplate(t, tmpl.Slug, false)
+				inspected(elsewhere)
+				_, code, stderr = elsewhere.stream(probe.load, bytes.NewReader(out))
+				require.Equal(t, 0, code, stderr)
+				assertKept(elsewhere, "the "+export.Format+" export loaded into a fresh app, with its own database and user")
+			}
+
+			_, code, stderr = target.stream(b.Restore, strings.NewReader("this is not a dump\n"))
+			assert.NotEqual(t, 0, code, "a dump that isn't one fails")
+			t.Logf("not a dump: %s", stderr)
+
+			sql(target, "INSERT INTO kept (id, note) VALUES (9999, 'after')")
+			_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump[:len(dump)/2]))
+			assert.NotEqual(t, 0, code, "a restore that fails half way exits non-zero")
+			t.Logf("cut off: %s", stderr)
+			if b.Atomic {
+				assert.Equal(t, "5001", sql(target, "SELECT COUNT(*) FROM kept"), "the failed restore rolled back")
+				assert.Equal(t, "after", sql(target, "SELECT note FROM kept WHERE id = 9999"))
+			}
+
+			out, err = exec.Command("docker", "service", "scale", "--detach", source.spec.Name+"=0").CombinedOutput()
+			require.NoError(t, err, string(out))
+			assert.Eventually(t, func() bool {
+				_, err := source.engine.ExecStream(source.ctx, source.spec.Name, b.Dump, nil, io.Discard, io.Discard)
+				return errors.Is(err, docker.ErrNotRunning)
+			}, time.Minute, time.Second, "a dump of a stopped service fails with ErrNotRunning")
+		})
+	}
+}
+
+// stream runs cmd in the service's task through ExecStream, as a backup
+// or restore does, and returns its stdout, exit code and stderr.
+func (r *templateRun) stream(cmd []string, stdin io.Reader) ([]byte, int, string) {
+	r.t.Helper()
+	var out bytes.Buffer
+	stderr := &docker.TailBuffer{Limit: 16 << 10}
+	code, err := r.engine.ExecStream(r.ctx, r.spec.Name, cmd, stdin, &out, stderr)
+	require.NoError(r.t, err)
+
+	return out.Bytes(), code, strings.TrimSpace(stderr.String())
 }

@@ -64,3 +64,53 @@ func TestFakeRemoveVolumeWaitsForTheService(t *testing.T) {
 	exists, _ = fake.VolumeExists(ctx, "echowa-db-data")
 	assert.False(t, exists)
 }
+
+func TestFakeListsServicesByRole(t *testing.T) {
+	ctx := context.Background()
+	fake := &Fake{}
+	require.NoError(t, fake.DeployService(ctx, ServiceSpec{Name: "echowa-db", App: "db", Image: "postgres@sha256:a", Replicas: 1}))
+	require.NoError(t, fake.DeployService(ctx, ServiceSpec{Name: "echowa-db-pooler", App: "db", Role: RolePooler, Image: "pgbouncer@sha256:a", Replicas: 1}))
+
+	poolers, err := fake.ServicesWithRole(ctx, RolePooler)
+	require.NoError(t, err)
+	assert.Equal(t, []ServiceRef{{Name: "echowa-db-pooler", App: "db"}}, poolers)
+
+	require.NoError(t, fake.RemoveService(ctx, "echowa-db-pooler"))
+	poolers, err = fake.ServicesWithRole(ctx, RolePooler)
+	require.NoError(t, err)
+	assert.Empty(t, poolers)
+	_, err = fake.ServicesWithRole(ctx, "")
+	assert.Error(t, err, "an empty role would match every service without one")
+}
+
+func TestFakeMatchesTheSpecItRuns(t *testing.T) {
+	ctx := context.Background()
+	fake := &Fake{Wait: func(spec ServiceSpec) (UpdateResult, error) {
+		if spec.Env["PASSWORD"] == "bad" {
+			return UpdateResult{Outcome: OutcomeRolledBack}, nil
+		}
+		return UpdateResult{Outcome: OutcomeCompleted}, nil
+	}}
+	spec := ServiceSpec{Name: "echowa-db-pooler", App: "db", Role: RolePooler, Image: "pgbouncer@sha256:a", Replicas: 1,
+		Env: map[string]string{"PASSWORD": "good"}}
+
+	same, err := fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.False(t, same, "no service yet")
+	require.NoError(t, fake.DeployService(ctx, spec))
+	same, err = fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, same)
+
+	bad := spec
+	bad.Env = map[string]string{"PASSWORD": "bad"}
+	require.NoError(t, fake.DeployService(ctx, bad))
+	_, err = fake.WaitForUpdate(ctx, bad.Name)
+	require.NoError(t, err)
+	same, err = fake.ServiceMatches(ctx, bad)
+	require.NoError(t, err)
+	assert.False(t, same, "a rollback goes back to the previous spec, so the next sync tries again")
+	same, err = fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, same)
+}

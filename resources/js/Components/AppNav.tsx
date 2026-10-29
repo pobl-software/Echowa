@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react';
 import {
+    ArchiveIcon,
     BracesIcon,
     CalendarClockIcon,
     ChartLineIcon,
@@ -26,6 +27,8 @@ export const appSections = [
     { group: 'Configuration', id: 'databases', label: 'Databases', icon: DatabaseIcon, kind: 'custom' },
     // How other apps, and clients outside the server, reach a template database.
     { group: 'Configuration', id: 'connection', label: 'Connection', icon: PlugIcon, kind: 'template' },
+    // Dumps of a template database to S3 storage (ADR 0034). Not Redis.
+    { group: 'Configuration', id: 'backups', label: 'Backups', icon: ArchiveIcon, kind: 'backups' },
     { group: 'Configuration', id: 'docker', label: 'Docker config', icon: ContainerIcon },
     { group: 'Configuration', id: 'resources', label: 'Resource limits', icon: GaugeIcon },
     // Template apps don't speak HTTP, so they have no domain.
@@ -42,16 +45,19 @@ export const appSections = [
     id: string;
     label: string;
     icon: LucideIcon;
-    kind?: 'template' | 'custom';
+    kind?: 'template' | 'custom' | 'backups';
 }[];
 export type AppSection = (typeof appSections)[number]['id'];
 
-type SectionApp = { template?: string | null };
+// backups says the app's template is one Echowa backs up.
+type SectionApp = { template?: string | null; backups?: boolean };
 
 // The sections an app has.
 export function sectionsFor(app: SectionApp) {
     const kind = app.template != null ? 'template' : 'custom';
-    return appSections.filter((s) => !('kind' in s) || s.kind === kind);
+    return appSections.filter(
+        (s) => !('kind' in s) || s.kind === kind || (s.kind === 'backups' && app.backups === true),
+    );
 }
 
 const groups = [...new Set(appSections.map((s) => s.group))];
