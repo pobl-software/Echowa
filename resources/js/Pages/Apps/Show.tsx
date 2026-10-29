@@ -1,5 +1,5 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
-import { ExternalLinkIcon } from 'lucide-react';
+import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react';
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 
 import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
@@ -23,6 +23,7 @@ import { PoolingSection } from '@/Components/PoolingSection';
 import { OOMAlert, ResourceLimits } from '@/Components/ResourceLimits';
 import { ScheduledTaskAlert, ScheduledTasks } from '@/Components/ScheduledTasks';
 import { DeploymentStatusBadge, LiveStatusBadge } from '@/Components/StatusBadge';
+import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button, buttonVariants } from '@/Components/ui/button';
 import { formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -230,6 +231,7 @@ export default function AppsShow({
                             {backups?.failures.map((failure) => (
                                 <BackupAlert key={failure.schedule_id} app={app} failure={failure} />
                             ))}
+                            {pooler && <PoolerAlert app={app} pooler={pooler} onSelect={show} />}
                             {database && <DatabaseWarnings database={database} />}
                             <Stats
                                 items={[
@@ -303,6 +305,19 @@ export default function AppsShow({
                                         <Detail label="External access">
                                             <SectionLink app={app} section="connection" onSelect={show}>
                                                 {app.external_port ? `On, port ${app.external_port}` : 'Off'}
+                                            </SectionLink>
+                                        </Detail>
+                                    )}
+                                    {pooler && (
+                                        <Detail label="Pooling">
+                                            <SectionLink app={app} section="connection" onSelect={show}>
+                                                {app.pooling ? (
+                                                    <span title={`${pooler.connect.host}:${pooler.connect.port}`}>
+                                                        On, port {pooler.connect.port}
+                                                    </span>
+                                                ) : (
+                                                    'Off'
+                                                )}
                                             </SectionLink>
                                         </Detail>
                                     )}
@@ -497,6 +512,38 @@ export default function AppsShow({
                 </div>
             </Page>
         </>
+    );
+}
+
+// PoolerAlert says on Overview that the connection pooler didn't start, or
+// wasn't removed, as its Connection section does.
+function PoolerAlert({
+    app,
+    pooler,
+    onSelect,
+}: {
+    app: App;
+    pooler: PoolerInfo;
+    onSelect: (section: AppSection) => void;
+}) {
+    const { status } = pooler;
+    if (!status.error || status.syncing) {
+        return null;
+    }
+
+    return (
+        <Alert variant="destructive">
+            <TriangleAlertIcon />
+            <AlertTitle>
+                {app.pooling ? 'The connection pooler didn’t start' : 'The connection pooler wasn’t removed'}
+            </AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-2 [&_p:not(:last-child)]:mb-0">
+                <p>{status.error}. Echowa tries again when it restarts, or turn pooling off and on.</p>
+                <SectionLink app={app} section="connection" onSelect={onSelect}>
+                    See connection pooling
+                </SectionLink>
+            </AlertDescription>
+        </Alert>
     );
 }
 

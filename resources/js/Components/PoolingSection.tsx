@@ -28,7 +28,7 @@ export function PoolingSection({ app, pooler, secrets }: { app: App; pooler: Poo
         <ConfigSection
             icon={WaypointsIcon}
             title="Connection pooling"
-            description="PgBouncer between your apps and the database, so many clients share a few connections. Off unless you turn it on."
+            description="Add PgBouncer between your apps and the database to reduce the amount of connections."
         >
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-1 basis-64 items-center gap-2.5">
@@ -74,22 +74,23 @@ export function PoolingSection({ app, pooler, secrets }: { app: App; pooler: Poo
                 </Alert>
             )}
             {on && <ConnectDetails connect={connect} secrets={secrets} url={(s) => s.pooled_url} />}
-            <Alert>
-                <InfoIcon />
-                <AlertTitle>Test your app through the pooler before you move it over</AlertTitle>
-                <AlertDescription>
-                    <p>
-                        The pooler gives each transaction whichever connection is free, so anything that relies on a
-                        session can fail through it: migrations, <code>LISTEN</code>, advisory locks, and{' '}
-                        <code>SET</code>, which can reach other clients (use <code>SET LOCAL</code>;{' '}
-                        <code>search_path</code> is kept per client). Run migrations on the direct URL.
-                    </p>
-                    <p>
-                        Laravel on PHP 8.3, or on an image with libpq older than 17, needs{' '}
-                        <code>PDO::ATTR_EMULATE_PREPARES =&gt; true</code> in its <code>pgsql</code> connection.
-                    </p>
-                </AlertDescription>
-            </Alert>
+            {!on && (
+                <Alert>
+                    <InfoIcon />
+                    <AlertTitle>Check your app before turning this on</AlertTitle>
+                    <AlertDescription>
+                        <p>
+                            Each query may use a different connection, so features that depend on one session can break:{' '}
+                            <code>LISTEN</code>, advisory locks and <code>SET</code> (use <code>SET LOCAL</code>{' '}
+                            instead). Run migrations on the direct URL.
+                        </p>
+                        <p>
+                            Laravel on PHP 8.3, or with libpq older than 17, also needs{' '}
+                            <code>PDO::ATTR_EMULATE_PREPARES =&gt; true</code> in its <code>pgsql</code> connection.
+                        </p>
+                    </AlertDescription>
+                </Alert>
+            )}
         </ConfigSection>
     );
 }
