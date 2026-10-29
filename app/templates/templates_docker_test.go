@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -151,10 +152,62 @@ func TestPostgresPooler(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(logs), "login attempt", "connections aren't logged")
 
+	// An app keeps querying through the pooler while the database
+	// redeploys. Between its tasks Docker's DNS doesn't know the
+	// database's name, so the pooler's logins fail, and on PgBouncer's
+	// defaults it then refuses everyone for up to 15 s after PostgreSQL is
+	// back (server_login_retry and dns_nxdomain_ttl).
+	type probe struct {
+		at         time.Time
+		direct, ok bool
+	}
+	var (
+		mu     sync.Mutex
+		probes []probe
+	)
 	before := pool.container()
+	query := func(direct bool) {
+		host, p := "127.0.0.1", port
+		if direct {
+			host, p = run.spec.Name, "5432"
+		}
+		out, err := exec.Command("docker", "exec", "-e", "PGPASSWORD="+password, "-e", "PGCONNECT_TIMEOUT=2", before,
+			"psql", "-h", host, "-p", p, "-U", user, "-d", user, "-tAc", "SELECT 1").CombinedOutput()
+		mu.Lock()
+		defer mu.Unlock()
+		probes = append(probes, probe{time.Now(), direct, err == nil && strings.TrimSpace(string(out)) == "1"})
+	}
+	querying, stop := context.WithCancel(run.ctx)
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			for querying.Err() == nil {
+				query(i == 0)
+			}
+		})
+	}
 	run.redeploy()
+	time.Sleep(20 * time.Second)
+	stop()
+	wg.Wait()
+	slices.SortFunc(probes, func(a, b probe) int { return a.at.Compare(b.at) })
+	var down, back, lastFailed time.Time
+	for _, p := range probes {
+		switch {
+		case p.direct && !p.ok && down.IsZero():
+			down = p.at
+		case p.direct && p.ok && !down.IsZero() && back.IsZero():
+			back = p.at
+		case !p.direct && !p.ok:
+			lastFailed = p.at
+		}
+	}
+	require.False(t, back.IsZero(), "PostgreSQL went away and came back during the redeploy")
+	t.Logf("PostgreSQL was unreachable for %s, and the pooler failed until %s after it was back",
+		back.Sub(down).Round(100*time.Millisecond), lastFailed.Sub(back).Round(100*time.Millisecond))
+	assert.Less(t, lastFailed.Sub(back), 3*time.Second, "the pooler signs in again as soon as PostgreSQL answers")
 	out, err = psql(password, "SELECT count(*) FROM pgbench_branches")
-	require.NoError(t, err, "the first query after the database's redeploy: %s", out)
+	require.NoError(t, err, "a query after the database's redeploy: %s", out)
 	assert.Equal(t, "1", strings.TrimSpace(out))
 	assert.Equal(t, before, pool.container(), "Swarm didn't replace the pooler's task")
 
@@ -162,6 +215,11 @@ func TestPostgresPooler(t *testing.T) {
 	// never restarts it for the database's sake.
 	out2, err := exec.Command("docker", "service", "scale", "--detach=false", run.spec.Name+"=0").CombinedOutput()
 	require.NoError(t, err, string(out2))
+	// scale returns while the task is still stopping.
+	require.Eventually(t, func() bool {
+		ids, err := exec.Command("docker", "ps", "-q", "--filter", "label=com.docker.swarm.service.name="+run.spec.Name).Output()
+		return err == nil && strings.TrimSpace(string(ids)) == ""
+	}, time.Minute, 200*time.Millisecond, "the database's container stopped")
 	out, err = pool.exec("sh", "-c", pooler.Healthcheck)
 	assert.NoError(t, err, "the healthcheck passes without the database: %s", out)
 }

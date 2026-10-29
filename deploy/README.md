@@ -451,6 +451,46 @@ for TLS, so set the client to require it as above.
 Turning it off, or changing the port, redeploys the database too: a few
 seconds without it.
 
+### Connection pooling for PostgreSQL
+
+A PostgreSQL app can run PgBouncer beside it, so many app processes
+share a few database connections. On the app's Connection tab, click
+**Enable connection pooling**. Echowa starts `echowa-<app>-pooler` on
+port 6432 (0.5 CPU, 128 MiB) and shows its connection details under
+Connect's: the same user, password and database, on the pooler's host.
+Copy the pooled URL into the apps that should use it. Nothing changes
+for an app until you do, and the direct URL keeps working.
+
+The pooler runs in transaction mode: a client holds a connection to
+PostgreSQL only while a transaction runs, which is how up to 1,000
+clients share 50 connections. Anything that relies on a session can
+fail through it, so test an app on the pooled URL before you move it
+over:
+
+| Feature | Through the pooler |
+|---|---|
+| Migrations | Run them on the direct URL. |
+| `LISTEN` and `NOTIFY` | Notifications are lost. Point listeners at the direct URL. For PostgREST, set `PGRST_DB_CHANNEL_ENABLED=false`. |
+| Advisory locks | A session lock stays with whichever connection took it. Use `pg_advisory_xact_lock`, which ends with the transaction. |
+| `SET` | Can reach other clients. Use `SET LOCAL` inside a transaction, or `ALTER ROLE <user> SET …`. `search_path` is kept per client. |
+| Prepared statements | Work with drivers that prepare in the protocol (libpq, pgx, PostgREST). Laravel on PHP 8.3, or on an image built against libpq older than 17, fails with `prepared statement "pdo_stmt_…" does not exist`: set `PDO::ATTR_EMULATE_PREPARES => true` in the `pgsql` connection's `options`. |
+
+The pooler opens at most 50 connections to PostgreSQL, out of its 100,
+which leaves the rest for direct connections, migrations and backups.
+It's only reachable from apps on the server; External access still
+publishes the database itself.
+
+A redeploy of the database interrupts queries for a few seconds through
+the pooler too, about as long as on the direct URL, and apps reconnect
+as they would to PostgreSQL. The pooler itself isn't restarted.
+
+If an app can't connect, open the database's Logs tab and pick
+**Pooler**: failed logins show there, such as `password authentication
+failed`. Connections that succeed aren't logged.
+
+**Turn off** removes the pooler, and apps still on the pooled URL lose
+their connection, so move them to the direct URL first.
+
 ### Upgrading Echowa
 
 Echowa checks for a new release every day. When there is one, **Settings,

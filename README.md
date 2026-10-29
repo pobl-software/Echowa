@@ -48,7 +48,8 @@ Start a database from a template and Echowa generates its passwords, gives it
 a volume that survives redeploys, and checks its health every minute. Link it
 to your app, copy the connection URL, and see what it's doing from the same
 page. You can also open it on a host port, over TLS, for a client outside the
-server.
+server, and put PgBouncer in front of PostgreSQL with one click when your apps
+open more connections than it should hold.
 
 <img src=".github/readme/databases.png" alt="Two cards. An app's databases: PostgreSQL 18, Redis 8 and MySQL 9.7, all running, with a hidden connection URL. A PostgreSQL database's connections, cache hits, commits and size, above its slowest queries." width="100%">
 

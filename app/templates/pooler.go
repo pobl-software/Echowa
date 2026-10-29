@@ -50,7 +50,13 @@ const PoolerServerEnv = "POOLER_SERVER"
 // password is never an argument, and a `"` in it is doubled, as the file's
 // format wants. Connections and disconnections aren't logged: the healthcheck and apps that connect per
 // request would fill the log with them. Nor is a stats line a minute, which would push
-// failed logins, what the Logs tab is for, out of its tail.
+// failed logins, what the Logs tab is for, out of its tail. While a database
+// redeploy has no task running, Docker's DNS doesn't know its name, so the
+// pooler's next login fails. PgBouncer then refuses every client for
+// server_login_retry and remembers the failed lookup for dns_nxdomain_ttl,
+// 15 s each by default: apps failed for 14 s through the pooler and 5 s
+// without it. At 1 s each, the pooler signs in again as soon as the name
+// resolves.
 var pgbouncer = &Pooler{
 	Image: "edoburu/pgbouncer:v1.26.1-p0@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624",
 	Port:  6432,
@@ -77,6 +83,8 @@ ignore_startup_parameters = extra_float_digits
 log_connections = 0
 log_disconnections = 0
 log_stats = 0
+server_login_retry = 1
+dns_nxdomain_ttl = 1
 EOF
 unset POSTGRES_PASSWORD
 exec pgbouncer "$dir/pgbouncer.ini"`},
