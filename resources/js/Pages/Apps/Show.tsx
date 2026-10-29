@@ -377,7 +377,7 @@ export default function AppsShow({
                         </ConfigPanel>
                     )}
 
-                    {section === 'backups' && backups && <AppBackups app={app} section={backups} />}
+                    {section === 'backups' && backups && <AppBackups app={app} section={backups} held={busy} />}
 
                     {section === 'docker' && (
                         <DockerConfig app={app} registries={registries} template={template ?? undefined} />

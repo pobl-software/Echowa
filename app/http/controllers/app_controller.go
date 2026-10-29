@@ -560,7 +560,7 @@ func (r *AppController) Deploy(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	if work := services.AppBusy(app.ID); work == services.WorkBackup || work == services.WorkRestore {
+	if work := services.AppBusy(app.ID); work != "" && work != services.WorkDeploy {
 		inertia.Flash(ctx, "info", fmt.Sprintf("Deployment #%d of %s queued. It starts once %s of %s has finished.", deployment.ID, ref, work.Describe(), app.Name))
 	} else {
 		inertia.Flash(ctx, "success", fmt.Sprintf("Deployment #%d of %s queued.", deployment.ID, ref))
@@ -579,7 +579,7 @@ func (r *AppController) Destroy(ctx http.Context) http.Response {
 	}
 	// A dump or restore would fail part way, and a restore could leave the
 	// new app's data half written.
-	if work := services.AppBusy(app.ID); work == services.WorkBackup || work == services.WorkRestore {
+	if work := services.AppBusy(app.ID); work != "" && work != services.WorkDeploy {
 		inertia.Flash(ctx, "error", fmt.Sprintf("%s of %s is running. Wait for it to finish, then delete the app.", capitalise(work.Describe()), app.Name))
 		return inertia.Back(ctx)
 	}

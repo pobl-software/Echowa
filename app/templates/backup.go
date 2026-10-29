@@ -33,6 +33,38 @@ type Backup struct {
 	// Compatible says whether a dump from server version from restores
 	// into server version to, both as ServerVersion reads them.
 	Compatible func(from, to string) bool
+	// Exports are the formats Export offers, the first by default.
+	Exports []Export
+}
+
+// Export is a format the database downloads in, straight to the browser
+// with nothing kept (ADR 0034).
+type Export struct {
+	// Format names it in the export's URL: "custom", "sql".
+	Format string `json:"format"`
+	Label  string `json:"label"`
+	// Hint says what reads it.
+	Hint string `json:"hint"`
+	// Dump writes the app's database to stdout in this format.
+	Dump      []string `json:"-"`
+	Extension string   `json:"extension"`
+	// Gzip has Echowa compress Dump's output. A gzip stream ends with a
+	// checksum, so a dump that fails part way can't pass for a whole one.
+	Gzip bool `json:"-"`
+}
+
+// FindExport is the export format named, or the first for "".
+func (b *Backup) FindExport(format string) (Export, bool) {
+	if format == "" && len(b.Exports) > 0 {
+		return b.Exports[0], true
+	}
+	for _, e := range b.Exports {
+		if e.Format == format {
+			return e, true
+		}
+	}
+
+	return Export{}, false
 }
 
 var (
@@ -94,30 +126,53 @@ func versionParts(v string, n int) ([]int, bool) {
 // PostgreSQL's commands connect over the container's socket as the
 // template's user, which needs no password (ADR 0027). The custom format
 // is compressed already, and pg_restore reads it from a pipe.
+var postgresDump = []string{"sh", "-c", `exec pg_dump -Fc -w -U "$POSTGRES_USER" -d "$POSTGRES_DB"`}
+
 var postgresBackup = &Backup{
 	Database: "POSTGRES_DB",
 	Version:  []string{"postgres", "-V"},
 	Ready: []string{"sh", "-c", `exec psql -w -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA ` +
 		`-c "SELECT (current_setting('listen_addresses') <> '')::int"`},
-	Dump: []string{"sh", "-c", `exec pg_dump -Fc -w -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
+	Dump: postgresDump,
 	Restore: []string{"sh", "-c", `exec pg_restore -w -U "$POSTGRES_USER" -d "$POSTGRES_DB" ` +
 		`--clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error`},
 	Extension:  "dump",
 	Atomic:     true,
 	Compatible: sameOrNewer(1),
+	Exports: []Export{
+		{
+			Format: "custom", Label: "Custom format",
+			Hint: "For pg_restore, or Restore in pgAdmin, of this server's major version or newer.",
+			Dump: postgresDump, Extension: "dump",
+		},
+		{
+			// Without owners or grants, it loads as whichever user runs it.
+			Format: "sql", Label: "Plain SQL",
+			Hint:      "For psql, into any database. Owners and privileges are left out.",
+			Dump:      []string{"sh", "-c", `exec pg_dump -w -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges`},
+			Extension: "sql.gz", Gzip: true,
+		},
+	},
 }
 
 // MySQL's connect over the socket as root, whose password is in the env.
 // The dump names no database, so it restores into another app's.
+var mysqlDump = []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysqldump -u root ` +
+	`--single-transaction --routines --triggers --events --set-gtid-purged=OFF --no-tablespaces --hex-blob "$MYSQL_DATABASE"`}
+
 var mysqlBackup = &Backup{
 	Database: "MYSQL_DATABASE",
 	Version:  []string{"mysqld", "--version"},
 	Ready: []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root -N -B ` +
 		`-e "SELECT 1 - @@skip_networking"`},
-	Dump: []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysqldump -u root ` +
-		`--single-transaction --routines --triggers --events --set-gtid-purged=OFF --no-tablespaces --hex-blob "$MYSQL_DATABASE"`},
+	Dump:       mysqlDump,
 	Restore:    []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root "$MYSQL_DATABASE"`},
 	Extension:  "sql.gz",
 	Gzip:       true,
 	Compatible: sameOrNewer(2),
+	Exports: []Export{{
+		Format: "sql", Label: "SQL",
+		Hint: "For mysql, or Import in phpMyAdmin.",
+		Dump: mysqlDump, Extension: "sql.gz", Gzip: true,
+	}},
 }

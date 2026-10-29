@@ -64,7 +64,11 @@ func TestBackupCommandsKeepSecretsOutOfTheirArguments(t *testing.T) {
 				"the database is named in the template's env")
 			assert.NotEmpty(t, b.Extension)
 			assert.NotNil(t, b.Compatible)
-			for _, cmd := range [][]string{b.Dump, b.Restore} {
+			cmds := [][]string{b.Dump, b.Restore}
+			for _, e := range b.Exports {
+				cmds = append(cmds, e.Dump)
+			}
+			for _, cmd := range cmds {
 				require.Equal(t, []string{"sh", "-c"}, cmd[:2], "the env is read inside sh -c")
 				require.Len(t, cmd, 3)
 				assert.True(t, strings.HasPrefix(cmd[2], "exec ") || strings.Contains(cmd[2], "; exec "),
@@ -75,4 +79,32 @@ func TestBackupCommandsKeepSecretsOutOfTheirArguments(t *testing.T) {
 	}
 	redis, _ := Find("redis")
 	assert.Nil(t, redis.Backup, "Redis isn't backed up")
+}
+
+func TestEveryBackupOffersAnExport(t *testing.T) {
+	for _, tmpl := range All() {
+		if tmpl.Backup == nil {
+			continue
+		}
+		t.Run(tmpl.Slug, func(t *testing.T) {
+			b := tmpl.Backup
+			require.NotEmpty(t, b.Exports, "the page offers the first by default")
+			first, ok := b.FindExport("")
+			require.True(t, ok)
+			assert.Equal(t, b.Exports[0], first)
+			formats := map[string]bool{}
+			for _, e := range b.Exports {
+				assert.False(t, formats[e.Format], "%s is offered once", e.Format)
+				formats[e.Format] = true
+				got, ok := b.FindExport(e.Format)
+				assert.True(t, ok)
+				assert.Equal(t, e, got)
+				assert.NotEmpty(t, e.Label)
+				assert.NotEmpty(t, e.Hint)
+				assert.Equal(t, e.Gzip, strings.HasSuffix(e.Extension, ".gz"), "%s's extension says whether it's gzipped", e.Format)
+			}
+			_, ok = b.FindExport("tar")
+			assert.False(t, ok)
+		})
+	}
 }

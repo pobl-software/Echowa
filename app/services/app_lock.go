@@ -6,19 +6,25 @@ import (
 	"time"
 )
 
-// AppWork is what holds an app's lock. A deploy, a backup and a restore of
-// one app never overlap (ADR 0034): a dump during a deploy could read from
-// a task that's stopping, and a restore during one could write to it.
+// AppWork is what holds an app's lock. A deploy, a backup, a restore and
+// an export of one app never overlap (ADR 0034): a dump during a deploy
+// could read from a task that's stopping, and a restore during one could
+// write to it.
 type AppWork string
 
 const (
 	WorkDeploy  AppWork = "deploy"
 	WorkBackup  AppWork = "backup"
 	WorkRestore AppWork = "restore"
+	WorkExport  AppWork = "export"
 )
 
-// Describe is the work as the pages name it: "a deploy", "a backup".
+// Describe is the work as the pages name it: "a deploy", "an export".
 func (w AppWork) Describe() string {
+	if w == WorkExport {
+		return "an export"
+	}
+
 	return "a " + string(w)
 }
 

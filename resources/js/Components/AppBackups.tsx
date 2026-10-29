@@ -39,6 +39,7 @@ import { duration, formatDateTime, formatInZone, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type {
     App,
+    AppWork,
     BackupDetail,
     BackupFailure,
     BackupSchedule,
@@ -64,19 +65,21 @@ const presets: Preset[] = [
 ];
 
 // AppBackups is a template database's Backups section (ADR 0034): back up
-// now to a storage location, the backups made so far, and restores.
-export function AppBackups({ app, section }: { app: App; section: BackupsSection }) {
+// now to a storage location, export, the backups made so far, and
+// restores. held is what holds the app's lock, the page's busy prop.
+export function AppBackups({ app, section, held }: { app: App; section: BackupsSection; held: AppWork }) {
     const [location, setLocation] = useState<number | null>(() => section.locations[0]?.id ?? null);
     const [starting, setStarting] = useState(false);
     const [opened, setOpened] = useState<BackupSummary | null>(null);
     const [restoring, setRestoring] = useState<RestoreSource | null>(null);
 
     // A running backup's size and a restore's progress go up every few
-    // seconds, and a schedule's backup starts on the minute.
+    // seconds, a schedule's backup starts on the minute, and Export waits
+    // for whatever holds the app.
     const running = section.backups.some((b) => b.status === 'running');
     const restore = section.restores.find((r) => r.status === 'running');
     const scheduled = section.schedules.some((s) => s.enabled);
-    const busy = running || restore !== undefined;
+    const busy = running || restore !== undefined || held !== '';
     useEffect(() => {
         if (!busy && !scheduled) {
             return;
@@ -87,17 +90,20 @@ export function AppBackups({ app, section }: { app: App; section: BackupsSection
 
     if (section.locations.length === 0) {
         return (
-            <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
-                <span className="mb-4 flex size-11 items-center justify-center rounded-xl border bg-card">
-                    <ArchiveIcon className="size-5 text-muted-foreground" />
-                </span>
-                <h2 className="font-medium">No storage yet</h2>
-                <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                    Backups of {app.name} go to an S3 bucket. Add one in Settings, then come back to back up.
-                </p>
-                <Link href="/settings" className={buttonVariants({ className: 'mt-5' })}>
-                    Add S3 storage
-                </Link>
+            <div className="space-y-6">
+                <ExportPanel app={app} section={section} held={held} />
+                <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
+                    <span className="mb-4 flex size-11 items-center justify-center rounded-xl border bg-card">
+                        <ArchiveIcon className="size-5 text-muted-foreground" />
+                    </span>
+                    <h2 className="font-medium">No storage yet</h2>
+                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                        Backups of {app.name} go to an S3 bucket. Add one in Settings, then come back to back up.
+                    </p>
+                    <Link href="/settings" className={buttonVariants({ className: 'mt-5' })}>
+                        Add S3 storage
+                    </Link>
+                </div>
             </div>
         );
     }
@@ -149,6 +155,8 @@ export function AppBackups({ app, section }: { app: App; section: BackupsSection
                     {running && <p className="text-sm text-muted-foreground">A backup is running.</p>}
                 </div>
             </Panel>
+
+            <ExportPanel app={app} section={section} held={held} />
 
             <Panel
                 title="Schedules"
@@ -401,6 +409,69 @@ function BackupOutput({ app, backup, onClose }: { app: App; backup: BackupSummar
                 )}
             </DialogContent>
         </Dialog>
+    );
+}
+
+// ExportPanel downloads the database straight to this browser, in a format
+// a local tool reads, with no storage location and nothing kept (ADR 0034).
+// A plain link, not a download one: the server's refusal, while a deploy
+// holds the app say, then shows instead of a failed download.
+function ExportPanel({ app, section, held }: { app: App; section: BackupsSection; held: AppWork }) {
+    const [format, setFormat] = useState(() => section.exports[0]?.format ?? '');
+    const chosen = section.exports.find((e) => e.format === format) ?? section.exports[0];
+    if (!chosen) {
+        return null;
+    }
+
+    return (
+        <Panel
+            title="Export"
+            description={
+                <>
+                    Downloads the <code className="font-mono text-xs">{section.database}</code> database to this browser
+                    as it&apos;s dumped. Nothing is kept on the server or in S3. Deploys of {app.name} wait for it to
+                    finish.
+                </>
+            }
+        >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                {section.exports.length > 1 && (
+                    <Select
+                        items={section.exports.map((e) => ({ value: e.format, label: `${e.label} (.${e.extension})` }))}
+                        value={chosen.format}
+                        onValueChange={(value) => value && setFormat(value)}
+                    >
+                        <SelectTrigger aria-label="Format" className="w-full sm:w-64">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {section.exports.map((e) => (
+                                <SelectItem key={e.format} value={e.format}>
+                                    {e.label}
+                                    <span className="font-mono text-xs text-muted-foreground">.{e.extension}</span>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+                {held ? (
+                    <Button disabled>
+                        <DownloadIcon />
+                        Export
+                    </Button>
+                ) : (
+                    <a href={`/apps/${app.id}/export?format=${chosen.format}`} className={buttonVariants()}>
+                        <DownloadIcon />
+                        Export
+                    </a>
+                )}
+                <p className="text-sm text-muted-foreground">
+                    {held
+                        ? `${held === 'export' ? 'An export' : `A ${held}`} of ${app.name} is running. Export once it has finished.`
+                        : chosen.hint}
+                </p>
+            </div>
+        </Panel>
     );
 }
 

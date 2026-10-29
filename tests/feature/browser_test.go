@@ -84,6 +84,8 @@ func (b *browser) request(method, uri string, data map[string]any, isInertia boo
 	switch method {
 	case nethttp.MethodGet:
 		resp, err = req.Get(uri)
+	case nethttp.MethodHead:
+		resp, err = req.Head(uri)
 	case nethttp.MethodPost:
 		resp, err = req.Post(uri, &body)
 	case nethttp.MethodPut:

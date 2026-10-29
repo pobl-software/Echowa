@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	nethttp "net/http"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/goravel/framework/contracts/http"
 
 	"goravel/app/backups"
+	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/inertia"
 	"goravel/app/models"
@@ -111,6 +114,55 @@ func (r *BackupController) Download(ctx http.Context) http.Response {
 		_, err := io.Copy(w, body)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			facades.Log().Error(fmt.Errorf("download backup %d: %w", rec.ID, err))
+		}
+		return nil
+	})
+}
+
+// Export dumps the app's database in the ?format= asked for, the first by
+// default, straight to the browser (ADR 0034). It's in routes/streams.go,
+// past the request timeout. The page links to it without download, so an
+// error status shows its message rather than a failed download.
+func (r *BackupController) Export(ctx http.Context) http.Response {
+	// Goravel answers HEAD with the GET route, which would dump the whole
+	// database for nothing.
+	if ctx.Request().Method() != nethttp.MethodGet {
+		return ctx.Response().String(http.StatusMethodNotAllowed, "")
+	}
+	var app models.App
+	if resp := findBackupApp(ctx, &app); resp != nil {
+		return resp
+	}
+	format, ok := services.AppBackup(&app).FindExport(ctx.Request().Query("format"))
+	if !ok {
+		return notFound(ctx)
+	}
+	ctx.Response().Header("Cache-Control", "no-store")
+	export, err := services.StartExport(ctx, &app, format, time.Now())
+	var busy *services.ExportBusy
+	var failed *docker.ExecError
+	switch {
+	case errors.As(err, &busy):
+		return ctx.Response().String(http.StatusConflict, fmt.Sprintf("%s of %s is running. Export once it has finished.", capitalise(busy.Holder.Describe()), app.Name))
+	case errors.Is(err, docker.ErrNotRunning):
+		return ctx.Response().String(http.StatusServiceUnavailable, app.Name+" has no running task to export from.")
+	case errors.As(err, &failed):
+		return ctx.Response().String(http.StatusBadGateway, fmt.Sprintf("The dump exited with status %d.\n\n%s", failed.ExitCode, failed.Stderr))
+	case err != nil:
+		return ctx.Response().String(http.StatusBadGateway, "The export failed: "+err.Error())
+	}
+
+	ctx.Response().Header("Content-Type", "application/octet-stream")
+	ctx.Response().Header("Content-Disposition", `attachment; filename="`+export.Filename+`"`)
+
+	return ctx.Response().Stream(http.StatusOK, func(w http.StreamWriter) error {
+		defer func() { _ = export.Close() }()
+		_, _ = io.Copy(w, export)
+		if err := export.Err(); err != nil && ctx.Err() == nil {
+			facades.Log().Error(fmt.Errorf("export %s: %w", app.Name, err))
+			// Without the response's last chunk, the browser marks the
+			// download failed instead of keeping a cut-off dump.
+			panic(nethttp.ErrAbortHandler)
 		}
 		return nil
 	})

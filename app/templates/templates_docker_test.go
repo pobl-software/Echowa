@@ -20,6 +20,7 @@ import (
 	"io"
 	"maps"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -407,6 +408,9 @@ var backupProbes = map[string]struct {
 	create string
 	// binary prints row 1's data as hex.
 	binary string
+	// load reads an export that isn't the backup's own dump on stdin, as
+	// someone loading it elsewhere would.
+	load []string
 }{
 	"postgres": {
 		sql: func(r *templateRun, statements string) (string, error) {
@@ -417,6 +421,7 @@ var backupProbes = map[string]struct {
 			INSERT INTO kept SELECT n, encode(sha256(n::text::bytea), 'hex'), sha256(n::text::bytea) FROM generate_series(3, 5000) n;
 			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
 		binary: "SELECT encode(data, 'hex') FROM kept WHERE id = 1",
+		load:   []string{"sh", "-c", `exec psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"`},
 	},
 	"mysql": {
 		sql: func(r *templateRun, statements string) (string, error) {
@@ -490,6 +495,21 @@ func TestTemplatesBackUpAndRestore(t *testing.T) {
 			_, code, stderr = source.stream(b.Restore, bytes.NewReader(dump))
 			require.Equal(t, 0, code, stderr)
 			assertKept(source, "restored over changed data")
+
+			for _, export := range b.Exports {
+				if slices.Equal(export.Dump, b.Dump) {
+					continue
+				}
+				require.NotNil(t, probe.load, "add a load for %s's %s export", tmpl.Slug, export.Format)
+				out, code, stderr := source.stream(export.Dump, nil)
+				require.Equal(t, 0, code, stderr)
+				assert.NotContains(t, string(out), "OWNER TO", "the %s export names no owners", export.Format)
+				elsewhere := deployTemplate(t, tmpl.Slug, false)
+				inspected(elsewhere)
+				_, code, stderr = elsewhere.stream(probe.load, bytes.NewReader(out))
+				require.Equal(t, 0, code, stderr)
+				assertKept(elsewhere, "the "+export.Format+" export loaded into a fresh app, with its own database and user")
+			}
 
 			_, code, stderr = target.stream(b.Restore, strings.NewReader("this is not a dump\n"))
 			assert.NotEqual(t, 0, code, "a dump that isn't one fails")

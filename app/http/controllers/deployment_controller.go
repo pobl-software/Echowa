@@ -100,7 +100,7 @@ func waitingFor(app *models.App, d *models.Deployment) string {
 	if d.Status != models.DeploymentQueued {
 		return ""
 	}
-	if work := services.AppBusy(app.ID); work == services.WorkBackup || work == services.WorkRestore {
+	if work := services.AppBusy(app.ID); work != "" && work != services.WorkDeploy {
 		return fmt.Sprintf("Waiting for %s of this app to finish.", work.Describe())
 	}
 

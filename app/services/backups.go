@@ -459,6 +459,8 @@ type BackupsSection struct {
 	Failures      []BackupFailure `json:"failures"`
 	// Restores are the newest few.
 	Restores []RestoreSummary `json:"restores"`
+	// Exports are the formats the database downloads in.
+	Exports []templates.Export `json:"exports"`
 }
 
 // AppBackups is the app's Backups section, with its newest limit backups.
@@ -482,7 +484,7 @@ func AppBackups(ctx context.Context, app *models.App, limit int, now time.Time) 
 		return nil, err
 	}
 
-	section := &BackupsSection{Database: env[b.Database], Locations: []StorageChoice{}, Backups: []BackupSummary{}}
+	section := &BackupsSection{Database: env[b.Database], Locations: []StorageChoice{}, Backups: []BackupSummary{}, Exports: b.Exports}
 	if section.Schedules, err = backupSchedules(ctx, app.ID, now); err != nil {
 		return nil, err
 	}

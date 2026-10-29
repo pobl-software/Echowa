@@ -16,10 +16,11 @@ import {
 import { FieldDescription } from '@/Components/ui/field';
 import type { App, AppWork } from '@/types/models';
 
-// Deploys the default tag, or a tag or digest typed in. While a backup or
-// restore holds the app (ADR 0034), it says the deploy will wait for it.
+// Deploys the default tag, or a tag or digest typed in. While a backup,
+// restore or export holds the app (ADR 0034), it says the deploy will wait
+// for it.
 export function DeployDialog({ app, busy = '' }: { app: App; busy?: AppWork }) {
-    const waitsFor = busy === 'backup' || busy === 'restore' ? busy : null;
+    const waitsFor = !busy || busy === 'deploy' ? null : busy === 'export' ? 'An export' : `A ${busy}`;
     const [open, setOpen] = useState(false);
     const form = useForm({ ref: app.default_tag });
 
@@ -33,7 +34,7 @@ export function DeployDialog({ app, busy = '' }: { app: App; busy?: AppWork }) {
             <DialogTrigger
                 render={
                     <Button
-                        title={waitsFor ? `A ${waitsFor} of ${app.name} is running. A deploy waits for it.` : undefined}
+                        title={waitsFor ? `${waitsFor} of ${app.name} is running. A deploy waits for it.` : undefined}
                     />
                 }
             >
@@ -68,7 +69,7 @@ export function DeployDialog({ app, busy = '' }: { app: App; busy?: AppWork }) {
                         <p className="flex gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
                             <HourglassIcon className="mt-0.5 size-4 shrink-0 text-warning" />
                             <span>
-                                A {waitsFor} of {app.name} is running. This deploy is queued now and starts once it has
+                                {waitsFor} of {app.name} is running. This deploy is queued now and starts once it has
                                 finished.
                             </span>
                         </p>

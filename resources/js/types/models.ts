@@ -182,10 +182,21 @@ export interface BackupsSection {
     failures: BackupFailure[];
     // The newest few restores.
     restores: RestoreSummary[];
+    // The formats the database downloads in, the first by default.
+    exports: ExportFormat[];
+}
+
+// templates.Export: a format the database downloads in (ADR 0034).
+export interface ExportFormat {
+    format: string;
+    label: string;
+    // What reads it.
+    hint: string;
+    extension: string;
 }
 
 // services.AppWork: what holds an app's lock, or empty (ADR 0034).
-export type AppWork = '' | 'deploy' | 'backup' | 'restore';
+export type AppWork = '' | 'deploy' | 'backup' | 'restore' | 'export';
 
 // models.RestoreStatus (ADR 0034).
 export type RestoreStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';

@@ -2,6 +2,7 @@ package routes
 
 import (
 	"fmt"
+	nethttp "net/http"
 	"runtime/debug"
 
 	"github.com/goravel/framework/contracts/http"
@@ -23,6 +24,11 @@ func Web() {
 	// default logs the request's headers and body too, which carry the
 	// session cookie and any password, token or env value being submitted.
 	facades.Route().Recover(func(ctx http.Context, err any) {
+		// A stream that can't finish cuts the connection off this way,
+		// so the browser sees a failed download rather than a whole one.
+		if err == nethttp.ErrAbortHandler {
+			panic(err)
+		}
 		facades.Log().Error(fmt.Errorf("panic serving %s %s: %v\n%s", ctx.Request().Method(), ctx.Request().OriginPath(), err, debug.Stack()))
 		ctx.Request().Abort(http.StatusInternalServerError)
 	})
