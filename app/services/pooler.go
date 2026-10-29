@@ -273,12 +273,13 @@ type PoolerStatus struct {
 	Syncing bool `json:"syncing"`
 	// Error is why the last sync failed, until one succeeds.
 	Error string `json:"error"`
-	// Service is the pooler's Swarm service as Docker reports it now.
-	Service LiveStatus `json:"service"`
+	// Service is the pooler's Swarm service as Docker reports it now. Nil
+	// while pooling is off, when an app called <app>-pooler could own the
+	// service name.
+	Service *LiveStatus `json:"service"`
 }
 
-// AppPoolerStatus is the app's pooler's status. Ask only while pooling is
-// on: otherwise an app called <app>-pooler could own the service name.
+// AppPoolerStatus is the app's pooler's status.
 func AppPoolerStatus(ctx context.Context, app *models.App) PoolerStatus {
 	var status PoolerStatus
 	poolerSyncs.Lock()
@@ -287,7 +288,10 @@ func AppPoolerStatus(ctx context.Context, app *models.App) PoolerStatus {
 		status.Error = state.err
 	}
 	poolerSyncs.Unlock()
-	status.Service = serviceStatus(ctx, app.PoolerServiceName())
+	if app.Pooling {
+		service := serviceStatus(ctx, app.PoolerServiceName())
+		status.Service = &service
+	}
 
 	return status
 }

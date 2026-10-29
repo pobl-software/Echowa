@@ -9,7 +9,7 @@ import { AppMetrics } from '@/Components/AppMetrics';
 import { AppNavAside, AppNavTabs, type AppSection, appSections, sectionsFor } from '@/Components/AppNav';
 import { ConfigPanel } from '@/Components/ConfigPanel';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
-import { ConnectSection } from '@/Components/ConnectSection';
+import { ConnectSection, useConnectSecrets } from '@/Components/ConnectSection';
 import { DatabaseGlance, DatabaseMetrics, DatabaseWarnings } from '@/Components/DatabaseMetrics';
 import { DeployDialog } from '@/Components/DeployDialog';
 import { DeploymentsTable } from '@/Components/DeploymentsTable';
@@ -19,6 +19,7 @@ import { ExternalAccessSection } from '@/Components/ExternalAccessSection';
 import { LinkedDatabases } from '@/Components/LinkedDatabases';
 import { Page } from '@/Components/Page';
 import { Panel, Stats } from '@/Components/Panel';
+import { PoolingSection } from '@/Components/PoolingSection';
 import { OOMAlert, ResourceLimits } from '@/Components/ResourceLimits';
 import { ScheduledTaskAlert, ScheduledTasks } from '@/Components/ScheduledTasks';
 import { DeploymentStatusBadge, LiveStatusBadge } from '@/Components/StatusBadge';
@@ -38,6 +39,7 @@ import {
     type LinkedDatabase,
     type LiveStatus,
     type LogDeploy,
+    type PoolerInfo,
     type RegistryOption,
     type ResourcesInfo,
     runningStatuses,
@@ -61,6 +63,8 @@ interface Props {
     // Null for a custom app.
     template: TemplateOption | null;
     connect: ConnectInfo | null;
+    // The Connection section's pooling, for a PostgreSQL app (ADR 0035).
+    pooler: PoolerInfo | null;
     // The Metrics section's: range picker choices, charts and the newest
     // reading (null before the first, or while no task runs).
     ranges: string[];
@@ -119,6 +123,7 @@ export default function AppsShow({
     resources,
     template,
     connect,
+    pooler,
     ranges,
     series,
     metrics,
@@ -148,6 +153,8 @@ export default function AppsShow({
         return () => window.clearInterval(id);
     }, [busy, section]);
     const volumes = app.volumes ?? [];
+    // The Connection section's Connect and pooling share one fetch.
+    const connectSecrets = useConnectSecrets(app.id, app.pooling);
 
     // While a deployment runs, refresh its status and the service's.
     const deploying = deployments.some((d) => runningStatuses.includes(d.status));
@@ -372,7 +379,8 @@ export default function AppsShow({
 
                     {section === 'connection' && template && (
                         <ConfigPanel>
-                            {connect && <ConnectSection appId={app.id} connect={connect} />}
+                            {connect && <ConnectSection connect={connect} secrets={connectSecrets} />}
+                            {pooler && <PoolingSection app={app} pooler={pooler} secrets={connectSecrets} />}
                             {!template.http && <ExternalAccessSection app={app} template={template} />}
                         </ConfigPanel>
                     )}

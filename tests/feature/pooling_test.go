@@ -123,9 +123,10 @@ func (s *PoolingTestSuite) TestTheSwitchStartsThePoolerInTheBackgroundAndRemoves
 		"POSTGRES_DB":             env["POSTGRES_DB"],
 		"POSTGRES_PASSWORD":       env["POSTGRES_PASSWORD"],
 	}, specs[0].Env)
-	status := services.AppPoolerStatus(ctx, app)
+	status := services.AppPoolerStatus(ctx, s.reload(app.ID))
 	s.False(status.Syncing)
 	s.Empty(status.Error)
+	s.Require().NotNil(status.Service)
 	s.Equal(services.StateRunning, status.Service.State)
 	_, show := b.visit(page)
 	s.Equal("Starting the connection pooler.", show.Flash["success"])
@@ -309,4 +310,48 @@ func (s *PoolingTestSuite) TestBootRestoresPoolersAndRemovesOrphans() {
 
 	s.Equal([]docker.ServiceRef{{Name: "echowa-shop-pooler", App: "shop"}}, s.poolers())
 	s.Len(s.poolerDeploys("echowa-shop-pooler"), 2)
+}
+
+func (s *PoolingTestSuite) TestTheConnectionTabShowsThePoolerAndRevealsItsURL() {
+	ctx := context.Background()
+	app := s.deployed("postgres", "shop")
+	env, err := services.EnvVars(ctx, app.ID)
+	s.Require().NoError(err)
+	user, password, db := env["POSTGRES_USER"], env["POSTGRES_PASSWORD"], env["POSTGRES_DB"]
+	b := signedIn(s.T(), &s.TestCase)
+	b.forbid(password)
+	page := fmt.Sprintf("/apps/%d?tab=connection", app.ID)
+	reveal := func() map[string]any {
+		resp := b.request(nethttp.MethodPost, fmt.Sprintf("/apps/%d/connect/reveal", app.ID), map[string]any{}, false, map[string]string{
+			"X-XSRF-TOKEN": b.cookieValue(middlewareXsrfCookie),
+			"Accept":       "application/json",
+		})
+		resp.AssertOk()
+		body, err := resp.Json()
+		s.Require().NoError(err)
+		return body
+	}
+
+	_, show := b.visit(page)
+	pooler := show.Props["pooler"].(map[string]any)
+	s.Equal(map[string]any{
+		"host": "echowa-shop-pooler", "port": float64(6432), "user": user,
+		"preview": "postgres://POSTGRES_USER:POSTGRES_PASSWORD@echowa-shop-pooler:6432/POSTGRES_DB",
+	}, pooler["connect"])
+	s.Equal(map[string]any{"syncing": false, "error": "", "service": nil}, pooler["status"])
+	s.Nil(reveal()["pooled_url"], "no pooled URL while pooling is off")
+
+	s.Require().NoError(services.SetPooling(ctx, app, true))
+	services.WaitForPoolers()
+	_, show = b.visit(page)
+	status := show.Props["pooler"].(map[string]any)["status"].(map[string]any)
+	s.Equal(services.StateRunning, status["service"].(map[string]any)["state"])
+	s.Equal(true, show.Props["app"].(map[string]any)["pooling"])
+	secrets := reveal()
+	s.Equal(fmt.Sprintf("postgres://%s:%s@echowa-shop-pooler:6432/%s", user, password, db), secrets["pooled_url"])
+	s.Equal(fmt.Sprintf("postgres://%s:%s@echowa-shop:5432/%s", user, password, db), secrets["url"])
+
+	mysql := s.deployed("mysql", "cms")
+	_, show = b.visit(fmt.Sprintf("/apps/%d?tab=connection", mysql.ID))
+	s.Nil(show.Props["pooler"])
 }

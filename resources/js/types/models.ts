@@ -389,6 +389,23 @@ export interface ConnectInfo {
     preview: string;
 }
 
+// services.PoolerStatus: an app's connection pooler (ADR 0035).
+export interface PoolerStatus {
+    // Echowa is starting, updating or removing it.
+    syncing: boolean;
+    // Why the last start, update or removal failed, until one succeeds.
+    error: string;
+    // The pooler's service as Docker reports it; null while pooling is off.
+    service: LiveStatus | null;
+}
+
+// controllers.PoolerInfo: the Connection section's pooling, for a
+// PostgreSQL app. The pooled URL comes from POST /apps/{id}/connect/reveal.
+export interface PoolerInfo {
+    connect: ConnectInfo;
+    status: PoolerStatus;
+}
+
 // models.App. The webhook secret is never sent.
 export interface App {
     id: number;
@@ -414,6 +431,8 @@ export interface App {
     // Whether a template database that needs a switch for it collects its
     // slow queries (ADR 0027).
     slow_queries: boolean;
+    // Whether a PostgreSQL app runs its connection pooler (ADR 0035).
+    pooling: boolean;
     // Each task's limits; null uses the default.
     cpu_millicores: number | null;
     memory_mib: number | null;

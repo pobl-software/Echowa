@@ -120,6 +120,15 @@ type ConnectInfo struct {
 	Preview string `json:"preview"`
 }
 
+// PoolerInfo is the Connection tab's pooling section, for an app whose
+// template runs a connection pooler (ADR 0035).
+type PoolerInfo struct {
+	// Connect is how other apps reach the database through the pooler.
+	// ConnectReveal returns its URL as pooled_url while pooling is on.
+	Connect ConnectInfo           `json:"connect"`
+	Status  services.PoolerStatus `json:"status"`
+}
+
 // DatabaseChoices is what the Databases tab can add: a new database from a
 // template, or an existing one not linked yet.
 type DatabaseChoices struct {
@@ -284,6 +293,20 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 		"resources":  resourcesProps(ctx),
 		"template":   templateProp,
 		"connect":    connect,
+		// The Connection section polls it while the pooler starts or goes.
+		"pooler": func(c context.Context) (any, error) {
+			tmpl := appTemplate(&app)
+			if tmpl == nil || tmpl.Pooler == nil || connect == nil {
+				return nil, nil
+			}
+			return PoolerInfo{
+				Connect: ConnectInfo{
+					Host: app.PoolerServiceName(), Port: tmpl.Pooler.Port, User: connect.User,
+					Preview: tmpl.ConnectPreview(app.PoolerServiceName(), tmpl.Pooler.Port),
+				},
+				Status: services.AppPoolerStatus(c, &app),
+			}, nil
+		},
 		// The Metrics section's, worked out only when asked for, like the
 		// Server page's (ADR 0024).
 		"ranges": metricRanges(),
@@ -719,8 +742,9 @@ func (r *AppController) EnvReveal(ctx http.Context) http.Response {
 }
 
 // ConnectReveal returns the URL other apps connect to a template app with,
-// password included, and the password on its own. Like EnvReveal, it's
-// plain JSON, never a page prop.
+// password included, and the password on its own. While pooling is on, it
+// also returns the URL through the pooler. Like EnvReveal, it's plain JSON,
+// never a page prop.
 func (r *AppController) ConnectReveal(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findOr404(ctx, "app", &app); resp != nil {
@@ -736,9 +760,14 @@ func (r *AppController) ConnectReveal(ctx http.Context) http.Response {
 	}
 
 	_, password := tmpl.ConnectCredentials(app.ServiceName(), app.Port, env)
+	var pooled *string
+	if app.Pooling && tmpl.Pooler != nil {
+		url := tmpl.Connect(app.PoolerServiceName(), tmpl.Pooler.Port, env)
+		pooled = &url
+	}
 
 	return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, http.Json{
-		"url": tmpl.Connect(app.ServiceName(), app.Port, env), "password": password,
+		"url": tmpl.Connect(app.ServiceName(), app.Port, env), "password": password, "pooled_url": pooled,
 	})
 }
 
