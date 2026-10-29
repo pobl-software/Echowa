@@ -32,7 +32,7 @@ func PollAppStatus(ctx context.Context, now time.Time) error {
 	}
 	statuses := make(map[uint]LiveStatus, len(apps))
 	for _, app := range apps {
-		statuses[app.ID] = serviceStatus(ctx, &app)
+		statuses[app.ID] = serviceStatus(ctx, app.ServiceName())
 	}
 
 	short.Lock()

@@ -241,6 +241,11 @@ func run(ctx context.Context, d *models.Deployment) error {
 		if _, err := facades.Orm().WithContext(ctx).Query().Model(&app).Update("current_deployment_id", d.ID); err != nil {
 			return err
 		}
+		// The pooler reads the database's credentials from the env, which
+		// only a deploy applies (ADR 0035).
+		if app.Pooling {
+			services.StartPoolerSync(&app)
+		}
 	case docker.OutcomeRolledBack:
 		message := "Swarm rolled the update back: " + swarmMessage(result)
 		r.log("%s The previous version is still running.", message)

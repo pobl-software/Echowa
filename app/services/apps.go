@@ -105,12 +105,17 @@ func RotateWebhookSecret(ctx context.Context, app *models.App) error {
 }
 
 // DeleteApp deletes the app with its env vars, deployments and metrics.
-// Removing the Swarm service is the caller's job.
+// Removing the Swarm service and pooler is the caller's job. A pooler sync
+// that was already running could start the pooler again, so one more sync
+// runs behind it and removes it.
 func DeleteApp(ctx context.Context, app *models.App) error {
 	if _, err := facades.Orm().WithContext(ctx).Query().Delete(app); err != nil {
 		return err
 	}
 	deleteAppMetrics(ctx, app.ID)
+	if poolerSyncing(app.ID) {
+		StartPoolerSync(app)
+	}
 
 	return nil
 }

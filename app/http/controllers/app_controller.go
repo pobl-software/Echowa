@@ -569,9 +569,10 @@ func (r *AppController) Deploy(ctx http.Context) http.Response {
 	return inertia.Redirect(ctx, fmt.Sprintf("/apps/%d/deployments/%d", app.ID, deployment.ID))
 }
 
-// Destroy removes the Swarm service first, so a failure there leaves the
-// app in place to try again rather than an orphaned service. Its volumes go
-// last, in the background, once Swarm has stopped the tasks using them.
+// Destroy removes the Swarm services first, the pooler's then the app's,
+// so a failure there leaves the app in place to try again rather than an
+// orphaned service. Its volumes go last, in the background, once Swarm has
+// stopped the tasks using them.
 func (r *AppController) Destroy(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findOr404(ctx, "app", &app, "Volumes"); resp != nil {
@@ -584,6 +585,11 @@ func (r *AppController) Destroy(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 
+	if err := services.RemovePooler(ctx, &app); err != nil {
+		facades.Log().Error(fmt.Errorf("delete app %s: %w", app.Name, err))
+		inertia.Flash(ctx, "error", "Couldn't remove the connection pooler "+app.PoolerServiceName()+", so the app was kept: "+err.Error())
+		return inertia.Back(ctx)
+	}
 	if err := services.Docker().RemoveService(ctx, app.ServiceName()); err != nil {
 		facades.Log().Error(fmt.Errorf("delete app %s: %w", app.Name, err))
 		inertia.Flash(ctx, "error", "Couldn't remove the Swarm service "+app.ServiceName()+", so the app was kept: "+err.Error())

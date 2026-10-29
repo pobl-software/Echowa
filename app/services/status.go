@@ -46,7 +46,7 @@ type LiveStatus struct {
 // unhealthy if it's still short of replicas the status poller found it
 // short of more than UnhealthyAfter ago.
 func AppLiveStatus(ctx context.Context, app *models.App) LiveStatus {
-	live := serviceStatus(ctx, app)
+	live := serviceStatus(ctx, app.ServiceName())
 	if live.Running < live.Desired {
 		live.UnhealthySince = unhealthySince(app.ID, time.Now())
 	}
@@ -55,8 +55,8 @@ func AppLiveStatus(ctx context.Context, app *models.App) LiveStatus {
 }
 
 // serviceStatus is the service as Docker reports it right now.
-func serviceStatus(ctx context.Context, app *models.App) LiveStatus {
-	status, err := Docker().ServiceStatus(ctx, app.ServiceName())
+func serviceStatus(ctx context.Context, name string) LiveStatus {
+	status, err := Docker().ServiceStatus(ctx, name)
 	if errors.Is(err, docker.ErrServiceNotFound) {
 		return LiveStatus{State: StateNotDeployed}
 	}

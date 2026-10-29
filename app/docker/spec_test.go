@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func TestSwarmSpecWithoutRouteHasNoTraefikLabels(t *testing.T) {
 	got, err := swarmSpec(ServiceSpec{Name: "echowa-worker", App: "worker", Image: testDigest, Replicas: 1}, DefaultConfig(), 0)
 	require.NoError(t, err)
 
-	assert.Equal(t, map[string]string{LabelManaged: "true", LabelApp: "worker"}, got.Labels)
+	assert.Equal(t, map[string]string{LabelManaged: "true", LabelApp: "worker", LabelSpec: got.Labels[LabelSpec]}, got.Labels)
 	assert.Empty(t, got.TaskTemplate.ContainerSpec.Env)
 }
 
@@ -124,12 +125,41 @@ func TestSwarmSpecForARoleServiceLabelsItsTasks(t *testing.T) {
 	}, DefaultConfig(), 0)
 	require.NoError(t, err)
 
-	assert.Equal(t, map[string]string{LabelManaged: "true", LabelApp: "db", LabelRole: RolePooler}, got.Labels,
+	assert.Equal(t, map[string]string{LabelManaged: "true", LabelApp: "db", LabelRole: RolePooler, LabelSpec: got.Labels[LabelSpec]}, got.Labels,
 		"the service still belongs to the app")
 	assert.Equal(t, map[string]string{LabelApp: "db", LabelRole: RolePooler}, got.TaskTemplate.ContainerSpec.Labels,
 		"the metrics collector reads the role to keep its tasks out of the app's figures")
 	assert.Equal(t, []string{"sh", "-c", "exec pgbouncer"}, got.TaskTemplate.ContainerSpec.Command)
 	assert.Nil(t, got.TaskTemplate.ContainerSpec.Args, "the image's CMD isn't added back (the pooler's docker test checks Docker drops it)")
+}
+
+func TestSpecHashChangesWithAnythingButTheForceUpdateCounter(t *testing.T) {
+	spec := ServiceSpec{Name: "echowa-db-pooler", App: "db", Role: RolePooler, Image: testDigest, Replicas: 1,
+		Env: map[string]string{"PASSWORD": "one"}, Limits: Limits{NanoCPUs: 500_000_000, MemoryBytes: 128 << 20}}
+	hash := func(spec ServiceSpec, force uint64) string {
+		t.Helper()
+		got, err := swarmSpec(spec, DefaultConfig(), force)
+		require.NoError(t, err)
+		require.Len(t, got.Labels[LabelSpec], 64)
+		return got.Labels[LabelSpec]
+	}
+
+	assert.Equal(t, hash(spec, 1), hash(spec, 2), "every deploy bumps the counter")
+
+	changed := spec
+	changed.Env = map[string]string{"PASSWORD": "two"}
+	assert.NotEqual(t, hash(spec, 1), hash(changed, 1), "a new password")
+	changed = spec
+	changed.Limits.MemoryBytes = 256 << 20
+	assert.NotEqual(t, hash(spec, 1), hash(changed, 1), "new limits")
+	changed = spec
+	changed.Image = "ghcr.io/owner/blog@sha256:" + strings.Repeat("f", 64)
+	assert.NotEqual(t, hash(spec, 1), hash(changed, 1), "a new image")
+	cfg := DefaultConfig()
+	cfg.UpdateMonitor = time.Minute
+	got, err := swarmSpec(spec, cfg, 1)
+	require.NoError(t, err)
+	assert.NotEqual(t, hash(spec, 1), got.Labels[LabelSpec], "a change in how Echowa deploys")
 }
 
 func TestSwarmSpecRejectsBadVolumes(t *testing.T) {

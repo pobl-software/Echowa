@@ -82,3 +82,35 @@ func TestFakeListsServicesByRole(t *testing.T) {
 	_, err = fake.ServicesWithRole(ctx, "")
 	assert.Error(t, err, "an empty role would match every service without one")
 }
+
+func TestFakeMatchesTheSpecItRuns(t *testing.T) {
+	ctx := context.Background()
+	fake := &Fake{Wait: func(spec ServiceSpec) (UpdateResult, error) {
+		if spec.Env["PASSWORD"] == "bad" {
+			return UpdateResult{Outcome: OutcomeRolledBack}, nil
+		}
+		return UpdateResult{Outcome: OutcomeCompleted}, nil
+	}}
+	spec := ServiceSpec{Name: "echowa-db-pooler", App: "db", Role: RolePooler, Image: "pgbouncer@sha256:a", Replicas: 1,
+		Env: map[string]string{"PASSWORD": "good"}}
+
+	same, err := fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.False(t, same, "no service yet")
+	require.NoError(t, fake.DeployService(ctx, spec))
+	same, err = fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, same)
+
+	bad := spec
+	bad.Env = map[string]string{"PASSWORD": "bad"}
+	require.NoError(t, fake.DeployService(ctx, bad))
+	_, err = fake.WaitForUpdate(ctx, bad.Name)
+	require.NoError(t, err)
+	same, err = fake.ServiceMatches(ctx, bad)
+	require.NoError(t, err)
+	assert.False(t, same, "a rollback goes back to the previous spec, so the next sync tries again")
+	same, err = fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, same)
+}

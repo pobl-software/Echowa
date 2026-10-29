@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -173,6 +174,16 @@ func (f *Fake) DeployService(_ context.Context, spec ServiceSpec) error {
 	}
 
 	return nil
+}
+
+// ServiceMatches compares spec with the one the service was last deployed
+// or rolled back to.
+func (f *Fake) ServiceMatches(_ context.Context, spec ServiceSpec) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	svc, ok := f.services[spec.Name]
+
+	return ok && reflect.DeepEqual(svc.spec, spec), nil
 }
 
 func (f *Fake) ServiceStatus(_ context.Context, name string) (ServiceStatus, error) {

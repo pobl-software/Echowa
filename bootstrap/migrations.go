@@ -25,5 +25,6 @@ func Migrations() []schema.Migration {
 		&migrations.M20261028090000CreateStorageLocationsTable{},
 		&migrations.M20261028120000CreateBackupsTables{},
 		&migrations.M20261028150000CreateRestoresTable{},
+		&migrations.M20261029120000AddPoolingToApps{},
 	}
 }

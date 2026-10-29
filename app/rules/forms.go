@@ -32,7 +32,7 @@ func Registry(id uint) map[string]any {
 func App(hasVolumes bool) map[string]any {
 	rules := AppDocker(hasVolumes)
 	maps.Copy(rules, AppDomain(0))
-	rules["name"] = "required|string|slug|" + unique("apps", "name", 0)
+	rules["name"] = "required|string|slug|" + unique("apps", "name", 0) + "|not_pooler_name"
 
 	return rules
 }
@@ -160,7 +160,7 @@ func AppDatabases() map[string]any {
 	return map[string]any{
 		"databases":            "array|max:" + strconv.Itoa(MaxNewDatabases),
 		"databases.*.template": "string",
-		"databases.*.name":     "string|slug|distinct|" + unique("apps", "name", 0),
+		"databases.*.name":     "string|slug|distinct|" + unique("apps", "name", 0) + "|not_pooler_name",
 		"link":                 "array|max:100",
 		"link.*":               "integer|distinct",
 	}
@@ -312,7 +312,7 @@ func NewAppRestore() map[string]any {
 		"backup":   "integer",
 		"location": "integer",
 		"key":      "string|max:1024",
-		"name":     "required|string|slug|" + unique("apps", "name", 0),
+		"name":     "required|string|slug|" + unique("apps", "name", 0) + "|not_pooler_name",
 		"tag":      "required|string|image_tag",
 	}
 }

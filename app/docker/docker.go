@@ -33,6 +33,11 @@ type Client interface {
 	// changed, so a redeploy always restarts the app.
 	DeployService(ctx context.Context, spec ServiceSpec) error
 
+	// ServiceMatches reports whether the service exists and its spec is the
+	// one DeployService makes from spec, so deploying spec again would only
+	// restart its tasks.
+	ServiceMatches(ctx context.Context, spec ServiceSpec) (bool, error)
+
 	// ServiceStatus returns the service's replicas, image and update state.
 	// The error wraps ErrServiceNotFound if there's no such service.
 	ServiceStatus(ctx context.Context, name string) (ServiceStatus, error)
@@ -134,6 +139,9 @@ const (
 	LabelApp     = "echowa.app"
 	// LabelRole marks a service that runs beside an app's own.
 	LabelRole = "echowa.role"
+	// LabelSpec is a hash of what the service was deployed from, for
+	// ServiceMatches.
+	LabelSpec = "echowa.spec"
 )
 
 // RolePooler is a PostgreSQL app's PgBouncer (ADR 0035).

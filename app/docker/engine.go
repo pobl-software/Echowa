@@ -171,6 +171,22 @@ func (e *Engine) DeployService(ctx context.Context, spec ServiceSpec) error {
 	}
 }
 
+func (e *Engine) ServiceMatches(ctx context.Context, spec ServiceSpec) (bool, error) {
+	current, err := e.inspect(ctx, spec.Name)
+	if errors.Is(err, ErrServiceNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	desired, err := swarmSpec(spec, e.cfg, 0)
+	if err != nil {
+		return false, err
+	}
+
+	return managed(current) && current.Spec.Labels[LabelSpec] == desired.Labels[LabelSpec], nil
+}
+
 func (e *Engine) ServiceStatus(ctx context.Context, name string) (ServiceStatus, error) {
 	svc, err := e.inspect(ctx, name)
 	if err != nil {

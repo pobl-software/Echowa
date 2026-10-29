@@ -1,6 +1,9 @@
 package docker
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"path"
@@ -94,7 +97,7 @@ func swarmSpec(spec ServiceSpec, cfg Config, forceUpdate uint64) (swarm.ServiceS
 		Monitor:       cfg.UpdateMonitor,
 	}
 
-	return swarm.ServiceSpec{
+	desired := swarm.ServiceSpec{
 		Annotations: swarm.Annotations{Name: spec.Name, Labels: labels},
 		TaskTemplate: swarm.TaskSpec{
 			ContainerSpec: &swarm.ContainerSpec{
@@ -114,7 +117,27 @@ func swarmSpec(spec ServiceSpec, cfg Config, forceUpdate uint64) (swarm.ServiceS
 		EndpointSpec:   endpoint,
 		UpdateConfig:   update,
 		RollbackConfig: rollback,
-	}, nil
+	}
+	hash, err := specHash(desired)
+	if err != nil {
+		return swarm.ServiceSpec{}, err
+	}
+	labels[LabelSpec] = hash
+
+	return desired, nil
+}
+
+// specHash identifies what spec deploys, leaving out the ForceUpdate
+// counter that every deploy bumps.
+func specHash(spec swarm.ServiceSpec) (string, error) {
+	spec.TaskTemplate.ForceUpdate = 0
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		return "", fmt.Errorf("service spec: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // endpointSpec names the VIP mode and publishes the host port, if any.
