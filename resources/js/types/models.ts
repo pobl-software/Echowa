@@ -205,7 +205,9 @@ export type RestoreStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';
 export interface RestoreSummary {
     id: number;
     status: RestoreStatus;
+    // Empty for an uploaded file.
     location: string;
+    uploaded: boolean;
     // The dump's file name.
     name: string;
     // null for a dump Echowa had no record of.
@@ -223,7 +225,9 @@ export interface RestoreSummary {
 }
 
 // models.Restore, from GET /apps/{app}/restores/{restore}.
-export interface RestoreDetail extends Omit<RestoreSummary, 'location' | 'name'> {
+export interface RestoreDetail extends Omit<RestoreSummary, 'location' | 'name' | 'uploaded'> {
+    // null for an uploaded file, whose name is the key.
+    storage_location_id: number | null;
     key: string;
     output: string;
 }
@@ -232,13 +236,16 @@ export interface RestoreDetail extends Omit<RestoreSummary, 'location' | 'name'>
 // restore dialog shows before it's confirmed.
 export interface RestorePreview {
     name: string;
+    // Empty for an uploaded file.
     location: string;
+    uploaded: boolean;
     backup_id: number | null;
     // The backup's database and server version.
     database: string;
     server_version: string;
     size_bytes: number;
-    started_at: string;
+    // null for an uploaded dump that doesn't say when it was made.
+    started_at: string | null;
     // What it restores into. app_version is empty when the app isn't running.
     app_database: string;
     app_version: string;

@@ -281,14 +281,26 @@ func BackupScheduleMessages() validation.Option {
 }
 
 // Restore returns the rules for restoring into an app (ADR 0034). The
-// source is a backup's record, or a location and a manifest's key in it.
+// source is a backup's record, a location and a manifest's key in it, or
+// an upload, whose safety backup goes to safety_location.
 func Restore() map[string]any {
 	return map[string]any{
-		"backup":   "integer",
-		"location": "integer",
-		"key":      "string|max:1024",
-		"safety":   "boolean",
-		"confirm":  "required|string",
+		"backup":          "integer",
+		"location":        "integer",
+		"key":             "string|max:1024",
+		"upload":          "string|max:64",
+		"safety":          "boolean",
+		"safety_location": "integer",
+		"confirm":         "required|string",
+	}
+}
+
+// RestoreUpload returns the rules for starting the upload of a file to
+// restore from: its name and size, before any of it is sent.
+func RestoreUpload() map[string]any {
+	return map[string]any{
+		"name": "required|string|max:255",
+		"size": "required|integer|min:1",
 	}
 }
 

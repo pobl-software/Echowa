@@ -152,7 +152,7 @@ func (s *RestoreDockerTestSuite) waitForSQL(app *models.App) {
 	}, 2*time.Minute, time.Second, "%s answers", app.Name)
 }
 
-func (s *RestoreDockerTestSuite) restored(app *models.App, src *services.RestoreSource, safety bool) models.Restore {
+func (s *RestoreDockerTestSuite) restored(app *models.App, src *services.RestoreSource, safety *models.StorageLocation) models.Restore {
 	_, err := services.StartRestore(app, src, safety)
 	s.Require().NoError(err)
 	services.WaitForRestores()
@@ -185,7 +185,7 @@ func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup(
 
 			src, err := services.BackupSource(context.Background(), app, rec.ID)
 			s.Require().NoError(err)
-			restore := s.restored(app, src, true)
+			restore := s.restored(app, src, &s.loc)
 			s.Require().Equal(models.RestoreSucceeded, restore.Status)
 			s.Equal("1\tcafé\n2\tnaïve ☃", s.sql(app, "SELECT id, note FROM kept ORDER BY id"), "the backup's data is back")
 
@@ -203,8 +203,52 @@ func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup(
 			// Restoring the safety backup brings the changed data back.
 			src, err = services.BackupSource(context.Background(), app, safety.ID)
 			s.Require().NoError(err)
-			s.Require().Equal(models.RestoreSucceeded, s.restored(app, src, false).Status)
+			s.Require().Equal(models.RestoreSucceeded, s.restored(app, src, nil).Status)
 			s.Equal("1\tchanged", s.sql(app, "SELECT id, note FROM kept ORDER BY id"))
+		})
+	}
+}
+
+// An export, uploaded back as the restore dialog sends it, restores over
+// changed data: the round trip Restore from a file is for. Its first bytes
+// say which server it came from, with no manifest.
+func (s *RestoreDockerTestSuite) TestAnExportUploadedBackRestoresOverChangedData() {
+	for _, slug := range []string{"postgres", "mysql"} {
+		s.Run(slug, func() {
+			ctx := context.Background()
+			app := s.deployed(slug)
+			s.waitForSQL(app)
+			s.sql(app, "CREATE TABLE kept (id int PRIMARY KEY, note varchar(50))")
+			s.sql(app, "INSERT INTO kept VALUES (1, 'café'), (2, 'naïve ☃')")
+
+			format, _ := services.AppBackup(app).FindExport("")
+			export, err := services.StartExport(ctx, app, format, time.Now())
+			s.Require().NoError(err)
+			file, err := io.ReadAll(export)
+			s.Require().NoError(err)
+			s.Require().NoError(export.Err())
+			s.Require().NoError(export.Close())
+
+			s.sql(app, "UPDATE kept SET note = 'changed' WHERE id = 1")
+			s.sql(app, "DELETE FROM kept WHERE id = 2")
+
+			upload, err := services.StartUpload(app, export.Filename, int64(len(file)))
+			s.Require().NoError(err)
+			for sent := 0; sent < len(file); sent += services.UploadChunk {
+				_, err := upload.Write(int64(sent), bytes.NewReader(file[sent:min(len(file), sent+services.UploadChunk)]))
+				s.Require().NoError(err)
+			}
+			src, err := services.UploadSource(app, upload.ID)
+			s.Require().NoError(err)
+			preview, err := services.PreviewRestore(ctx, app, src)
+			s.Require().NoError(err)
+			s.Empty(preview.Refusal)
+			s.Equal(preview.AppVersion, preview.ServerVersion, "the dump says which server it came from")
+			s.Equal(preview.AppDatabase, preview.Database)
+
+			restore := s.restored(app, src, nil)
+			s.Require().Equal(models.RestoreSucceeded, restore.Status)
+			s.Equal("1\tcafé\n2\tnaïve ☃", s.sql(app, "SELECT id, note FROM kept ORDER BY id"), "the export's data is back")
 		})
 	}
 }
@@ -235,7 +279,7 @@ func (s *RestoreDockerTestSuite) TestAPostgresDumpThatDoesntMatchItsManifestChan
 
 	src, err := services.BackupSource(context.Background(), app, rec.ID)
 	s.Require().NoError(err)
-	restore := s.restored(app, src, false)
+	restore := s.restored(app, src, nil)
 	s.Equal(models.RestoreFailed, restore.Status)
 	s.Contains(*restore.Message, "doesn't match its manifest")
 	s.Equal("changed", s.sql(app, "SELECT note FROM kept"), "pg_restore rolled back")

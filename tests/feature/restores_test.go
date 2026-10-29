@@ -380,15 +380,15 @@ func (s *BackupsTestSuite) TestAFailedMySQLRestoreSaysWhatItMayHaveLeft() {
 func (s *BackupsTestSuite) TestRecoveryMarksEarlierRestoresInterrupted() {
 	orders := s.templateApp("orders", "mysql")
 	started := carbon.NewDateTime(carbon.Now().SubHour())
-	pg := &models.Restore{AppID: s.app.ID, StorageLocationID: s.loc.ID, Key: "k", Status: models.RestoreRunning, StartedAt: started}
+	pg := &models.Restore{AppID: s.app.ID, StorageLocationID: &s.loc.ID, Key: "k", Status: models.RestoreRunning, StartedAt: started}
 	s.Require().NoError(facades.Orm().Query().Create(pg))
 	safety := s.backedUp(orders, mysql974, "x")
 	my := &models.Restore{
-		AppID: orders.ID, StorageLocationID: s.loc.ID, Key: "k", Status: models.RestoreRunning, StartedAt: started, SafetyBackupID: &safety.ID,
+		AppID: orders.ID, StorageLocationID: &s.loc.ID, Key: "k", Status: models.RestoreRunning, StartedAt: started, SafetyBackupID: &safety.ID,
 	}
 	s.Require().NoError(facades.Orm().Query().Create(my))
 	ours := &models.Restore{
-		AppID: s.app.ID, StorageLocationID: s.loc.ID, Key: "k", Status: models.RestoreRunning, StartedAt: carbon.NewDateTime(carbon.Now().AddMinute()),
+		AppID: s.app.ID, StorageLocationID: &s.loc.ID, Key: "k", Status: models.RestoreRunning, StartedAt: carbon.NewDateTime(carbon.Now().AddMinute()),
 	}
 	s.Require().NoError(facades.Orm().Query().Create(ours))
 
@@ -406,7 +406,7 @@ func (s *BackupsTestSuite) TestRecoveryMarksEarlierRestoresInterrupted() {
 func (s *BackupsTestSuite) TestOnlyTheNewestRestoresAreKept() {
 	for range services.KeepRestores + 2 {
 		finished := carbon.NewDateTime(carbon.Now())
-		rec := &models.Restore{AppID: s.app.ID, StorageLocationID: s.loc.ID, Key: "k", Status: models.RestoreSucceeded, StartedAt: finished, FinishedAt: finished}
+		rec := &models.Restore{AppID: s.app.ID, StorageLocationID: &s.loc.ID, Key: "k", Status: models.RestoreSucceeded, StartedAt: finished, FinishedAt: finished}
 		s.Require().NoError(facades.Orm().Query().Create(rec))
 	}
 	first := s.restores(s.app.ID)[0].ID

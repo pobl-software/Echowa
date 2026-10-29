@@ -126,6 +126,11 @@ func Web() {
 			router.Get("/apps/{app}/restores/browse", restores.Browse)
 			router.Get("/apps/{app}/restores/preview", restores.Preview)
 			router.Get("/apps/{app}/restores/{restore}", restores.Show)
+			// The chunks of an upload are in routes/streams.go.
+			uploads := controllers.NewRestoreUploadController()
+			router.Post("/apps/{app}/restores/uploads", uploads.Store)
+			router.Get("/apps/{app}/restores/uploads/{upload}", uploads.Show)
+			router.Delete("/apps/{app}/restores/uploads/{upload}", uploads.Destroy)
 			router.Post("/apps/restore", restores.NewApp)
 			router.Get("/backups/browse", restores.BrowseLocation)
 			router.Get("/backups/preview", restores.PreviewNewApp)

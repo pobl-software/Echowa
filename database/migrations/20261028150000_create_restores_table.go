@@ -24,8 +24,10 @@ func (r *M20261028150000CreateRestoresTable) Up() error {
 	return facades.Schema().Create("restores", func(table schema.Blueprint) {
 		table.ID()
 		table.UnsignedBigInteger("app_id")
-		table.UnsignedBigInteger("storage_location_id")
-		// The dump restored, its whole key, prefix included.
+		// None for an uploaded file.
+		table.UnsignedBigInteger("storage_location_id").Nullable()
+		// The dump restored, its whole key, prefix included, or an uploaded
+		// file's name.
 		table.String("key")
 		// The backup's record, when Echowa has one.
 		table.UnsignedBigInteger("backup_id").Nullable()

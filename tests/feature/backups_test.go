@@ -60,6 +60,7 @@ func (s *BackupsTestSuite) SetupTest() {
 	s.app = s.templateApp("shop-db", "postgres")
 	s.T().Cleanup(services.WaitForBackups)
 	s.T().Cleanup(services.WaitForRestores)
+	s.T().Cleanup(services.CancelUploads)
 }
 
 func (s *BackupsTestSuite) templateApp(name, slug string) *models.App {

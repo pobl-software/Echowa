@@ -157,7 +157,7 @@ func StartNewAppRestore(app *models.App, src *RestoreSource, queue func() (uint,
 	waiting := "Waiting for the first deploy."
 	rec := &models.Restore{
 		AppID:             app.ID,
-		StorageLocationID: src.Location.ID,
+		StorageLocationID: &src.Location.ID,
 		Key:               src.Key,
 		NewApp:            true,
 		Status:            models.RestoreRunning,
@@ -245,7 +245,7 @@ func restoreNewApp(ctx context.Context, app *models.App, b *templates.Backup, sr
 	}
 	rec.Message = nil
 
-	return restore(ctx, app, b, src, rec, false)
+	return restore(ctx, app, b, src, rec, nil)
 }
 
 // sleep waits for d, or returns false when ctx ends first.

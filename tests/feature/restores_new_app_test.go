@@ -275,14 +275,14 @@ func (s *BackupsTestSuite) TestANewAppWaitingForItsRestoreRefusesAnotherAndRecov
 
 	src, err := services.FolderSource(context.Background(), &s.loc, key)
 	s.Require().NoError(err)
-	_, err = services.StartRestore(app, src, false)
+	_, err = services.StartRestore(app, src, nil)
 	s.EqualError(err, "A restore of shop-copy is running. Restore once it has finished.")
 
 	// As if Echowa had stopped while the restore waited.
 	s.deployFirst(app)
 	waiting := "Waiting for the first deploy."
 	rec := &models.Restore{
-		AppID: app.ID, StorageLocationID: s.loc.ID, Key: "k", NewApp: true, Status: models.RestoreRunning,
+		AppID: app.ID, StorageLocationID: &s.loc.ID, Key: "k", NewApp: true, Status: models.RestoreRunning,
 		Message: &waiting, StartedAt: carbon.NewDateTime(carbon.Now().SubHour()),
 	}
 	s.Require().NoError(facades.Orm().Query().Create(rec))

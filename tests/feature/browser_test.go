@@ -3,6 +3,8 @@ package feature
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"maps"
 	nethttp "net/http"
 	"strings"
 	"testing"
@@ -62,17 +64,19 @@ func (b *browser) request(method, uri string, data map[string]any, isInertia boo
 	if data != nil {
 		require.NoError(b.t, json.NewEncoder(&body).Encode(data))
 	}
-
-	req := b.tc.Http(b.t).WithHeader("Content-Type", "application/json")
+	all := map[string]string{"Content-Type": "application/json"}
 	if isInertia {
-		req = req.WithHeaders(map[string]string{
-			"X-Inertia":         "true",
-			"X-Inertia-Version": inertia.Version(),
-		})
+		all["X-Inertia"] = "true"
+		all["X-Inertia-Version"] = inertia.Version()
 	}
-	for key, val := range headers {
-		req = req.WithHeader(key, val)
-	}
+	maps.Copy(all, headers)
+
+	return b.send(method, uri, &body, all)
+}
+
+// send makes a request with body as it is, such as a chunk of an upload.
+func (b *browser) send(method, uri string, body io.Reader, headers map[string]string) contractstesting.Response {
+	req := b.tc.Http(b.t).WithHeaders(headers)
 	for _, cookie := range b.cookies {
 		req = req.WithCookie(cookie)
 	}
@@ -87,11 +91,11 @@ func (b *browser) request(method, uri string, data map[string]any, isInertia boo
 	case nethttp.MethodHead:
 		resp, err = req.Head(uri)
 	case nethttp.MethodPost:
-		resp, err = req.Post(uri, &body)
+		resp, err = req.Post(uri, body)
 	case nethttp.MethodPut:
-		resp, err = req.Put(uri, &body)
+		resp, err = req.Put(uri, body)
 	case nethttp.MethodDelete:
-		resp, err = req.Delete(uri, &body)
+		resp, err = req.Delete(uri, body)
 	default:
 		b.t.Fatalf("unsupported method %s", method)
 	}

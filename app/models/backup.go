@@ -85,13 +85,15 @@ const (
 )
 
 // Restore is one restore of a dump into a template app's database (ADR
-// 0034), from a backup Echowa has a record of or from a manifest found in
-// the bucket.
+// 0034), from a backup Echowa has a record of, from a manifest found in
+// the bucket, or from an uploaded file.
 type Restore struct {
 	orm.Model
-	AppID             uint `json:"app_id"`
-	StorageLocationID uint `json:"storage_location_id"`
-	// Key is the dump's whole key, prefix included.
+	AppID uint `json:"app_id"`
+	// StorageLocationID is nil for an uploaded file.
+	StorageLocationID *uint `json:"storage_location_id"`
+	// Key is the dump's whole key, prefix included, or an uploaded file's
+	// name.
 	Key string `json:"key"`
 	// BackupID is nil for a dump Echowa has no record of.
 	BackupID       *uint         `json:"backup_id"`

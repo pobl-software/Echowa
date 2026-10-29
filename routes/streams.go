@@ -10,20 +10,21 @@ import (
 	"goravel/app/http/middleware"
 )
 
-// Server-Sent Events routes, a backup's download and a database export.
-// They stay open as long as they need, so they skip Goravel's global
-// request timeout (GlobalMiddleware) and use a session that's never saved
-// (middleware.AuthenticateStream). They also go without Goravel's
-// response middleware, which keeps a copy of every byte written, so a
-// stream would hold all it had sent in memory.
+// Server-Sent Events routes, a backup's download, a database export and
+// the chunks of an upload to restore from. They stay open as long as they
+// need, so they skip Goravel's global request timeout (GlobalMiddleware)
+// and use a session that's never saved (middleware.AuthenticateStream).
+// They also go without Goravel's response middleware, which keeps a copy
+// of every byte written, so a stream would hold all it had sent in memory.
 const (
 	appLogsStream    = "/apps/{app}/logs/stream"
 	deploymentStream = "/deployments/{deployment}/stream"
 	backupDownload   = "/apps/{app}/backups/{backup}/download"
 	appExport        = "/apps/{app}/export"
+	restoreUpload    = "/apps/{app}/restores/uploads/{upload}"
 )
 
-var streams = []string{appLogsStream, deploymentStream, backupDownload, appExport}
+var streams = []string{appLogsStream, deploymentStream, backupDownload, appExport, restoreUpload}
 
 func Streams() {
 	routes := facades.Route().Middleware(&middleware.AuthenticateStream{}).WithoutMiddleware(gin.ResponseMiddleware())
@@ -34,6 +35,10 @@ func Streams() {
 		appBackups := controllers.NewBackupController()
 		router.Get(backupDownload, appBackups.Download)
 		router.Get(appExport, appBackups.Export)
+		// The only route here that changes anything, so it checks the CSRF
+		// token as the web group does.
+		uploads := controllers.NewRestoreUploadController()
+		router.Middleware(&middleware.VerifyCsrfToken{}).Put(restoreUpload, uploads.Update)
 	})
 }
 

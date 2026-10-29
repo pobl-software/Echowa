@@ -55,7 +55,8 @@ func (r *RestoreController) Preview(ctx http.Context) http.Response {
 	if resp := findBackupApp(ctx, &app); resp != nil {
 		return resp
 	}
-	src, err := restoreSource(ctx, &app, ctx.Request().QueryInt("backup"), ctx.Request().QueryInt("location"), ctx.Request().Query("key"))
+	src, err := restoreSource(ctx, &app, ctx.Request().QueryInt("backup"), ctx.Request().QueryInt("location"),
+		ctx.Request().Query("key"), ctx.Request().Query("upload"))
 	var refused *services.RestoreRefusal
 	if errors.As(err, &refused) {
 		return ctx.Response().Json(http.StatusUnprocessableEntity, http.Json{"error": refused.Reason})
@@ -90,7 +91,8 @@ func (r *RestoreController) Store(ctx http.Context) http.Response {
 		return failed(ctx, map[string]string{"confirm": "Type " + app.Name + " to confirm."})
 	}
 
-	src, err := restoreSource(ctx, &app, ctx.Request().InputInt("backup"), ctx.Request().InputInt("location"), ctx.Request().Input("key"))
+	src, err := restoreSource(ctx, &app, ctx.Request().InputInt("backup"), ctx.Request().InputInt("location"),
+		ctx.Request().Input("key"), ctx.Request().Input("upload"))
 	var refused *services.RestoreRefusal
 	if errors.As(err, &refused) {
 		return failed(ctx, map[string]string{"source": refused.Reason})
@@ -105,8 +107,22 @@ func (r *RestoreController) Store(ctx http.Context) http.Response {
 	if preview.Refusal != "" {
 		return failed(ctx, map[string]string{"source": preview.Refusal})
 	}
+	// A backup in a bucket is backed up to the same location first. An
+	// upload's safety backup goes where the form says.
+	var safety *models.StorageLocation
+	if ctx.Request().InputBool("safety") {
+		safety = src.Location
+		if src.Upload != nil {
+			var loc models.StorageLocation
+			err := facades.Orm().WithContext(ctx).Query().Where("id", ctx.Request().InputInt("safety_location")).FirstOrFail(&loc)
+			if err != nil {
+				return failed(ctx, map[string]string{"safety_location": "Choose where the safety backup goes."})
+			}
+			safety = &loc
+		}
+	}
 
-	_, err = services.StartRestore(&app, src, ctx.Request().InputBool("safety"))
+	_, err = services.StartRestore(&app, src, safety)
 	if errors.As(err, &refused) {
 		return failed(ctx, map[string]string{"source": refused.Reason})
 	}
@@ -268,9 +284,13 @@ func newAppSource(ctx http.Context, backupID, locationID int, key string) (*serv
 	return services.FolderSource(ctx, &loc, key)
 }
 
-// restoreSource is the backup with ID backupID, or else the manifest at
-// key in the location with ID locationID.
-func restoreSource(ctx http.Context, app *models.App, backupID, locationID int, key string) (*services.RestoreSource, error) {
+// restoreSource is the app's upload with ID upload, the backup with ID
+// backupID, or else the manifest at key in the location with ID
+// locationID.
+func restoreSource(ctx http.Context, app *models.App, backupID, locationID int, key, upload string) (*services.RestoreSource, error) {
+	if upload != "" {
+		return services.UploadSource(app, upload)
+	}
 	if backupID > 0 {
 		return services.BackupSource(ctx, app, uint(backupID))
 	}

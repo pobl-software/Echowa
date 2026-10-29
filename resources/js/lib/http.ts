@@ -30,7 +30,8 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
     return data as T;
 }
 
-function xsrfToken(): string {
+// The CSRF token, for a request postJson doesn't make.
+export function xsrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
 
     return match ? decodeURIComponent(match[1]) : '';

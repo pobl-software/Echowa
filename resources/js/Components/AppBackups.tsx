@@ -16,6 +16,7 @@ import { RestoreDialog, RestoreFromBucket, RestoreProgress, RestoresPanel } from
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
 import type { RestoreSource } from '@/Components/NewAppRestore';
 import { Panel } from '@/Components/Panel';
+import { RestoreFromFile } from '@/Components/RestoreFromFile';
 import { browserZone, type Preset, presetLabel, ScheduleFields, ScheduleText } from '@/Components/ScheduleFields';
 import { RunStatusBadge } from '@/Components/StatusBadge';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/Components/ui/alert';
@@ -65,8 +66,9 @@ const presets: Preset[] = [
 ];
 
 // AppBackups is a template database's Backups section (ADR 0034): back up
-// now to a storage location, export, the backups made so far, and
-// restores. held is what holds the app's lock, the page's busy prop.
+// now to a storage location, export, restore from a file, the backups made
+// so far, and restores. held is what holds the app's lock, the page's busy
+// prop. Export and restoring from a file need no storage location.
 export function AppBackups({ app, section, held }: { app: App; section: BackupsSection; held: AppWork }) {
     const [location, setLocation] = useState<number | null>(() => section.locations[0]?.id ?? null);
     const [starting, setStarting] = useState(false);
@@ -87,11 +89,14 @@ export function AppBackups({ app, section, held }: { app: App; section: BackupsS
         const id = window.setInterval(() => router.reload({ only: ['backups', 'busy'] }), busy ? 3000 : 30_000);
         return () => window.clearInterval(id);
     }, [busy, scheduled]);
+    const fileBlocked = restore ? `A restore of ${app.name} is running.` : null;
 
     if (section.locations.length === 0) {
         return (
             <div className="space-y-6">
+                {restore && <RestoreProgress restore={restore} />}
                 <ExportPanel app={app} section={section} held={held} />
+                <RestoreFromFile app={app} section={section} blocked={fileBlocked} />
                 <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
                     <span className="mb-4 flex size-11 items-center justify-center rounded-xl border bg-card">
                         <ArchiveIcon className="size-5 text-muted-foreground" />
@@ -104,6 +109,7 @@ export function AppBackups({ app, section, held }: { app: App; section: BackupsS
                         Add S3 storage
                     </Link>
                 </div>
+                <RestoresPanel app={app} restores={section.restores} />
             </div>
         );
     }
@@ -242,6 +248,7 @@ export function AppBackups({ app, section, held }: { app: App; section: BackupsS
                 locations={section.locations}
                 onRestore={(source) => !restore && setRestoring(source)}
             />
+            <RestoreFromFile app={app} section={section} blocked={fileBlocked} />
 
             <BackupOutput app={app} backup={opened} onClose={() => setOpened(null)} />
             <RestoreDialog app={app} source={restoring} onClose={() => setRestoring(null)} />

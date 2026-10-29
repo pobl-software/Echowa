@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"os"
 	"path"
 	"slices"
 	"strings"
@@ -58,15 +59,21 @@ func refuse(format string, args ...any) error {
 	return &RestoreRefusal{Reason: fmt.Sprintf(format, args...)}
 }
 
-// RestoreSource is a dump to restore, with the manifest read from beside
-// it in the bucket.
+// RestoreSource is a dump to restore: one in a bucket, with the manifest
+// read from beside it, or an upload, with a manifest made from the dump's
+// first bytes.
 type RestoreSource struct {
+	// Location is nil for an upload.
 	Location *models.StorageLocation
-	// Key is the dump's whole key.
+	// Key is the dump's whole key, or an upload's name.
 	Key      string
 	Manifest backups.Manifest
 	// Backup is the dump's record, or nil for one Echowa has none of.
 	Backup *models.Backup
+	// Upload is the uploaded file, and Head what its first bytes say, or
+	// nil for a dump in a bucket.
+	Upload *Upload
+	Head   *templates.DumpHead
 }
 
 // AppFolder is where a location keeps the app's backups.
@@ -98,6 +105,36 @@ func BucketSource(ctx context.Context, app *models.App, loc *models.StorageLocat
 	}
 
 	return readSource(ctx, app, loc, key)
+}
+
+// UploadSource is the app's upload with ID id. Its manifest comes from the
+// dump's first bytes: the server it came from and the database, and when
+// it was made if the dump says.
+func UploadSource(app *models.App, id string) (*RestoreSource, error) {
+	u, ok := FindUpload(app.ID, id)
+	if !ok {
+		return nil, refuse("The upload isn't there any more. Choose the file again.")
+	}
+	head, err := u.head()
+	if err != nil {
+		return nil, err
+	}
+	dump, err := templates.ReadDumpHead(head)
+	if err != nil {
+		return nil, refuse("%s", err)
+	}
+	if app.Template == nil || dump.Template != *app.Template {
+		return nil, refuse("This is a dump of a %s database, and %s is %s.", templateName(dump.Template), app.Name, templateName(deref(app.Template)))
+	}
+	m := backups.Manifest{
+		Template: dump.Template, ServerVersion: dump.ServerVersion, Database: dump.Database,
+		Object: u.Name, Compression: "none", Size: u.Size, StartedAt: dump.Made,
+	}
+	if dump.Gzip {
+		m.Compression = "gzip"
+	}
+
+	return &RestoreSource{Key: u.Name, Manifest: m, Upload: u, Head: &dump}, nil
 }
 
 // readSource reads the manifest at key and refuses a dump of another
@@ -169,14 +206,17 @@ func deref(s *string) string {
 
 // RestorePreview is what the restore dialog shows before it's confirmed.
 type RestorePreview struct {
-	Name     string `json:"name"`
+	Name string `json:"name"`
+	// Location is "" for an upload.
 	Location string `json:"location"`
+	Uploaded bool   `json:"uploaded"`
 	BackupID *uint  `json:"backup_id"`
 	// Database and ServerVersion are the backup's.
-	Database      string    `json:"database"`
-	ServerVersion string    `json:"server_version"`
-	SizeBytes     int64     `json:"size_bytes"`
-	StartedAt     time.Time `json:"started_at"`
+	Database      string `json:"database"`
+	ServerVersion string `json:"server_version"`
+	SizeBytes     int64  `json:"size_bytes"`
+	// StartedAt is nil for an upload whose dump doesn't say.
+	StartedAt *time.Time `json:"started_at"`
 	// AppDatabase and AppVersion are what the restore goes into.
 	// AppVersion is "" when the app isn't running.
 	AppDatabase string `json:"app_database"`
@@ -201,9 +241,14 @@ func PreviewRestore(ctx context.Context, app *models.App, src *RestoreSource) (*
 	}
 	m := src.Manifest
 	preview := &RestorePreview{
-		Name: m.Object, Location: src.Location.Name, Database: m.Database, ServerVersion: m.ServerVersion,
-		SizeBytes: m.Size, StartedAt: m.StartedAt, AppDatabase: env[b.Database], Template: templateName(m.Template),
-		Atomic: b.Atomic,
+		Name: m.Object, Uploaded: src.Upload != nil, Database: m.Database, ServerVersion: m.ServerVersion,
+		SizeBytes: m.Size, AppDatabase: env[b.Database], Template: templateName(m.Template), Atomic: b.Atomic,
+	}
+	if src.Location != nil {
+		preview.Location = src.Location.Name
+	}
+	if !m.StartedAt.IsZero() {
+		preview.StartedAt = &m.StartedAt
 	}
 	if tmpl, ok := templates.Find(deref(app.Template)); ok {
 		preview.DefaultTag = tmpl.DefaultTag
@@ -213,7 +258,7 @@ func PreviewRestore(ctx context.Context, app *models.App, src *RestoreSource) (*
 	}
 	versionCtx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
-	preview.AppVersion, preview.Warning, err = checkVersion(versionCtx, app, b, m)
+	preview.AppVersion, preview.Warning, err = checkVersion(versionCtx, app, b, src)
 	var refused *RestoreRefusal
 	if errors.As(err, &refused) {
 		preview.Refusal = refused.Reason
@@ -225,8 +270,10 @@ func PreviewRestore(ctx context.Context, app *models.App, src *RestoreSource) (*
 }
 
 // checkVersion reads the app's server version and refuses a dump from a
-// newer one (ADR 0034). The warning is for a newer major version.
-func checkVersion(ctx context.Context, app *models.App, b *templates.Backup, m backups.Manifest) (version, warning string, err error) {
+// newer one, or an upload its restore command can't read (ADR 0034). The
+// warning is for a newer major version.
+func checkVersion(ctx context.Context, app *models.App, b *templates.Backup, src *RestoreSource) (version, warning string, err error) {
+	m := src.Manifest
 	out, err := Docker().Exec(ctx, app.ServiceName(), b.Version)
 	if errors.Is(err, docker.ErrNotRunning) {
 		return "", "", refuse("%s has no running task to restore into. Deploy it first.", app.Name)
@@ -242,6 +289,11 @@ func checkVersion(ctx context.Context, app *models.App, b *templates.Backup, m b
 		return version, "", refuse("The backup is from %s %s, and %s runs %s. A backup never restores into an older server.",
 			name, m.ServerVersion, app.Name, version)
 	}
+	if src.Head != nil {
+		if err := src.Head.ReadableBy(version); err != nil {
+			return version, "", refuse("%s", err)
+		}
+	}
 	from, _, _ := strings.Cut(m.ServerVersion, ".")
 	to, _, _ := strings.Cut(version, ".")
 	if from != to {
@@ -253,9 +305,11 @@ func checkVersion(ctx context.Context, app *models.App, b *templates.Backup, m b
 }
 
 // StartRestore restores src into the app in the background, after a
-// safety backup to the same location when safety is set. It's refused at
-// once while a deploy, backup or restore holds the app (ADR 0034).
-func StartRestore(app *models.App, src *RestoreSource, safety bool) (*models.Restore, error) {
+// safety backup to the location safety when it isn't nil. It's refused at
+// once while a deploy, backup, restore or export holds the app (ADR 0034).
+// An upload has to have arrived whole, and the restore deletes it when it
+// ends.
+func StartRestore(app *models.App, src *RestoreSource, safety *models.StorageLocation) (*models.Restore, error) {
 	b := AppBackup(app)
 	if b == nil {
 		return nil, fmt.Errorf("%s has no backups", app.Name)
@@ -274,19 +328,32 @@ func StartRestore(app *models.App, src *RestoreSource, safety bool) (*models.Res
 		}
 		return nil, refuse("A restore of %s is running. Restore once it has finished.", app.Name)
 	}
+	removeUpload := func() {}
+	if u := src.Upload; u != nil {
+		sum, err := u.take()
+		if err != nil {
+			unlock()
+			return nil, err
+		}
+		src.Manifest.SHA256 = sum
+		removeUpload = func() { _ = os.Remove(u.path) }
+	}
 
 	rec := &models.Restore{
-		AppID:             app.ID,
-		StorageLocationID: src.Location.ID,
-		Key:               src.Key,
-		Status:            models.RestoreRunning,
-		SizeBytes:         src.Manifest.Size,
-		StartedAt:         carbon.NewDateTime(carbon.Now()),
+		AppID:     app.ID,
+		Key:       src.Key,
+		Status:    models.RestoreRunning,
+		SizeBytes: src.Manifest.Size,
+		StartedAt: carbon.NewDateTime(carbon.Now()),
+	}
+	if src.Location != nil {
+		rec.StorageLocationID = &src.Location.ID
 	}
 	if src.Backup != nil {
 		rec.BackupID = &src.Backup.ID
 	}
 	if err := facades.Orm().Query().Create(rec); err != nil {
+		removeUpload()
 		unlock()
 		return nil, err
 	}
@@ -295,6 +362,7 @@ func StartRestore(app *models.App, src *RestoreSource, safety bool) (*models.Res
 	go func() {
 		defer runningRestores.Done()
 		defer unlock()
+		defer removeUpload()
 		ctx, cancel := context.WithTimeout(context.Background(), BackupTimeout)
 		defer cancel()
 		finishRestore(rec, restore(ctx, app, b, src, rec, safety))
@@ -341,20 +409,20 @@ type restoreResult struct {
 }
 
 // restore checks the app's version, takes the safety backup, then streams
-// the dump from the bucket into the template's restore command. The caller
-// holds the app's lock.
-func restore(ctx context.Context, app *models.App, b *templates.Backup, src *RestoreSource, rec *models.Restore, safety bool) restoreResult {
+// the dump from the bucket or the uploaded file into the template's
+// restore command. The caller holds the app's lock.
+func restore(ctx context.Context, app *models.App, b *templates.Backup, src *RestoreSource, rec *models.Restore, safety *models.StorageLocation) restoreResult {
 	failed := func(format string, args ...any) restoreResult {
 		return restoreResult{status: models.RestoreFailed, message: fmt.Sprintf(format, args...)}
 	}
-	if _, _, err := checkVersion(ctx, app, b, src.Manifest); err != nil {
+	if _, _, err := checkVersion(ctx, app, b, src); err != nil {
 		if rec.NewApp {
 			return failed("%s%s", err, notRestored(app))
 		}
 		return failed("%s Nothing was restored.", err)
 	}
-	if safety {
-		backup, result := safetyBackup(ctx, app, b, src.Location, rec)
+	if safety != nil {
+		backup, result := safetyBackup(ctx, app, b, safety, rec)
 		if backup == nil || result.status != models.BackupSucceeded {
 			return failed("The safety backup failed, so nothing was restored. %s", result.message)
 		}
@@ -362,12 +430,9 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 	}
 	partly := func() string { return partly(app, b, rec) }
 
-	body, err := backups.Open(src.Location).Get(ctx, src.Key)
-	if errors.Is(err, backups.ErrNotFound) {
-		return failed("The dump isn't in %s any more, so nothing was restored.", src.Location.Name)
-	}
+	body, err := openDump(ctx, src)
 	if err != nil {
-		return failed("Couldn't read the dump from %s, so nothing was restored: %s", src.Location.Name, backups.Describe(err))
+		return failed("%s", err)
 	}
 	defer func() { _ = body.Close() }()
 	checked := &checkedDump{r: body, size: src.Manifest.Size, sha256: src.Manifest.SHA256, h: sha256.New()}
@@ -392,6 +457,8 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		result.message = fmt.Sprintf("Stopped after %d hours.", int(BackupTimeout/time.Hour)) + partly()
+	case errors.Is(err, errDumpMismatch) && src.Upload != nil:
+		result.message = "The uploaded file changed on the server's disk, so the restore was stopped before its end." + partly()
 	case errors.Is(err, errDumpMismatch):
 		result.message = "The dump in the bucket doesn't match its manifest, so the restore was stopped before its end." + partly()
 	case errors.Is(err, docker.ErrNotRunning):
@@ -407,6 +474,27 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 	}
 
 	return result
+}
+
+// openDump opens the dump in the bucket or the uploaded file. Its error is
+// for the page.
+func openDump(ctx context.Context, src *RestoreSource) (io.ReadCloser, error) {
+	if src.Upload != nil {
+		f, err := os.Open(src.Upload.path)
+		if err != nil {
+			return nil, fmt.Errorf("Couldn't read the uploaded file, so nothing was restored: %w", err)
+		}
+		return f, nil
+	}
+	body, err := backups.Open(src.Location).Get(ctx, src.Key)
+	if errors.Is(err, backups.ErrNotFound) {
+		return nil, fmt.Errorf("The dump isn't in %s any more, so nothing was restored.", src.Location.Name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Couldn't read the dump from %s, so nothing was restored: %s", src.Location.Name, backups.Describe(err))
+	}
+
+	return body, nil
 }
 
 // safetyBackup backs the app up to loc before a restore, inside the
@@ -633,18 +721,20 @@ func listFolder(ctx context.Context, loc *models.StorageLocation, folder string)
 // RestoreSummary is a row of the Backups section's restores, without the
 // output.
 type RestoreSummary struct {
-	ID             uint                 `json:"id"`
-	Status         models.RestoreStatus `json:"status"`
-	Location       string               `json:"location"`
-	Name           string               `json:"name"`
-	BackupID       *uint                `json:"backup_id"`
-	SafetyBackupID *uint                `json:"safety_backup_id"`
-	NewApp         bool                 `json:"new_app"`
-	SizeBytes      int64                `json:"size_bytes"`
-	ReadBytes      int64                `json:"read_bytes"`
-	Message        *string              `json:"message"`
-	StartedAt      *carbon.DateTime     `json:"started_at"`
-	FinishedAt     *carbon.DateTime     `json:"finished_at"`
+	ID     uint                 `json:"id"`
+	Status models.RestoreStatus `json:"status"`
+	// Location is "" for an upload.
+	Location       string           `json:"location"`
+	Uploaded       bool             `json:"uploaded"`
+	Name           string           `json:"name"`
+	BackupID       *uint            `json:"backup_id"`
+	SafetyBackupID *uint            `json:"safety_backup_id"`
+	NewApp         bool             `json:"new_app"`
+	SizeBytes      int64            `json:"size_bytes"`
+	ReadBytes      int64            `json:"read_bytes"`
+	Message        *string          `json:"message"`
+	StartedAt      *carbon.DateTime `json:"started_at"`
+	FinishedAt     *carbon.DateTime `json:"finished_at"`
 }
 
 // appRestores lists the app's newest limit restores.
@@ -658,7 +748,8 @@ func appRestores(ctx context.Context, appID uint, limit int) ([]RestoreSummary, 
 	list := make([]RestoreSummary, len(rows))
 	for i, rec := range rows {
 		list[i] = RestoreSummary{
-			ID: rec.ID, Status: rec.Status, Name: path.Base(rec.Key), BackupID: rec.BackupID, SafetyBackupID: rec.SafetyBackupID, NewApp: rec.NewApp,
+			ID: rec.ID, Status: rec.Status, Name: path.Base(rec.Key), Uploaded: rec.StorageLocationID == nil,
+			BackupID: rec.BackupID, SafetyBackupID: rec.SafetyBackupID, NewApp: rec.NewApp,
 			SizeBytes: rec.SizeBytes, ReadBytes: rec.ReadBytes, Message: rec.Message, StartedAt: rec.StartedAt, FinishedAt: rec.FinishedAt,
 		}
 		if rec.StorageLocation != nil {

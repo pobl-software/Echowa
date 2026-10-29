@@ -199,16 +199,20 @@ export function RestoreDialog({
 
 // BackupFacts compares the backup with the app it would restore into, or
 // for a new app, just describes it.
-function BackupFacts({ preview, newApp }: { preview: RestorePreview; newApp: boolean }) {
+export function BackupFacts({ preview, newApp }: { preview: RestorePreview; newApp: boolean }) {
     const sameVersion = !newApp && preview.server_version === preview.app_version;
 
     return (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
-            <dt className="text-muted-foreground">Made</dt>
-            <dd title={formatDateTime(preview.started_at)}>
-                {formatDateTime(preview.started_at)}{' '}
-                <span className="text-muted-foreground">({timeAgo(preview.started_at)})</span>
-            </dd>
+            {preview.started_at && (
+                <>
+                    <dt className="text-muted-foreground">Made</dt>
+                    <dd title={formatDateTime(preview.started_at)}>
+                        {formatDateTime(preview.started_at)}{' '}
+                        <span className="text-muted-foreground">({timeAgo(preview.started_at)})</span>
+                    </dd>
+                </>
+            )}
             <dt className="text-muted-foreground">Size</dt>
             <dd className="tabular-nums">{formatBytes(preview.size_bytes)}</dd>
             <dt className="text-muted-foreground">Database</dt>
@@ -223,7 +227,7 @@ function BackupFacts({ preview, newApp }: { preview: RestorePreview; newApp: boo
                 {!newApp && preview.app_version && !sameVersion && ` into ${preview.app_version}`}
                 {sameVersion && <span className="font-sans text-muted-foreground"> on both</span>}
             </dd>
-            {preview.backup_id === null && (
+            {preview.backup_id === null && !preview.uploaded && (
                 <>
                     <dt className="text-muted-foreground">Record</dt>
                     <dd className="text-muted-foreground">None. Echowa found it in the bucket.</dd>
@@ -235,7 +239,7 @@ function BackupFacts({ preview, newApp }: { preview: RestorePreview; newApp: boo
 
 // Replaces says what the restore changes, and how it fails. MySQL's isn't
 // all or nothing, so it says so before it's confirmed.
-function Replaces({ preview }: { preview: RestorePreview }) {
+export function Replaces({ preview }: { preview: RestorePreview }) {
     const database = <code className="font-mono text-xs">{preview.app_database}</code>;
     if (preview.atomic) {
         return (
@@ -470,7 +474,7 @@ export function RestoresPanel({ app, restores }: { app: App; restores: RestoreSu
                                     {r.name}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                    {r.location}
+                                    {r.uploaded ? 'Uploaded' : r.location}
                                     {r.backup_id && `, backup #${r.backup_id}`}
                                 </div>
                             </TableCell>
@@ -527,7 +531,8 @@ function RestoreOutput({ app, restore, onClose }: { app: App; restore: RestoreSu
                 <DialogHeader>
                     <DialogTitle>Restore #{restore?.id}</DialogTitle>
                     <DialogDescription>
-                        {restore && `${formatDateTime(restore.started_at)} from ${restore.location}`}
+                        {restore &&
+                            `${formatDateTime(restore.started_at)} from ${restore.uploaded ? 'an uploaded file' : restore.location}`}
                     </DialogDescription>
                 </DialogHeader>
                 {detail === null ? (
@@ -536,7 +541,9 @@ function RestoreOutput({ app, restore, onClose }: { app: App; restore: RestoreSu
                     <div className="grid min-w-0 gap-3 text-sm">
                         {detail.message && <p>{detail.message}</p>}
                         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
-                            <dt className="text-muted-foreground">Key</dt>
+                            <dt className="text-muted-foreground">
+                                {detail.storage_location_id === null ? 'File' : 'Key'}
+                            </dt>
                             <dd className="font-mono text-xs break-all">{detail.key}</dd>
                             <dt className="text-muted-foreground">Read</dt>
                             <dd className="tabular-nums">
