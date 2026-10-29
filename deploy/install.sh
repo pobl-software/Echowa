@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Installs Echowa on a fresh Ubuntu server, or upgrades it (ADR 0021):
+# Installs Echowa on a fresh Ubuntu or Debian server, or upgrades it (ADR 0021):
 #
 #   curl -fsSL @RELEASE_URL@/install.sh | sudo bash
 #   curl -fsSL @RELEASE_URL@/install.sh | sudo bash -s -- --access https --domain echowa.example.com
 #
-# Run it on a fresh Ubuntu server. It downloads the newest release for this
+# Run it on a fresh Ubuntu or Debian server. It downloads the newest release for this
 # machine, checks it against the SHA-256 in latest.json, and runs
 # `echowa setup` with any options given, which installs Docker, the Swarm,
 # Traefik and Echowa itself. On a first install it asks how the UI should be

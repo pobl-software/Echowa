@@ -409,7 +409,9 @@ export function RestoreProgress({ restore }: { restore: RestoreSummary }) {
                             ? `Backing up first, as backup #${restore.safety_backup_id}.`
                             : 'Starting.'}{' '}
                     {restore.new_app
-                        ? 'This app was made for the restore, which begins once it’s running.'
+                        ? restore.read_bytes > 0
+                            ? 'This app was made for the restore.'
+                            : 'This app was made for the restore, which begins once it’s running.'
                         : 'Deploys and backups of this app wait until it has finished.'}
                 </p>
                 <div className="h-1.5 overflow-hidden rounded-full bg-muted">

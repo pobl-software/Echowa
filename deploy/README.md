@@ -3,7 +3,7 @@
 Everything a server needs to run Echowa: Docker Engine, a single-node
 Swarm, the `echowa-public` network, Traefik with Let's Encrypt, and Echowa
 itself as a systemd service. One command sets it all up on a fresh Ubuntu
-server:
+or Debian server:
 
 ```bash
 curl -fsSL https://get.echowa.dev/install.sh | sudo bash
@@ -24,7 +24,9 @@ stack) is compiled into the binary, in `app/setup/files/`.
 
 You need:
 
-- a fresh Ubuntu 24.04 server with a public IPv4 address and root or sudo.
+- a fresh Ubuntu 24.04 or 26.04, Debian 12 or Debian 13 server with a public
+  IPv4 address and root or sudo. Other Ubuntu releases, and distributions built on
+  Ubuntu, install with a warning that they aren't tested.
   Echowa owns the server: Traefik takes ports 80 and 443, and setup refuses
   to start if anything already listens there;
 - a domain whose DNS you control.
@@ -108,8 +110,9 @@ it did once it's done. `NO_COLOR` drops the colour. Without a terminal it
 writes plain lines: one when a step starts something slow, and one when
 each step is done. In order, `echowa setup`:
 
-1. checks this is a fresh Ubuntu server, with nothing on ports 80 and 443;
-2. installs Docker Engine from Docker's apt repository;
+1. checks this is a fresh Ubuntu or Debian server, with nothing on ports 80
+   and 443;
+2. installs Docker Engine from Docker's apt repository for that OS;
 3. creates a single-node Swarm and the `echowa-public` network;
 4. deploys Traefik with Let's Encrypt (no contact email needed), and with
    HTTPS, port 8192 and a route from your domain on it to Echowa;
@@ -337,9 +340,17 @@ Set the bucket up so a leak or a mistake costs little:
 - **Server-side encryption** from the provider. Echowa doesn't encrypt
   backups itself, so anyone with the bucket's keys can read them.
 - **Versioning**, if you want backups that a stolen key can't delete,
-  with a rule that expires old versions after a few weeks: a schedule's
-  deletes otherwise keep every dump it prunes. Object lock would stop
-  those deletes, so schedules couldn't keep to their number.
+  with a lifecycle rule that expires noncurrent versions after a few
+  weeks. On a versioned bucket a schedule's deletes only add delete
+  markers: the schedule still keeps to its number, but every dump it
+  prunes stays as an older version, and is billed, until the rule
+  expires it. The key above has no `s3:DeleteObjectVersion`, so it
+  can't remove them.
+- **No default retention from Object Lock.** With one, AWS wants a
+  checksum on every upload, which Echowa doesn't send: Test fails at
+  "Write a test object" with "Content-MD5 OR x-amz-checksum- HTTP
+  header is required for Put Object requests with Object Lock
+  parameters", and so does every backup.
 
 **Export** downloads the database straight to your browser, with nothing
 kept on the server or in S3: PostgreSQL's custom format (for

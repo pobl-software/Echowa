@@ -3,7 +3,7 @@
 <p align="center">
 	<a href="https://get.echowa.dev/latest.json"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fget.echowa.dev%2Flatest.json&query=%24.version&label=release&color=d14400&labelColor=1c1c1c&style=flat-square" alt="Latest release"></a>
 	<a href="LICENSE.md"><img src="https://img.shields.io/badge/licence-FSL--1.1--ALv2-2a2a2a?labelColor=1c1c1c&style=flat-square" alt="Licence: FSL-1.1-ALv2"></a>
-	<img src="https://img.shields.io/badge/runs_on-Ubuntu_24.04-2a2a2a?labelColor=1c1c1c&style=flat-square" alt="Runs on Ubuntu 24.04">
+	<img src="https://img.shields.io/badge/runs_on-Ubuntu_24.04_%26_26.04_%7C_Debian_12_%26_13-2a2a2a?labelColor=1c1c1c&style=flat-square" alt="Runs on Ubuntu 24.04 and 26.04 and Debian 12 and 13">
 	<img src="https://img.shields.io/badge/arch-amd64_%7C_arm64-2a2a2a?labelColor=1c1c1c&style=flat-square" alt="amd64 and arm64">
 </p>
 
@@ -140,8 +140,8 @@ so there's no database server to run beside it.
 
 ## Install
 
-On a fresh Ubuntu server (24.04 is the tested one, on amd64 or arm64), as a
-user with sudo:
+On a fresh Ubuntu or Debian server (Ubuntu 24.04 and 26.04 and Debian 12
+and 13 are the tested ones, on amd64 or arm64), as a user with sudo:
 
 ```bash
 curl -fsSL https://get.echowa.dev/install.sh | sudo bash

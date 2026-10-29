@@ -134,12 +134,29 @@ NAME="Ubuntu"
 VERSION_ID="24.04"
 VERSION_CODENAME=noble
 ID=ubuntu
+ID_LIKE=debian
 UBUNTU_CODENAME=noble
 `)
 	assert.Equal(t, "ubuntu", info["ID"])
 	assert.Equal(t, "24.04", info["VERSION_ID"])
-	assert.Contains(t, dockerSources(info), "Suites: noble\n")
-	assert.Contains(t, dockerSources(map[string]string{"VERSION_CODENAME": "jammy"}), "Suites: jammy\n")
+	repo, suite, ok := dockerRepo(info)
+	assert.True(t, ok)
+	assert.Equal(t, "Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: noble\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n", dockerSources(repo, suite))
+
+	for name, c := range map[string]struct {
+		osRelease, repo, suite string
+	}{
+		"Debian 12":     {"ID=debian\nVERSION_ID=\"12\"\nVERSION_CODENAME=bookworm", "debian", "bookworm"},
+		"Debian 13":     {"ID=debian\nVERSION_ID=\"13\"\nVERSION_CODENAME=trixie", "debian", "trixie"},
+		"Linux Mint 22": {"ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nVERSION_CODENAME=wilma\nUBUNTU_CODENAME=noble", "ubuntu", "noble"},
+		"Kali":          {"ID=kali\nID_LIKE=debian\nVERSION_CODENAME=kali-rolling", "", ""},
+		"Fedora":        {"ID=fedora\nVERSION_ID=43", "", ""},
+	} {
+		repo, suite, ok := dockerRepo(parseOSRelease(c.osRelease))
+		assert.Equal(t, c.repo != "", ok, name)
+		assert.Equal(t, c.repo, repo, name)
+		assert.Equal(t, c.suite, suite, name)
+	}
 }
 
 func TestRouteSource(t *testing.T) {
