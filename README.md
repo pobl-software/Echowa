@@ -110,6 +110,7 @@ server you understand completely, with the numbers to show it's healthy.
 - Zero-downtime, healthcheck-gated rollouts on Docker Swarm
 - Automatic TLS through Traefik and Let's Encrypt
 - PostgreSQL, MySQL and Redis from templates
+- Backups of PostgreSQL and MySQL to S3, with restores and exports
 - Host, app and database metrics, with a year of history
 - Live logs and live deploy output in the browser
 - Scheduled tasks in your app's own container
@@ -123,7 +124,7 @@ server you understand completely, with the numbers to show it's healthy.
 - Compose stacks and sidecars
 - More than one server
 - Preview environments per branch
-- Backing up your apps' data
+- Backups of Redis or app volumes
 - Teams and roles. One admin, by design
 
 </td>

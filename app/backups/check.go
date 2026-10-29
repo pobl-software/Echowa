@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/aws/smithy-go"
 )
@@ -45,12 +46,30 @@ func Check(ctx context.Context, store Store, prefix string) []Step {
 	}
 	if !step("Read it back", readBack(ctx, store, key, body)) ||
 		!step("Find it in a listing", findInListing(ctx, store, key)) {
-		_ = store.Delete(ctx, key)
+		cleanUp(ctx, store, key)
 		return steps
 	}
 	step("Delete it", store.Delete(ctx, key))
 
 	return steps
+}
+
+// cleanupTimeout bounds the delete after a step ran out of time.
+const cleanupTimeout = 10 * time.Second
+
+// cleanUp deletes key after a failed step. A step that ran out of time
+// leaves ctx done, so the delete then gets its own time in the
+// background rather than hold up the answer.
+func cleanUp(ctx context.Context, store Store, key string) {
+	if ctx.Err() == nil {
+		_ = store.Delete(ctx, key)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		_ = store.Delete(ctx, key)
+	}()
 }
 
 // Passed says whether every step of a Check passed.

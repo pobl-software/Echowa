@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
@@ -55,6 +57,37 @@ func TestCheckCleansUpWhenALaterStepFails(t *testing.T) {
 	assert.Empty(t, steps[1].Error)
 	assert.Equal(t, "These keys aren't allowed to do this in the bucket.", steps[2].Error)
 	assert.Empty(t, store.Keys(), "the test object is deleted after a failed step")
+}
+
+// slowGet writes but never reads back in time, like an endpoint slower
+// than the Test's deadline. Its Delete refuses a done ctx, as the SDK's
+// does.
+type slowGet struct{ *Fake }
+
+func (s slowGet) Get(ctx context.Context, _ string) (io.ReadCloser, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (s slowGet) Delete(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return s.Fake.Delete(ctx, key)
+}
+
+func TestCheckCleansUpAfterRunningOutOfTime(t *testing.T) {
+	store := slowGet{NewFake()}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	steps := Check(ctx, store, "server-1")
+
+	require.Len(t, steps, 2)
+	assert.Equal(t, "The endpoint didn't answer in time.", steps[1].Error)
+	assert.Eventually(t, func() bool { return len(store.Keys()) == 0 }, time.Second, 10*time.Millisecond,
+		"the test object is deleted after the deadline")
 }
 
 func TestDescribe(t *testing.T) {
