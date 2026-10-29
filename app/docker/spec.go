@@ -52,6 +52,11 @@ func swarmSpec(spec ServiceSpec, cfg Config, forceUpdate uint64) (swarm.ServiceS
 	}
 
 	labels := map[string]string{LabelManaged: "true", LabelApp: spec.App}
+	containerLabels := map[string]string{LabelApp: spec.App}
+	if spec.Role != "" {
+		labels[LabelRole] = spec.Role
+		containerLabels[LabelRole] = spec.Role
+	}
 	if spec.Route != nil {
 		traefik, err := TraefikLabels(spec.Name, *spec.Route, cfg.CertResolver)
 		if err != nil {
@@ -94,7 +99,8 @@ func swarmSpec(spec ServiceSpec, cfg Config, forceUpdate uint64) (swarm.ServiceS
 		TaskTemplate: swarm.TaskSpec{
 			ContainerSpec: &swarm.ContainerSpec{
 				Image:       spec.Image,
-				Labels:      map[string]string{LabelApp: spec.App},
+				Labels:      containerLabels,
+				Command:     spec.Entrypoint,
 				Args:        spec.Args,
 				Env:         envList(spec.Env),
 				Healthcheck: healthConfig(spec.Healthcheck),

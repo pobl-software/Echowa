@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -350,6 +352,22 @@ func (f *Fake) RemoveService(_ context.Context, name string) error {
 	f.removed = append(f.removed, name)
 
 	return nil
+}
+
+func (f *Fake) ServicesWithRole(_ context.Context, role string) ([]ServiceRef, error) {
+	if role == "" {
+		return nil, errors.New("list services: no role given")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	refs := []ServiceRef{}
+	for _, name := range slices.Sorted(maps.Keys(f.services)) {
+		if spec := f.services[name].spec; spec.Role == role {
+			refs = append(refs, ServiceRef{Name: name, App: spec.App})
+		}
+	}
+
+	return refs, nil
 }
 
 // RemoveVolume fails with ErrVolumeInUse while a service mounts the

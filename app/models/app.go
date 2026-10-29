@@ -59,3 +59,9 @@ type App struct {
 func (a *App) ServiceName() string {
 	return ServicePrefix + a.Name
 }
+
+// PoolerServiceName is the Swarm service name of the app's connection
+// pooler (ADR 0035).
+func (a *App) PoolerServiceName() string {
+	return a.ServiceName() + "-pooler"
+}

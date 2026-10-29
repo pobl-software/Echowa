@@ -64,3 +64,21 @@ func TestFakeRemoveVolumeWaitsForTheService(t *testing.T) {
 	exists, _ = fake.VolumeExists(ctx, "echowa-db-data")
 	assert.False(t, exists)
 }
+
+func TestFakeListsServicesByRole(t *testing.T) {
+	ctx := context.Background()
+	fake := &Fake{}
+	require.NoError(t, fake.DeployService(ctx, ServiceSpec{Name: "echowa-db", App: "db", Image: "postgres@sha256:a", Replicas: 1}))
+	require.NoError(t, fake.DeployService(ctx, ServiceSpec{Name: "echowa-db-pooler", App: "db", Role: RolePooler, Image: "pgbouncer@sha256:a", Replicas: 1}))
+
+	poolers, err := fake.ServicesWithRole(ctx, RolePooler)
+	require.NoError(t, err)
+	assert.Equal(t, []ServiceRef{{Name: "echowa-db-pooler", App: "db"}}, poolers)
+
+	require.NoError(t, fake.RemoveService(ctx, "echowa-db-pooler"))
+	poolers, err = fake.ServicesWithRole(ctx, RolePooler)
+	require.NoError(t, err)
+	assert.Empty(t, poolers)
+	_, err = fake.ServicesWithRole(ctx, "")
+	assert.Error(t, err, "an empty role would match every service without one")
+}

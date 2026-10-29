@@ -190,3 +190,33 @@ func TestTemplatesWithTLSReadTheCertificateFromTheEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestPoolersArePinnedAndReadTheirTemplatesEnv(t *testing.T) {
+	var pooled []string
+	for _, tmpl := range All() {
+		p := tmpl.Pooler
+		if p == nil {
+			continue
+		}
+		pooled = append(pooled, tmpl.Slug)
+		t.Run(tmpl.Slug, func(t *testing.T) {
+			assert.Regexp(t, `@sha256:[0-9a-f]{64}$`, p.Image, "a server runs the image this release was tested with")
+			assert.True(t, rules.IsPort(p.Port), "port")
+			assert.Contains(t, strings.Join(p.Command, " "), "listen_port = "+strconv.Itoa(p.Port))
+			assert.NotEmpty(t, p.Healthcheck)
+
+			keys := map[string]bool{}
+			for _, e := range tmpl.Env {
+				keys[e.Key] = true
+				if e.Value == Generated {
+					rest := strings.ReplaceAll(p.Healthcheck, `="$`+e.Key+`"`, "")
+					assert.NotContains(t, rest, "$"+e.Key, "the healthcheck passes %s in an env var, not an argument", e.Key)
+				}
+			}
+			for _, key := range p.Env {
+				assert.True(t, keys[key], "%s is one of the template's env vars", key)
+			}
+		})
+	}
+	assert.Equal(t, []string{"postgres"}, pooled)
+}

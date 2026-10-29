@@ -111,8 +111,25 @@ func TestSwarmSpecWithoutVolumesOrArgsKeepsTheImageDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Nil(t, got.TaskTemplate.ContainerSpec.Args, "nil keeps the image's CMD")
+	assert.Nil(t, got.TaskTemplate.ContainerSpec.Command, "nil keeps the image's ENTRYPOINT")
+	assert.Equal(t, map[string]string{LabelApp: "a"}, got.TaskTemplate.ContainerSpec.Labels)
 	assert.Empty(t, got.TaskTemplate.ContainerSpec.Mounts)
 	assert.Equal(t, swarm.UpdateOrderStartFirst, got.UpdateConfig.Order)
+}
+
+func TestSwarmSpecForARoleServiceLabelsItsTasks(t *testing.T) {
+	got, err := swarmSpec(ServiceSpec{
+		Name: "echowa-db-pooler", App: "db", Role: RolePooler, Image: testDigest, Replicas: 1,
+		Entrypoint: []string{"sh", "-c", "exec pgbouncer"},
+	}, DefaultConfig(), 0)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]string{LabelManaged: "true", LabelApp: "db", LabelRole: RolePooler}, got.Labels,
+		"the service still belongs to the app")
+	assert.Equal(t, map[string]string{LabelApp: "db", LabelRole: RolePooler}, got.TaskTemplate.ContainerSpec.Labels,
+		"the metrics collector reads the role to keep its tasks out of the app's figures")
+	assert.Equal(t, []string{"sh", "-c", "exec pgbouncer"}, got.TaskTemplate.ContainerSpec.Command)
+	assert.Nil(t, got.TaskTemplate.ContainerSpec.Args, "the image's CMD isn't added back (the pooler's docker test checks Docker drops it)")
 }
 
 func TestSwarmSpecRejectsBadVolumes(t *testing.T) {

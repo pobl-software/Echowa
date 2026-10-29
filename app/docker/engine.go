@@ -356,6 +356,24 @@ func (e *Engine) RemoveService(ctx context.Context, name string) error {
 	return nil
 }
 
+func (e *Engine) ServicesWithRole(ctx context.Context, role string) ([]ServiceRef, error) {
+	if role == "" {
+		return nil, errors.New("list services: no role given")
+	}
+	list, err := e.api.ServiceList(ctx, client.ServiceListOptions{
+		Filters: make(client.Filters).Add("label", LabelManaged+"=true", LabelRole+"="+role),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list %s services: %w", role, err)
+	}
+	refs := make([]ServiceRef, 0, len(list.Items))
+	for _, svc := range list.Items {
+		refs = append(refs, ServiceRef{Name: svc.Spec.Name, App: svc.Spec.Labels[LabelApp]})
+	}
+
+	return refs, nil
+}
+
 // RemoveVolume never forces: Docker refuses while a container uses the
 // volume, which is the signal to wait for Swarm to finish removing tasks.
 func (e *Engine) RemoveVolume(ctx context.Context, name string) error {

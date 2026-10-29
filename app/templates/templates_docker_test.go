@@ -21,6 +21,7 @@ import (
 	"maps"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,119 @@ func TestPostgresTemplate(t *testing.T) {
 	out, err = psql(run.seed.Env["POSTGRES_PASSWORD"], "SELECT x FROM kept")
 	require.NoError(t, err)
 	assert.Equal(t, "42", strings.TrimSpace(out), "the table survived the redeploy")
+}
+
+// The pooler signs in to PostgreSQL as the app's user, shares at most 50
+// server connections in transaction mode, and keeps serving across a
+// database redeploy (ADR 0035). It's deployed as services.PoolerSpec
+// builds it.
+func TestPostgresPooler(t *testing.T) {
+	run := deployTemplate(t, "postgres", false)
+	tmpl, _ := Find("postgres")
+	pooler := tmpl.Pooler
+	image, err := run.engine.PullImage(run.ctx, pooler.Image, nil)
+	require.NoError(t, err)
+	_, digest, _ := strings.Cut(image, "@")
+	assert.True(t, strings.HasSuffix(pooler.Image, "@"+digest), "the pull resolved to the pinned digest: %s", image)
+
+	env, err := pooler.EnvFrom(run.spec.Name, run.seed.Env)
+	require.NoError(t, err)
+	pool := &templateRun{t: t, ctx: run.ctx, engine: run.engine, seed: run.seed, spec: docker.ServiceSpec{
+		Name:        run.spec.Name + "-pooler",
+		App:         run.spec.App,
+		Role:        docker.RolePooler,
+		Image:       image,
+		Env:         env,
+		Replicas:    1,
+		Entrypoint:  pooler.Command,
+		Healthcheck: &docker.Healthcheck{Command: pooler.Healthcheck},
+		Limits:      pooler.Limits,
+	}}
+	t.Cleanup(func() { _ = run.engine.RemoveService(context.Background(), pool.spec.Name) })
+	pool.deploy()
+
+	user, password := run.seed.Env["POSTGRES_USER"], run.seed.Env["POSTGRES_PASSWORD"]
+	port := strconv.Itoa(pooler.Port)
+	psql := func(password, sql string) (string, error) {
+		return run.client("env", "PGPASSWORD="+password, "psql", "-h", pool.spec.Name, "-p", port, "-U", user, "-d", user, "-tAc", sql)
+	}
+	out, err := psql(password, "SELECT current_user")
+	require.NoError(t, err, out)
+	assert.Equal(t, user, strings.TrimSpace(out), "signed in through the pooler")
+	out, err = psql("wrong", "SELECT 1")
+	assert.Error(t, err, "a wrong password is refused")
+	assert.Contains(t, out, "authentication failed")
+
+	config, err := exec.Command("docker", "inspect", "-f", "{{json .Config.Cmd}}", pool.container()).Output()
+	require.NoError(t, err)
+	assert.Contains(t, []string{"null", "[]"}, strings.TrimSpace(string(config)), "Docker dropped the image's CMD")
+	cmdline, err := pool.exec("cat", "/proc/1/cmdline")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(cmdline, "pgbouncer"), "sh execs into PgBouncer: %q", cmdline)
+	assert.NotContains(t, cmdline, password)
+	environ, err := pool.exec("cat", "/proc/1/environ")
+	require.NoError(t, err)
+	assert.NotContains(t, environ, password, "the script unsets it before PgBouncer starts")
+	status, err := pool.exec("cat", "/proc/1/status")
+	require.NoError(t, err)
+	assert.NotRegexp(t, `(?m)^Uid:\s+0\s`, status, "the image's user, not root")
+
+	poolers, err := run.engine.ServicesWithRole(run.ctx, docker.RolePooler)
+	require.NoError(t, err)
+	assert.Contains(t, poolers, docker.ServiceRef{Name: pool.spec.Name, App: run.spec.App})
+	assert.NotContains(t, poolers, docker.ServiceRef{Name: run.spec.Name, App: run.spec.App}, "the database has no role")
+
+	// Named prepared statements from 60 clients on each of two databases,
+	// which PgBouncer pools apart, so 120 clients share the 50 server
+	// connections. A thread per client, since pgbench's prepare blocks its
+	// thread (ADR 0035).
+	databases := []string{user, "postgres"}
+	for _, db := range databases {
+		out, err := run.client("env", "PGPASSWORD="+password, "pgbench", "-q", "-i", "-s", "1", "-h", run.spec.Name, "-U", user, db)
+		require.NoError(t, err, out)
+	}
+	results := make([]string, len(databases))
+	errs := make([]error, len(databases))
+	done := make(chan int)
+	for i, db := range databases {
+		go func() {
+			results[i], errs[i] = run.client("env", "PGPASSWORD="+password, "timeout", "90", "pgbench",
+				"-M", "prepared", "-c", "60", "-j", "60", "-T", "5", "-h", pool.spec.Name, "-p", port, "-U", user, db)
+			done <- i
+		}()
+	}
+	for range databases {
+		i := <-done
+		require.NoError(t, errs[i], results[i])
+		assert.Contains(t, results[i], "number of failed transactions: 0 ", results[i])
+		assert.NotContains(t, results[i], "aborted", results[i])
+	}
+	out, err = run.client("env", "PGPASSWORD="+password, "psql", "-h", run.spec.Name, "-U", user, "-d", user, "-tAc",
+		"SELECT count(*) FROM pg_stat_activity WHERE usename = current_user AND backend_type = 'client backend' AND pid <> pg_backend_pid()")
+	require.NoError(t, err, out)
+	servers, err := strconv.Atoi(strings.TrimSpace(out))
+	require.NoError(t, err, out)
+	t.Logf("server connections the pooler kept open: %d", servers)
+	assert.LessOrEqual(t, servers, 50, "the pooler's server connections, over both databases")
+	assert.GreaterOrEqual(t, servers, 25, "the load went through the pool")
+
+	logs, err := exec.Command("docker", "service", "logs", "--raw", pool.spec.Name).CombinedOutput()
+	require.NoError(t, err)
+	assert.NotContains(t, string(logs), "login attempt", "connections aren't logged")
+
+	before := pool.container()
+	run.redeploy()
+	out, err = psql(password, "SELECT count(*) FROM pgbench_branches")
+	require.NoError(t, err, "the first query after the database's redeploy: %s", out)
+	assert.Equal(t, "1", strings.TrimSpace(out))
+	assert.Equal(t, before, pool.container(), "Swarm didn't replace the pooler's task")
+
+	// With no PostgreSQL at all, the pooler is still healthy, so Swarm
+	// never restarts it for the database's sake.
+	out2, err := exec.Command("docker", "service", "scale", "--detach=false", run.spec.Name+"=0").CombinedOutput()
+	require.NoError(t, err, string(out2))
+	out, err = pool.exec("sh", "-c", pooler.Healthcheck)
+	assert.NoError(t, err, "the healthcheck passes without the database: %s", out)
 }
 
 func TestMySQLTemplate(t *testing.T) {

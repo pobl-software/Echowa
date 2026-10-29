@@ -149,6 +149,7 @@ func TestAppTasksAreSummed(t *testing.T) {
 				{ID: "a", App: "blog", Read: read(0), CPUNanos: 0, NetRxBytes: 0},
 				{ID: "b", App: "blog", Read: read(time.Second), CPUNanos: 0, NetRxBytes: 0},
 				{ID: "t", Name: "traefik", Read: read(0)},
+				{ID: "p", Name: "echowa-blog-pooler.1.x", App: "blog", Role: docker.RolePooler, Read: read(0)},
 			},
 			{
 				// Docker read "b" ten seconds after the last time, not
@@ -156,6 +157,7 @@ func TestAppTasksAreSummed(t *testing.T) {
 				{ID: "a", App: "blog", Read: read(15 * time.Second), CPUNanos: 3e9, NetRxBytes: 1500, MemoryUsed: 300, MemoryLimit: 800},
 				{ID: "b", App: "blog", Read: read(11 * time.Second), CPUNanos: 1e9, NetRxBytes: 1000, MemoryUsed: 200, MemoryLimit: 800},
 				{ID: "t", Name: "traefik", Read: read(15 * time.Second), CPUNanos: 1.5e9, MemoryUsed: 50, MemoryLimit: 1000},
+				{ID: "p", Name: "echowa-blog-pooler.1.x", App: "blog", Role: docker.RolePooler, Read: read(15 * time.Second), CPUNanos: 1.5e9, MemoryUsed: 8, MemoryLimit: 128},
 			},
 		},
 	}
@@ -170,10 +172,13 @@ func TestAppTasksAreSummed(t *testing.T) {
 	assert.Equal(t, uint64(500), blog.MemoryUsed)
 	assert.Equal(t, uint64(1000), blog.MemoryLimit, "two limits capped at the host's memory")
 
-	require.Len(t, r.Others, 1)
-	assert.Equal(t, "traefik", r.Others[0].Name)
-	assert.InDelta(t, 10, *r.Others[0].CPUPercent, 1e-9)
-	assert.Equal(t, 3, *r.Host.Containers)
+	require.Len(t, r.Others, 2)
+	assert.Equal(t, Container{Name: "echowa-blog-pooler.1.x", App: "blog", Role: docker.RolePooler, CPUPercent: ptr(10.0), MemoryUsed: 8, MemoryLimit: 128}, r.Others[0],
+		"the pooler runs beside blog, outside its figures")
+	assert.Equal(t, "traefik", r.Others[1].Name)
+	assert.Empty(t, r.Others[1].App)
+	assert.InDelta(t, 10, *r.Others[1].CPUPercent, 1e-9)
+	assert.Equal(t, 4, *r.Host.Containers)
 }
 
 func TestANewTaskLeavesItsAppWithoutRates(t *testing.T) {

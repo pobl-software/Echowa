@@ -206,8 +206,8 @@ func containerFigures(stats []docker.ContainerStats, prev *snapshot, at time.Tim
 
 	for _, s := range stats {
 		r := ratesFor(s, prev, at)
-		if s.App == "" {
-			others = append(others, Container{Name: s.Name, CPUPercent: r.cpuPercent, MemoryUsed: s.MemoryUsed, MemoryLimit: s.MemoryLimit})
+		if s.App == "" || s.Role != "" {
+			others = append(others, Container{Name: s.Name, App: s.App, Role: s.Role, CPUPercent: r.cpuPercent, MemoryUsed: s.MemoryUsed, MemoryLimit: s.MemoryLimit})
 			continue
 		}
 		app := apps[s.App]

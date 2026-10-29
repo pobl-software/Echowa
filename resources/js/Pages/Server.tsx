@@ -252,18 +252,28 @@ function PerEntityPanel({
     );
 }
 
+// What a container that isn't an app's own task is.
+function containerNote(container: Reading['other_containers'][number]): string {
+    if (!container.app) {
+        return 'Not managed by Echowa';
+    }
+    return container.role === 'pooler' ? `Connection pooler for ${container.app}` : `Runs beside ${container.app}`;
+}
+
 function traffic(lines: ChartLine[]): number {
     return lines.reduce((sum, line) => sum + line.points.reduce((total, point) => total + (point.avg ?? 0), 0), 0);
 }
 
 // Every running container: Echowa's apps, summed over their tasks and
-// linked, then the rest (Traefik, anything else on the server).
+// linked, then the rest: apps' poolers, linked to their app, and Traefik
+// and anything else on the server.
 function Containers({ latest, appIds }: { latest: Reading; appIds: Record<string, number> }) {
     const rows = [
         ...latest.apps.map((app) => ({
             key: `app:${app.app}`,
             name: app.app,
             href: appIds[app.app] ? `/apps/${appIds[app.app]}` : undefined,
+            note: undefined,
             tasks: app.tasks,
             cpu: app.cpu_percent,
             used: app.memory_used_bytes,
@@ -272,7 +282,8 @@ function Containers({ latest, appIds }: { latest: Reading; appIds: Record<string
         ...latest.other_containers.map((container) => ({
             key: `other:${container.name}`,
             name: container.name,
-            href: undefined,
+            href: appIds[container.app] ? `/apps/${appIds[container.app]}` : undefined,
+            note: containerNote(container),
             tasks: null,
             cpu: container.cpu_percent,
             used: container.memory_used_bytes,
@@ -307,10 +318,8 @@ function Containers({ latest, appIds }: { latest: Reading; appIds: Record<string
                                     ) : (
                                         <span className="block truncate font-mono text-sm">{row.name}</span>
                                     )}
-                                    {!row.href && (
-                                        <span className="block text-xs text-muted-foreground">
-                                            Not managed by Echowa
-                                        </span>
+                                    {row.note && (
+                                        <span className="block text-xs text-muted-foreground">{row.note}</span>
                                     )}
                                 </TableCell>
                                 <TableCell className="hidden tabular-nums sm:table-cell">{row.tasks ?? '—'}</TableCell>

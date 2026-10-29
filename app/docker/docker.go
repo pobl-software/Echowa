@@ -57,6 +57,10 @@ type Client interface {
 	// an error.
 	RemoveService(ctx context.Context, name string) error
 
+	// ServicesWithRole lists the managed services labelled with role, such
+	// as every app's pooler. role can't be empty.
+	ServicesWithRole(ctx context.Context, role string) ([]ServiceRef, error)
+
 	// RemoveVolume removes a volume Echowa's services created. Removing a
 	// missing volume is not an error. The error wraps ErrVolumeInUse while a
 	// container, even a stopped task, still uses it.
@@ -128,7 +132,18 @@ var (
 const (
 	LabelManaged = "echowa.managed"
 	LabelApp     = "echowa.app"
+	// LabelRole marks a service that runs beside an app's own.
+	LabelRole = "echowa.role"
 )
+
+// RolePooler is a PostgreSQL app's PgBouncer (ADR 0035).
+const RolePooler = "pooler"
+
+// ServiceRef names a service and the app it belongs to.
+type ServiceRef struct {
+	Name string
+	App  string
+}
 
 // RegistryAuth is the login for a private registry.
 type RegistryAuth struct {
@@ -144,6 +159,10 @@ type ServiceSpec struct {
 	Image    string            // pinned digest reference, repo@sha256:...
 	Env      map[string]string // environment variables
 	Replicas uint64
+	// Role is set on a service that runs beside the app's own, such as
+	// RolePooler. The metrics collector keeps its tasks out of the app's
+	// figures.
+	Role string
 	// Route makes the service reachable through Traefik. Nil means it
 	// isn't routed.
 	Route *Route
@@ -152,6 +171,9 @@ type ServiceSpec struct {
 	// Args replace the image's CMD and keep its ENTRYPOINT. They aren't run
 	// through a shell. Nil keeps the image's CMD.
 	Args []string
+	// Entrypoint replaces the image's ENTRYPOINT, and its CMD too unless
+	// Args are set. Nil keeps the image's.
+	Entrypoint []string
 	// Volumes keep data across tasks. A service with any runs one replica
 	// and updates stop-first, since a volume has one writer.
 	Volumes []Volume
@@ -328,7 +350,10 @@ type ContainerStats struct {
 	Name string // without Docker's leading slash
 	// App is the echowa.app label Echowa puts on every task of an app.
 	// Empty for containers Echowa doesn't manage.
-	App  string
+	App string
+	// Role is the echowa.role label of a task that runs beside the app's
+	// own, such as its pooler. Empty for the app's own tasks.
+	Role string
 	Read time.Time // when Docker read the counters
 
 	CPUNanos    uint64 // CPU time used, all cores

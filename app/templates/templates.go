@@ -54,6 +54,9 @@ type Template struct {
 	// Backup dumps and restores the database (ADR 0034). Nil for a
 	// template Echowa doesn't back up, such as Redis.
 	Backup *Backup
+	// Pooler is the connection pooler the app can run beside the server
+	// (ADR 0035). Nil for a template without one.
+	Pooler *Pooler
 }
 
 // TLS turns a template's server's TLS on with the certificate in the
@@ -253,6 +256,7 @@ var all = []Template{
 		},
 		Inspect: postgresInspect,
 		Backup:  postgresBackup,
+		Pooler:  pgbouncer,
 	},
 	{
 		Slug:        "mysql",
