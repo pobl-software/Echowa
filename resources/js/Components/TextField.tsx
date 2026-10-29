@@ -15,8 +15,18 @@ interface TextFieldProps extends ComponentProps<typeof Input> {
 }
 
 // A labelled input with its validation error: the building block for forms.
-export function TextField({ id, label, error, labelAction, description, ...props }: TextFieldProps) {
-    const describedBy = [error && `${id}-error`, description && `${id}-description`].filter(Boolean).join(' ');
+export function TextField({
+    id,
+    label,
+    error,
+    labelAction,
+    description,
+    'aria-describedby': callerDescribedBy,
+    ...props
+}: TextFieldProps) {
+    const describedBy = [callerDescribedBy, error && `${id}-error`, description && `${id}-description`]
+        .filter(Boolean)
+        .join(' ');
 
     return (
         <Field data-invalid={!!error || undefined}>

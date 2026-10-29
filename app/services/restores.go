@@ -526,7 +526,8 @@ var errDumpMismatch = errors.New("the dump doesn't match its manifest")
 // checkedDump passes a dump through, holding its last checkTail bytes back
 // until all of it has been read and its size and SHA-256 match the
 // manifest's. A dump that doesn't match ends in errDumpMismatch instead of
-// its last bytes.
+// its last bytes, and one longer than its manifest says ends as soon as
+// it is, so an archive with more appended never reaches its end either.
 type checkedDump struct {
 	r      io.Reader
 	size   int64
@@ -550,7 +551,12 @@ func (c *checkedDump) Read(p []byte) (int, error) {
 		chunk := make([]byte, 32<<10)
 		n, err := c.r.Read(chunk)
 		c.h.Write(chunk[:n])
-		c.n.Add(int64(n))
+		if c.n.Add(int64(n)) > c.size {
+			// Longer than its manifest: what's held back may be the
+			// archive's end, so none of it goes out.
+			c.err = errDumpMismatch
+			continue
+		}
 		c.held = append(c.held, chunk[:n]...)
 		if over := len(c.held) - checkTail; over > 0 {
 			c.out = slices.Clone(c.held[:over])
