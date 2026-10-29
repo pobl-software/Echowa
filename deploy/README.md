@@ -281,12 +281,78 @@ Deployed apps keep running throughout; Echowa only manages them.
 
 ### Backing up template apps
 
-Echowa's backup holds its own database, not your apps' data. A PostgreSQL,
-MySQL or Redis app made from a template keeps its data in a Docker volume,
-`echowa-<app>-data`, which survives deploys but not deleting the app.
-Back it up yourself, and before deleting the app if you want the data.
+Echowa's own backup holds its database, not your apps' data. A
+PostgreSQL, MySQL or Redis app made from a template keeps its data in a
+Docker volume, `echowa-<app>-data`, which survives deploys but not
+deleting the app.
 
-Each command below runs in the app's container. Find it with:
+**PostgreSQL and MySQL apps** have a **Backups** section that dumps the
+app's database (the one its connection URL names) to S3-compatible
+storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, Hetzner or your
+own. Other databases you made by hand in the same server aren't
+included. Redis apps have no Backups section; use the commands further
+down.
+
+1. **Add a storage location.** In **Settings, S3 storage**, click **Add
+   location** and fill in the endpoint, region, bucket, an optional
+   folder (the server's host name is a good one), and an access key.
+   For R2 the region is `auto`. Turn on path-style addressing only for
+   a provider that needs it (most self-hosted servers). Click **Test**,
+   which writes, reads, lists and deletes a small object, and names the
+   step that failed.
+2. **Back up now** from the app's Backups section, or **Add schedule**:
+   a schedule, a time zone and how many successful backups to keep (7
+   by default). After each success, the schedule deletes its oldest
+   backups past that number. Backups made by hand, and the ones taken
+   before a restore, are never deleted for you. If a scheduled backup
+   fails or is skipped, the app's Overview says so until you dismiss it.
+3. **Restore** from a backup's menu in the History, or from **Restore
+   from the bucket**, which lists the backups in the location's folder
+   for this app, including ones another server made. You type the app's
+   name to confirm. By default, Echowa first backs up the current data,
+   so you can go back. PostgreSQL restores all or nothing; MySQL restores
+   one table at a time and stops at the first error, which is when that
+   first backup matters. A backup never restores into an older server.
+   **Into a new app** creates a new app on the tag you choose (the same
+   major version or newer) and restores into it once it's running.
+
+Each backup is two objects in the bucket,
+`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL) and a
+`.json` manifest beside it with the app, template, server version, size
+and SHA-256. A restore checks the dump against its manifest as it reads
+it, and stops before the end if they differ. Echowa needs nothing else to find them again:
+after losing the server, install Echowa on a new one, add a location
+with the same bucket and folder, then **New app, From a backup**.
+
+Set the bucket up so a leak or a mistake costs little:
+
+- **A key for this bucket only,** allowed `s3:PutObject`,
+  `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket`,
+  `s3:ListBucketMultipartUploads` and `s3:AbortMultipartUpload`. On R2,
+  an API token with Object Read & Write on the one bucket. The key is
+  stored encrypted with `APP_KEY`, and never shown again.
+- **A lifecycle rule that aborts incomplete multipart uploads after a
+  day.** Echowa aborts its own when a backup fails or it restarts, but
+  not if the server is gone.
+- **Server-side encryption** from the provider. Echowa doesn't encrypt
+  backups itself, so anyone with the bucket's keys can read them.
+- **Versioning**, if you want backups that a stolen key can't delete,
+  with a rule that expires old versions after a few weeks: a schedule's
+  deletes otherwise keep every dump it prunes. Object lock would stop
+  those deletes, so schedules couldn't keep to their number.
+
+**Export** downloads the database straight to your browser, with nothing
+kept on the server or in S3: PostgreSQL's custom format (for
+`pg_restore` or pgAdmin) or plain SQL, and gzipped SQL for MySQL.
+Deploys of the app wait until the download ends, so for a big database
+on a slow connection, back up to S3 and download that instead.
+**Restore from a file** takes a file Export or a backup's download made
+and restores it into the app, with the same checks as a restore from
+the bucket. The upload needs its size plus 1 GiB free beside Echowa's
+database (`/var/lib/echowa`), and is deleted when the restore ends.
+
+**When Echowa is down,** or for a Redis app, use these. Each command
+runs in the app's container. Find it with:
 
 ```bash
 c=$(sudo docker ps -q -f label=com.docker.swarm.service.name=echowa-<app>)

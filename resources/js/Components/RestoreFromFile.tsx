@@ -4,7 +4,6 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 import { BackupFacts, Replaces } from '@/Components/AppRestores';
 import { Refusal } from '@/Components/NewAppRestore';
-import { Panel } from '@/Components/Panel';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
@@ -47,36 +46,27 @@ export function RestoreFromFile({
     const extension = section.exports[0]?.extension;
 
     return (
-        <Panel
-            title="Restore from a file"
-            description={
-                <>
-                    Uploads the {extension ? <code className="font-mono text-xs">.{extension}</code> : 'dump'} file that
-                    Export or a backup&apos;s download made, checks it, then restores it into the{' '}
-                    <code className="font-mono text-xs">{section.database}</code> database. The file is deleted from the
-                    server when the restore ends.
-                </>
-            }
-        >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <input
-                    ref={input}
-                    type="file"
-                    className="hidden"
-                    aria-label="File to restore"
-                    onChange={(e) => {
-                        setFile(e.target.files?.[0] ?? null);
-                        e.target.value = '';
-                    }}
-                />
-                <Button variant="outline" disabled={blocked !== null} onClick={() => input.current?.click()}>
-                    <UploadIcon />
-                    Choose a file
-                </Button>
-                {blocked && <p className="text-sm text-muted-foreground">{blocked}</p>}
-            </div>
+        <div className="flex flex-col items-start gap-2">
+            <input
+                ref={input}
+                type="file"
+                className="hidden"
+                aria-label="File to restore"
+                onChange={(e) => {
+                    setFile(e.target.files?.[0] ?? null);
+                    e.target.value = '';
+                }}
+            />
+            <Button variant="outline" disabled={blocked !== null} onClick={() => input.current?.click()}>
+                <UploadIcon />
+                Choose a file
+            </Button>
+            <p className="text-sm text-muted-foreground">
+                {blocked ??
+                    `A ${extension ? `.${extension} ` : ''}file from Export or a backup's download. It's checked before anything is restored, and deleted from the server afterwards.`}
+            </p>
             <FileRestoreDialog app={app} file={file} locations={section.locations} onClose={() => setFile(null)} />
-        </Panel>
+        </div>
     );
 }
 

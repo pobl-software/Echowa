@@ -1,8 +1,12 @@
 import { Link, router, useForm } from '@inertiajs/react';
 import {
     ArchiveIcon,
+    ChevronDownIcon,
+    CloudDownloadIcon,
     DownloadIcon,
+    EllipsisIcon,
     FileTextIcon,
+    FileUpIcon,
     HistoryIcon,
     PencilIcon,
     PlusIcon,
@@ -11,11 +15,11 @@ import {
     XIcon,
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
-
 import { RestoreDialog, RestoreFromBucket, RestoreProgress, RestoresPanel } from '@/Components/AppRestores';
+import { ConfigSection } from '@/Components/ConfigPanel';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
 import type { RestoreSource } from '@/Components/NewAppRestore';
-import { Panel } from '@/Components/Panel';
+import { Panel, Stats } from '@/Components/Panel';
 import { RestoreFromFile } from '@/Components/RestoreFromFile';
 import { browserZone, type Preset, presetLabel, ScheduleFields, ScheduleText } from '@/Components/ScheduleFields';
 import { RunStatusBadge } from '@/Components/StatusBadge';
@@ -30,6 +34,15 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/Components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuGroup,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/Components/ui/dropdown-menu';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/Components/ui/input-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
@@ -65,13 +78,12 @@ const presets: Preset[] = [
     { value: '0 3 1 * *', label: 'The 1st of every month at 03:00' },
 ];
 
-// AppBackups is a template database's Backups section (ADR 0034): back up
-// now to a storage location, export, restore from a file, the backups made
-// so far, and restores. held is what holds the app's lock, the page's busy
-// prop. Export and restoring from a file need no storage location.
+// AppBackups is a template database's Backups section (ADR 0034). From
+// the top: a running restore, a summary of how well the app is covered,
+// its backups with Back up now, its schedules, its restores, then the ways
+// in and out that need no history: Export, a file, and the bucket. held is
+// what holds the app's lock, the page's busy prop.
 export function AppBackups({ app, section, held }: { app: App; section: BackupsSection; held: AppWork }) {
-    const [location, setLocation] = useState<number | null>(() => section.locations[0]?.id ?? null);
-    const [starting, setStarting] = useState(false);
     const [opened, setOpened] = useState<BackupSummary | null>(null);
     const [restoring, setRestoring] = useState<RestoreSource | null>(null);
 
@@ -90,168 +102,243 @@ export function AppBackups({ app, section, held }: { app: App; section: BackupsS
         return () => window.clearInterval(id);
     }, [busy, scheduled]);
     const fileBlocked = restore ? `A restore of ${app.name} is running.` : null;
+    const stored = section.locations.length > 0;
 
-    if (section.locations.length === 0) {
-        return (
-            <div className="space-y-6">
-                {restore && <RestoreProgress restore={restore} />}
-                <ExportPanel app={app} section={section} held={held} />
-                <RestoreFromFile app={app} section={section} blocked={fileBlocked} />
-                <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
-                    <span className="mb-4 flex size-11 items-center justify-center rounded-xl border bg-card">
-                        <ArchiveIcon className="size-5 text-muted-foreground" />
-                    </span>
-                    <h2 className="font-medium">No storage yet</h2>
-                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                        Backups of {app.name} go to an S3 bucket. Add one in Settings, then come back to back up.
-                    </p>
-                    <Link href="/settings" className={buttonVariants({ className: 'mt-5' })}>
-                        Add S3 storage
-                    </Link>
+    return (
+        <div className="space-y-6">
+            {restore && <RestoreProgress restore={restore} />}
+            {stored ? <Coverage section={section} /> : <NoStorage app={app} />}
+
+            {stored && (
+                <Panel
+                    title="Backups"
+                    description={`Dumps of the ${section.database} database in S3, newest first.`}
+                    actions={<BackUpButton app={app} locations={section.locations} running={running} />}
+                    flush
+                >
+                    {section.backups.length === 0 ? (
+                        <p className="px-4 py-8 text-center text-sm text-muted-foreground sm:px-5">
+                            No backups yet. Back up now, or add a schedule below.
+                        </p>
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="w-8">
+                                        <span className="sr-only">Status</span>
+                                    </TableHead>
+                                    <TableHead>Started</TableHead>
+                                    <TableHead className="hidden md:table-cell">Location</TableHead>
+                                    <TableHead className="hidden text-right sm:table-cell">Size</TableHead>
+                                    <TableHead className="hidden text-right lg:table-cell">Took</TableHead>
+                                    <TableHead className="hidden xl:table-cell">Server</TableHead>
+                                    <TableHead>
+                                        <span className="sr-only">Actions</span>
+                                    </TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {section.backups.map((backup) => (
+                                    <BackupRow
+                                        key={backup.id}
+                                        app={app}
+                                        backup={backup}
+                                        onOpen={() => setOpened(backup)}
+                                        onRestore={restore ? undefined : () => setRestoring({ backup: backup.id })}
+                                    />
+                                ))}
+                            </TableBody>
+                        </Table>
+                    )}
+                </Panel>
+            )}
+
+            {stored && <Schedules app={app} section={section} />}
+
+            <Panel
+                title="Export and restore"
+                description={`Download the database, or restore ${app.name} from a file or straight from a bucket.`}
+                flush
+            >
+                <div className="divide-y">
+                    <ConfigSection
+                        icon={DownloadIcon}
+                        title="Export"
+                        description="Downloads the database to this browser as it's dumped. Nothing is kept on the server or in S3."
+                    >
+                        <ExportControl app={app} section={section} held={held} />
+                    </ConfigSection>
+                    <ConfigSection
+                        icon={FileUpIcon}
+                        title="Restore from a file"
+                        description="Uploads a dump from this computer, checks it, then restores it into the database."
+                    >
+                        <RestoreFromFile app={app} section={section} blocked={fileBlocked} />
+                    </ConfigSection>
+                    {stored && (
+                        <ConfigSection
+                            icon={CloudDownloadIcon}
+                            title="Restore from the bucket"
+                            description="For backups this server has no record of, such as a lost server's."
+                        >
+                            <RestoreFromBucket
+                                app={app}
+                                locations={section.locations}
+                                onRestore={(source) => !restore && setRestoring(source)}
+                            />
+                        </ConfigSection>
+                    )}
                 </div>
-                <RestoresPanel app={app} restores={section.restores} />
-            </div>
-        );
-    }
+            </Panel>
 
-    const backUp = () => {
+            <RestoresPanel app={app} restores={section.restores} />
+
+            <BackupOutput app={app} backup={opened} onClose={() => setOpened(null)} />
+            <RestoreDialog app={app} source={restoring} onClose={() => setRestoring(null)} />
+        </div>
+    );
+}
+
+// Coverage answers "is this app backed up?" at a glance: the last good
+// backup, the next one due, what's kept, and what a backup covers.
+function Coverage({ section }: { section: BackupsSection }) {
+    const last = section.last_succeeded;
+    const newest = section.backups.find((b) => b.status !== 'running');
+    const failedSince = newest && newest.status !== 'succeeded' && (!last || newest.id > last.id) ? newest : undefined;
+    const next = section.schedules
+        .filter((s) => s.enabled && s.next_run_at)
+        .sort((a, b) => (a.next_run_at ?? '').localeCompare(b.next_run_at ?? ''))[0];
+    const kept = section.backups.filter((b) => b.status === 'succeeded');
+    const more = section.backups.length >= 50 ? '+' : '';
+    const version = last?.server_version;
+
+    return (
+        <Stats
+            // Two across until xl: the sub nav leaves too little room for four at lg.
+            className="lg:grid-cols-2 xl:grid-cols-4"
+            items={[
+                {
+                    label: 'Last backup',
+                    value: last ? (
+                        <span title={formatDateTime(last.started_at)}>{timeAgo(last.started_at)}</span>
+                    ) : (
+                        'Never'
+                    ),
+                    hint: failedSince ? (
+                        <span className="text-destructive">
+                            The newest one {endings[failedSince.status] ?? 'failed'}
+                        </span>
+                    ) : last ? (
+                        `${formatBytes(last.size_bytes)} to ${last.location}`
+                    ) : (
+                        'Back up now to make the first'
+                    ),
+                },
+                {
+                    label: 'Next backup',
+                    value: next?.next_run_at ? (
+                        <span title={formatInZone(next.next_run_at, next.timezone)}>{timeAgo(next.next_run_at)}</span>
+                    ) : (
+                        'Not scheduled'
+                    ),
+                    hint: next ? <ScheduleText presets={presets} schedule={next.schedule} /> : 'Only when you back up',
+                },
+                {
+                    label: 'Stored',
+                    value: `${kept.length}${more} ${kept.length === 1 && !more ? 'backup' : 'backups'}`,
+                    hint:
+                        kept.length > 0
+                            ? `${formatBytes(kept.reduce((sum, b) => sum + b.size_bytes, 0))}${more ? ' in the newest' : ' in all'}`
+                            : 'None kept yet',
+                },
+                {
+                    label: 'Covers',
+                    value: <span className="font-mono text-base">{section.database}</span>,
+                    hint: (
+                        <span title="A backup holds this one database, not others made by hand in the same server.">
+                            {version ? `Server ${version}, this database only` : 'This database only'}
+                        </span>
+                    ),
+                },
+            ]}
+        />
+    );
+}
+
+// NoStorage is where the summary goes until there's somewhere to back up
+// to. Export and restoring from a file still work below it.
+function NoStorage({ app }: { app: App }) {
+    return (
+        <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-12 text-center">
+            <span className="mb-4 flex size-11 items-center justify-center rounded-xl border bg-card">
+                <ArchiveIcon className="size-5 text-muted-foreground" />
+            </span>
+            <h2 className="font-medium">Back {app.name} up to S3</h2>
+            <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                Add a bucket in Settings, then back up by hand or on a schedule. Any S3-compatible provider works.
+            </p>
+            <Link href="/settings" className={buttonVariants({ className: 'mt-5' })}>
+                <PlusIcon />
+                Add S3 storage
+            </Link>
+        </div>
+    );
+}
+
+// BackUpButton backs up to the location used last, or, from its menu, to
+// any other.
+function BackUpButton({ app, locations, running }: { app: App; locations: StorageChoice[]; running: boolean }) {
+    const [starting, setStarting] = useState(false);
+    const disabled = starting || running;
+    const backUp = (location: number) =>
         router.post(
             `/apps/${app.id}/backups`,
             { location },
             { preserveScroll: true, onStart: () => setStarting(true), onFinish: () => setStarting(false) },
         );
-    };
+    const first = locations[0];
+    const label = running ? 'Backing up…' : 'Back up now';
 
     return (
-        <div className="space-y-6">
-            {restore && <RestoreProgress restore={restore} />}
-            <Panel
-                title="Back up now"
-                description={
-                    <>
-                        Dumps the <code className="font-mono text-xs">{section.database}</code> database to S3. Other
-                        databases in this server aren&apos;t included.
-                    </>
-                }
+        <div className="flex">
+            <Button
+                onClick={() => backUp(first.id)}
+                disabled={disabled}
+                title={`To ${first.name}`}
+                className={cn(locations.length > 1 && 'rounded-r-none')}
             >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <Select
-                        items={section.locations.map((l) => ({ value: l.id, label: l.name }))}
-                        value={location}
-                        onValueChange={(value) => setLocation(value)}
+                <ArchiveIcon />
+                {label}
+            </Button>
+            {locations.length > 1 && (
+                <DropdownMenu>
+                    <DropdownMenuTrigger
+                        render={
+                            <Button
+                                size="icon"
+                                disabled={disabled}
+                                className="rounded-l-none border-l border-primary-foreground/25"
+                                aria-label="Back up to another location"
+                            />
+                        }
                     >
-                        <SelectTrigger aria-label="Storage location" className="w-full sm:w-64">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {section.locations.map((l) => (
-                                <SelectItem key={l.id} value={l.id}>
-                                    {l.name}
-                                    <span className="font-mono text-xs text-muted-foreground">
+                        <ChevronDownIcon />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                        <DropdownMenuGroup>
+                            <DropdownMenuLabel>Back up to</DropdownMenuLabel>
+                            {locations.map((l) => (
+                                <DropdownMenuItem key={l.id} onClick={() => backUp(l.id)} className="block">
+                                    <span className="block">{l.name}</span>
+                                    <span className="block truncate font-mono text-xs text-muted-foreground">
                                         {l.prefix ? `${l.bucket}/${l.prefix}` : l.bucket}
                                     </span>
-                                </SelectItem>
+                                </DropdownMenuItem>
                             ))}
-                        </SelectContent>
-                    </Select>
-                    <Button onClick={backUp} disabled={starting || running || location === null}>
-                        <ArchiveIcon />
-                        Back up now
-                    </Button>
-                    {running && <p className="text-sm text-muted-foreground">A backup is running.</p>}
-                </div>
-            </Panel>
-
-            <ExportPanel app={app} section={section} held={held} />
-
-            <Panel
-                title="Schedules"
-                description="Each backs up on its own schedule and keeps its newest successful backups. Backups made by hand are never deleted."
-                actions={<ScheduleDialog app={app} locations={section.locations} trigger={<AddScheduleButton />} />}
-                flush
-            >
-                {section.schedules.length === 0 ? (
-                    <p className="px-4 py-6 text-sm text-muted-foreground">
-                        No schedules yet. {app.name} is backed up only when you back it up.
-                    </p>
-                ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Schedule</TableHead>
-                                <TableHead className="hidden md:table-cell">Location</TableHead>
-                                <TableHead className="hidden xl:table-cell">Next backup</TableHead>
-                                <TableHead className="hidden text-right sm:table-cell">Keeps</TableHead>
-                                <TableHead className="hidden sm:table-cell">Last backup</TableHead>
-                                <TableHead>
-                                    <span className="sr-only">Enabled</span>
-                                </TableHead>
-                                <TableHead>
-                                    <span className="sr-only">Actions</span>
-                                </TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {section.schedules.map((schedule) => (
-                                <ScheduleRow
-                                    key={schedule.id}
-                                    app={app}
-                                    schedule={schedule}
-                                    locations={section.locations}
-                                />
-                            ))}
-                        </TableBody>
-                    </Table>
-                )}
-            </Panel>
-
-            <Panel
-                title="History"
-                description="Newest first. Each backup is a dump and a manifest in its bucket."
-                flush
-            >
-                {section.backups.length === 0 ? (
-                    <p className="px-4 py-6 text-sm text-muted-foreground">No backups yet.</p>
-                ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Started</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead className="hidden md:table-cell">Location</TableHead>
-                                <TableHead className="hidden text-right sm:table-cell">Size</TableHead>
-                                <TableHead className="hidden text-right sm:table-cell">Took</TableHead>
-                                <TableHead className="hidden lg:table-cell">Server</TableHead>
-                                <TableHead className="text-right">
-                                    <span className="sr-only">Actions</span>
-                                </TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {section.backups.map((backup) => (
-                                <BackupRow
-                                    key={backup.id}
-                                    app={app}
-                                    backup={backup}
-                                    onOpen={() => setOpened(backup)}
-                                    onRestore={restore ? undefined : () => setRestoring({ backup: backup.id })}
-                                />
-                            ))}
-                        </TableBody>
-                    </Table>
-                )}
-            </Panel>
-
-            <RestoresPanel app={app} restores={section.restores} />
-            <RestoreFromBucket
-                app={app}
-                locations={section.locations}
-                onRestore={(source) => !restore && setRestoring(source)}
-            />
-            <RestoreFromFile app={app} section={section} blocked={fileBlocked} />
-
-            <BackupOutput app={app} backup={opened} onClose={() => setOpened(null)} />
-            <RestoreDialog app={app} source={restoring} onClose={() => setRestoring(null)} />
+                        </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            )}
         </div>
     );
 }
@@ -271,88 +358,323 @@ function BackupRow({
     const done = backup.status !== 'running';
     const kept = backup.status === 'succeeded';
     const size = kept || (!done && backup.size_bytes > 0) ? formatBytes(backup.size_bytes) : null;
+    const problem = backup.message && !kept ? backup.message : null;
 
     return (
         <TableRow>
-            <TableCell>
-                <div title={formatDateTime(backup.started_at)}>{timeAgo(backup.started_at)}</div>
-                <div className="text-xs text-muted-foreground">{triggers[backup.trigger]}</div>
-                {/* Phones have no Size column. */}
-                {size && <div className="text-xs text-muted-foreground tabular-nums sm:hidden">{size}</div>}
+            <TableCell className="pr-0">
+                <RunStatusBadge status={backup.status} quiet />
             </TableCell>
-            <TableCell className="w-full max-w-0 min-w-24">
-                <RunStatusBadge status={backup.status} />
-                {backup.message && !kept && (
-                    <p className="mt-1 truncate text-xs text-muted-foreground" title={backup.message}>
-                        {backup.message}
+            <TableCell className="w-full max-w-0">
+                <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
+                    <span title={formatDateTime(backup.started_at)}>{timeAgo(backup.started_at)}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                        {triggers[backup.trigger]}
+                        {/* Phones have no Size column. */}
+                        {size && <span className="tabular-nums sm:hidden"> · {size}</span>}
+                    </span>
+                </div>
+                {problem && (
+                    <p className="truncate text-xs text-muted-foreground" title={problem}>
+                        {problem}
                     </p>
                 )}
             </TableCell>
             <TableCell className="hidden md:table-cell">{backup.location}</TableCell>
-            <TableCell className="hidden text-right tabular-nums sm:table-cell">{size ?? '—'}</TableCell>
             <TableCell className="hidden text-right tabular-nums sm:table-cell">
+                {size ?? <span className="text-muted-foreground">—</span>}
+            </TableCell>
+            <TableCell className="hidden text-right text-muted-foreground tabular-nums lg:table-cell">
                 {duration(backup.started_at, backup.finished_at)}
             </TableCell>
-            <TableCell className="hidden font-mono text-xs lg:table-cell">{backup.server_version || '—'}</TableCell>
-            <TableCell>
-                <div className="flex justify-end gap-1">
-                    {kept && (
-                        <a
-                            href={`/apps/${app.id}/backups/${backup.id}/download`}
-                            download={backup.name}
-                            // Phones have room for three actions; a dump is
-                            // rarely wanted on one.
-                            className={cn(
-                                buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
-                                'hidden sm:inline-flex',
-                            )}
-                            aria-label={`Download ${backup.name}`}
-                            title="Download"
-                        >
-                            <DownloadIcon />
-                        </a>
-                    )}
+            <TableCell className="hidden font-mono text-xs text-muted-foreground xl:table-cell">
+                {backup.server_version || '—'}
+            </TableCell>
+            <TableCell className="py-1.5">
+                <div className="flex items-center justify-end gap-1">
                     {kept && (
                         <Button
-                            variant="ghost"
-                            size="icon-sm"
+                            variant="outline"
+                            size="sm"
                             onClick={onRestore}
                             disabled={!onRestore}
-                            aria-label={`Restore ${backup.name}`}
-                            title={onRestore ? 'Restore' : 'A restore is running'}
+                            title={onRestore ? undefined : 'A restore is running'}
+                            className="hidden sm:inline-flex"
                         >
                             <HistoryIcon />
+                            Restore
                         </Button>
                     )}
-                    <Button variant="ghost" size="icon-sm" onClick={onOpen} aria-label="Show output" title="Output">
-                        <FileTextIcon />
-                    </Button>
-                    {done && (
-                        <ConfirmDelete
-                            title="Delete this backup?"
-                            trigger={
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    className="text-destructive"
-                                    aria-label="Delete backup"
-                                    title="Delete"
-                                >
-                                    <Trash2Icon />
-                                </Button>
-                            }
-                            onConfirm={() =>
-                                router.delete(`/apps/${app.id}/backups/${backup.id}`, { preserveScroll: true })
-                            }
-                        >
-                            {kept
-                                ? `The dump and its manifest are deleted from ${backup.location}, and can't be restored afterwards.`
-                                : 'Echowa forgets this backup. Nothing of it was kept in the bucket.'}
-                        </ConfirmDelete>
-                    )}
+                    <BackupMenu app={app} backup={backup} onOpen={onOpen} onRestore={onRestore} />
                 </div>
             </TableCell>
         </TableRow>
+    );
+}
+
+// BackupMenu holds a backup's less frequent actions. Restore is in it too
+// on phones, where the row has no room for its button.
+function BackupMenu({
+    app,
+    backup,
+    onOpen,
+    onRestore,
+}: {
+    app: App;
+    backup: BackupSummary;
+    onOpen: () => void;
+    onRestore?: () => void;
+}) {
+    const [deleting, setDeleting] = useState(false);
+    const kept = backup.status === 'succeeded';
+
+    return (
+        <>
+            <DropdownMenu>
+                <DropdownMenuTrigger
+                    render={<Button variant="ghost" size="icon-sm" aria-label={`More for backup #${backup.id}`} />}
+                >
+                    <EllipsisIcon />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                    {kept && (
+                        <DropdownMenuItem onClick={onRestore} disabled={!onRestore} className="sm:hidden">
+                            <HistoryIcon />
+                            Restore
+                        </DropdownMenuItem>
+                    )}
+                    {kept && (
+                        <DropdownMenuItem
+                            render={<a href={`/apps/${app.id}/backups/${backup.id}/download`} download={backup.name} />}
+                        >
+                            <DownloadIcon />
+                            Download
+                        </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={onOpen}>
+                        <FileTextIcon />
+                        Details
+                    </DropdownMenuItem>
+                    {backup.status !== 'running' && (
+                        <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+                                <Trash2Icon />
+                                Delete
+                            </DropdownMenuItem>
+                        </>
+                    )}
+                </DropdownMenuContent>
+            </DropdownMenu>
+            <ConfirmDelete
+                title="Delete this backup?"
+                open={deleting}
+                onOpenChange={setDeleting}
+                onConfirm={() => router.delete(`/apps/${app.id}/backups/${backup.id}`, { preserveScroll: true })}
+            >
+                {kept
+                    ? `The dump and its manifest are deleted from ${backup.location}, and can't be restored afterwards.`
+                    : 'Echowa forgets this backup. Nothing of it was kept in the bucket.'}
+            </ConfirmDelete>
+        </>
+    );
+}
+
+// Schedules back the app up when they're due, each keeping its newest
+// successful backups.
+function Schedules({ app, section }: { app: App; section: BackupsSection }) {
+    return (
+        <Panel
+            title="Schedules"
+            description="Each keeps its newest successful backups and deletes older ones. Backups made by hand stay."
+            actions={
+                <ScheduleDialog
+                    app={app}
+                    locations={section.locations}
+                    trigger={
+                        <Button variant="outline">
+                            <PlusIcon />
+                            Add schedule
+                        </Button>
+                    }
+                />
+            }
+            flush
+        >
+            {section.schedules.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground sm:px-5">
+                    Not on a schedule yet. Add one, and Echowa backs {app.name} up for you.
+                </p>
+            ) : (
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Schedule</TableHead>
+                            <TableHead className="hidden md:table-cell">Next</TableHead>
+                            <TableHead className="hidden text-right sm:table-cell">Kept</TableHead>
+                            <TableHead className="hidden lg:table-cell">Last backup</TableHead>
+                            <TableHead>
+                                <span className="sr-only">On</span>
+                            </TableHead>
+                            <TableHead>
+                                <span className="sr-only">Actions</span>
+                            </TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {section.schedules.map((schedule) => (
+                            <ScheduleRow
+                                key={schedule.id}
+                                app={app}
+                                schedule={schedule}
+                                locations={section.locations}
+                            />
+                        ))}
+                    </TableBody>
+                </Table>
+            )}
+        </Panel>
+    );
+}
+
+function ScheduleRow({ app, schedule, locations }: { app: App; schedule: BackupSchedule; locations: StorageChoice[] }) {
+    const base = `/apps/${app.id}/backup-schedules/${schedule.id}`;
+    const last = schedule.last_backup;
+
+    return (
+        <TableRow className={cn(!schedule.enabled && 'text-muted-foreground')}>
+            <TableCell className="w-full max-w-0">
+                <div className="truncate font-medium">
+                    <ScheduleText presets={presets} schedule={schedule.schedule} />
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                    {schedule.timezone} · to {schedule.location}
+                </div>
+            </TableCell>
+            <TableCell className="hidden text-sm whitespace-nowrap md:table-cell">
+                {schedule.next_run_at ? (
+                    <span title={formatInZone(schedule.next_run_at, schedule.timezone)}>
+                        {timeAgo(schedule.next_run_at)}
+                    </span>
+                ) : (
+                    <span className="text-muted-foreground">Off</span>
+                )}
+            </TableCell>
+            <TableCell
+                className="hidden text-right whitespace-nowrap tabular-nums sm:table-cell"
+                title={`Keeps its newest ${schedule.keep}`}
+            >
+                {schedule.kept} <span className="text-muted-foreground">of {schedule.keep}</span>
+            </TableCell>
+            <TableCell className="hidden lg:table-cell">
+                {last ? (
+                    <div className="flex items-center gap-1.5 text-sm whitespace-nowrap">
+                        <RunStatusBadge status={last.status} quiet />
+                        <span title={formatDateTime(last.started_at)}>{timeAgo(last.started_at)}</span>
+                    </div>
+                ) : (
+                    <span className="text-sm text-muted-foreground">Never</span>
+                )}
+            </TableCell>
+            <TableCell>
+                <Switch
+                    checked={schedule.enabled}
+                    aria-label={schedule.enabled ? 'Turn this schedule off' : 'Turn this schedule on'}
+                    title={schedule.enabled ? 'On' : 'Off'}
+                    onCheckedChange={(enabled) => router.put(`${base}/enabled`, { enabled }, { preserveScroll: true })}
+                />
+            </TableCell>
+            <TableCell className="py-1">
+                <div className="flex justify-end gap-1">
+                    <ScheduleDialog
+                        app={app}
+                        schedule={schedule}
+                        locations={locations}
+                        trigger={
+                            <Button variant="ghost" size="icon-sm" aria-label="Edit schedule" title="Edit">
+                                <PencilIcon />
+                            </Button>
+                        }
+                    />
+                    <ConfirmDelete
+                        title="Delete this schedule?"
+                        trigger={
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-destructive"
+                                aria-label="Delete schedule"
+                                title="Delete"
+                            >
+                                <Trash2Icon />
+                            </Button>
+                        }
+                        onConfirm={() => router.delete(base, { preserveScroll: true })}
+                    >
+                        Its {schedule.kept === 1 ? 'backup stays' : `${schedule.kept} backups stay`} in the history and
+                        the bucket, and are no longer deleted as newer ones come. A backup that&apos;s running finishes.
+                    </ConfirmDelete>
+                </div>
+            </TableCell>
+        </TableRow>
+    );
+}
+
+// ExportControl downloads the database straight to this browser, in a
+// format a local tool reads, with no storage location and nothing kept
+// (ADR 0034). A plain link, not a download one: the server's refusal,
+// while a deploy holds the app say, then shows instead of a failed
+// download.
+function ExportControl({ app, section, held }: { app: App; section: BackupsSection; held: AppWork }) {
+    const [format, setFormat] = useState(() => section.exports[0]?.format ?? '');
+    const chosen = section.exports.find((e) => e.format === format) ?? section.exports[0];
+    if (!chosen) {
+        return null;
+    }
+
+    return (
+        <div className="flex flex-col items-start gap-2">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
+                {section.exports.length > 1 && (
+                    <Select
+                        items={section.exports.map((e) => ({ value: e.format, label: `${e.label} (.${e.extension})` }))}
+                        value={chosen.format}
+                        onValueChange={(value) => value && setFormat(value)}
+                    >
+                        <SelectTrigger aria-label="Format" className="w-full sm:w-64">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {section.exports.map((e) => (
+                                <SelectItem key={e.format} value={e.format}>
+                                    {e.label}
+                                    <span className="font-mono text-xs text-muted-foreground">.{e.extension}</span>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+                {held ? (
+                    <Button variant="outline" disabled>
+                        <DownloadIcon />
+                        Export
+                    </Button>
+                ) : (
+                    <a
+                        href={`/apps/${app.id}/export?format=${chosen.format}`}
+                        className={buttonVariants({ variant: 'outline' })}
+                    >
+                        <DownloadIcon />
+                        Export
+                    </a>
+                )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+                {held
+                    ? `${held === 'export' ? 'An export' : `A ${held}`} of ${app.name} is running. Export once it has finished.`
+                    : `${chosen.hint} Deploys of ${app.name} wait until the download ends.`}
+            </p>
+        </div>
     );
 }
 
@@ -416,171 +738,6 @@ function BackupOutput({ app, backup, onClose }: { app: App; backup: BackupSummar
                 )}
             </DialogContent>
         </Dialog>
-    );
-}
-
-// ExportPanel downloads the database straight to this browser, in a format
-// a local tool reads, with no storage location and nothing kept (ADR 0034).
-// A plain link, not a download one: the server's refusal, while a deploy
-// holds the app say, then shows instead of a failed download.
-function ExportPanel({ app, section, held }: { app: App; section: BackupsSection; held: AppWork }) {
-    const [format, setFormat] = useState(() => section.exports[0]?.format ?? '');
-    const chosen = section.exports.find((e) => e.format === format) ?? section.exports[0];
-    if (!chosen) {
-        return null;
-    }
-
-    return (
-        <Panel
-            title="Export"
-            description={
-                <>
-                    Downloads the <code className="font-mono text-xs">{section.database}</code> database to this browser
-                    as it&apos;s dumped. Nothing is kept on the server or in S3. Deploys of {app.name} wait for it to
-                    finish.
-                </>
-            }
-        >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                {section.exports.length > 1 && (
-                    <Select
-                        items={section.exports.map((e) => ({ value: e.format, label: `${e.label} (.${e.extension})` }))}
-                        value={chosen.format}
-                        onValueChange={(value) => value && setFormat(value)}
-                    >
-                        <SelectTrigger aria-label="Format" className="w-full sm:w-64">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {section.exports.map((e) => (
-                                <SelectItem key={e.format} value={e.format}>
-                                    {e.label}
-                                    <span className="font-mono text-xs text-muted-foreground">.{e.extension}</span>
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                )}
-                {held ? (
-                    <Button disabled>
-                        <DownloadIcon />
-                        Export
-                    </Button>
-                ) : (
-                    <a href={`/apps/${app.id}/export?format=${chosen.format}`} className={buttonVariants()}>
-                        <DownloadIcon />
-                        Export
-                    </a>
-                )}
-                <p className="text-sm text-muted-foreground">
-                    {held
-                        ? `${held === 'export' ? 'An export' : `A ${held}`} of ${app.name} is running. Export once it has finished.`
-                        : chosen.hint}
-                </p>
-            </div>
-        </Panel>
-    );
-}
-
-function AddScheduleButton(props: React.ComponentProps<typeof Button>) {
-    return (
-        <Button variant="outline" {...props}>
-            <PlusIcon />
-            Add schedule
-        </Button>
-    );
-}
-
-function ScheduleRow({ app, schedule, locations }: { app: App; schedule: BackupSchedule; locations: StorageChoice[] }) {
-    const base = `/apps/${app.id}/backup-schedules/${schedule.id}`;
-    const last = schedule.last_backup;
-
-    return (
-        <TableRow>
-            <TableCell className="w-full max-w-0">
-                <div className="truncate">
-                    <ScheduleText presets={presets} schedule={schedule.schedule} />
-                </div>
-                <div className="truncate text-xs text-muted-foreground">
-                    {schedule.timezone}
-                    {/* Phones have no Location column. */}
-                    <span className="md:hidden"> to {schedule.location}</span>
-                </div>
-                {last && (
-                    <div className="mt-1 sm:hidden">
-                        <RunStatusBadge status={last.status} />
-                    </div>
-                )}
-            </TableCell>
-            <TableCell className="hidden md:table-cell">{schedule.location}</TableCell>
-            <TableCell className="hidden text-sm xl:table-cell">
-                {schedule.next_run_at ? (
-                    <span title={formatInZone(schedule.next_run_at, schedule.timezone)}>
-                        {timeAgo(schedule.next_run_at)}
-                    </span>
-                ) : (
-                    <span className="text-muted-foreground">Off</span>
-                )}
-            </TableCell>
-            <TableCell
-                className="hidden text-right tabular-nums sm:table-cell"
-                title={`${schedule.kept} kept of ${schedule.keep}`}
-            >
-                {schedule.kept} / {schedule.keep}
-            </TableCell>
-            <TableCell className="hidden sm:table-cell">
-                {last ? (
-                    <div className="flex flex-col items-start gap-0.5">
-                        <RunStatusBadge status={last.status} />
-                        <span className="text-xs text-muted-foreground" title={formatDateTime(last.started_at)}>
-                            {timeAgo(last.started_at)}
-                        </span>
-                    </div>
-                ) : (
-                    <span className="text-sm text-muted-foreground">Never</span>
-                )}
-            </TableCell>
-            <TableCell>
-                <Switch
-                    checked={schedule.enabled}
-                    aria-label={schedule.enabled ? 'Turn this schedule off' : 'Turn this schedule on'}
-                    title={schedule.enabled ? 'On' : 'Off'}
-                    onCheckedChange={(enabled) => router.put(`${base}/enabled`, { enabled }, { preserveScroll: true })}
-                />
-            </TableCell>
-            <TableCell className="py-1">
-                <div className="flex justify-end gap-1">
-                    <ScheduleDialog
-                        app={app}
-                        schedule={schedule}
-                        locations={locations}
-                        trigger={
-                            <Button variant="ghost" size="icon-sm" aria-label="Edit schedule" title="Edit">
-                                <PencilIcon />
-                            </Button>
-                        }
-                    />
-                    <ConfirmDelete
-                        title="Delete this schedule?"
-                        trigger={
-                            <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="text-destructive"
-                                aria-label="Delete schedule"
-                                title="Delete"
-                            >
-                                <Trash2Icon />
-                            </Button>
-                        }
-                        onConfirm={() => router.delete(base, { preserveScroll: true })}
-                    >
-                        Its {schedule.kept === 1 ? 'backup stays' : `${schedule.kept} backups stay`} in the history and
-                        the bucket, and are no longer deleted as newer ones come. A backup that&apos;s running finishes.
-                    </ConfirmDelete>
-                </div>
-            </TableCell>
-        </TableRow>
     );
 }
 

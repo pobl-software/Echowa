@@ -24,9 +24,69 @@ const zones = (() => {
 
 export const presetLabel = (presets: Preset[], schedule: string) => presets.find((p) => p.value === schedule)?.label;
 
-// ScheduleText is a schedule's preset name, or its expression.
+const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+const ordinal = (n: number) => {
+    const tens = n % 100;
+    const suffix = tens >= 11 && tens <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th');
+    return `${n}${suffix}`;
+};
+
+// describeSchedule puts the common shapes of a cron expression into words,
+// or gives undefined for one it can't say simply.
+export function describeSchedule(schedule: string): string | undefined {
+    const fields = schedule.trim().split(/\s+/);
+    if (fields.length !== 5) {
+        return undefined;
+    }
+    const [minute, hour, day, month, weekday] = fields;
+    const number = (field: string, max: number) => (/^\d+$/.test(field) && Number(field) <= max ? Number(field) : null);
+    const m = number(minute, 59);
+    const h = number(hour, 23);
+    const at = m !== null && h !== null ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` : null;
+    const every = (field: string) => /^\*\/(\d+)$/.exec(field)?.[1];
+
+    if (month !== '*') {
+        return undefined;
+    }
+    if (hour === '*' && day === '*' && weekday === '*') {
+        if (minute === '*') {
+            return 'Every minute';
+        }
+        if (every(minute)) {
+            return `Every ${every(minute)} minutes`;
+        }
+        if (m !== null) {
+            return m === 0 ? 'Every hour' : `Every hour at :${String(m).padStart(2, '0')}`;
+        }
+    }
+    if (m !== null && every(hour) && day === '*' && weekday === '*') {
+        return `Every ${every(hour)} hours${m === 0 ? '' : ` at :${String(m).padStart(2, '0')}`}`;
+    }
+    if (!at) {
+        return undefined;
+    }
+    if (day === '*' && weekday === '*') {
+        return `Every day at ${at}`;
+    }
+    const w = number(weekday, 7);
+    if (day === '*' && w !== null) {
+        return `Every ${weekdays[w]} at ${at}`;
+    }
+    const d = number(day, 31);
+    if (d !== null && d > 0 && weekday === '*') {
+        return `The ${ordinal(d)} of every month at ${at}`;
+    }
+
+    return undefined;
+}
+
+// ScheduleText is a schedule's preset name, its expression in words, or the
+// expression itself.
 export function ScheduleText({ presets, schedule }: { presets: Preset[]; schedule: string }) {
-    return presetLabel(presets, schedule) ?? <span className="font-mono">{schedule}</span>;
+    return (
+        presetLabel(presets, schedule) ?? describeSchedule(schedule) ?? <span className="font-mono">{schedule}</span>
+    );
 }
 
 // ScheduleFields picks a schedule, from presets or as a cron expression,

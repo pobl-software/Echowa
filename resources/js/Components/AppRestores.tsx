@@ -304,12 +304,8 @@ export function RestoreFromBucket({
     };
 
     return (
-        <Panel
-            title="Restore from the bucket"
-            description={`Backups of ${app.name} in a location's folder, including ones made by another server or forgotten here.`}
-            flush
-        >
-            <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Select
                     items={locations.map((l) => ({ value: l.id, label: l.name }))}
                     value={location}
@@ -327,60 +323,57 @@ export function RestoreFromBucket({
                         {locations.map((l) => (
                             <SelectItem key={l.id} value={l.id}>
                                 {l.name}
+                                <span className="font-mono text-xs text-muted-foreground">
+                                    {l.prefix ? `${l.bucket}/${l.prefix}` : l.bucket}
+                                </span>
                             </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
                 {location !== null && (
-                    <Button variant="outline" onClick={() => browse(location)} disabled={loading}>
+                    <Button variant="ghost" onClick={() => browse(location)} disabled={loading}>
                         <RefreshCwIcon className={cn(loading && 'animate-spin')} />
                         Look again
                     </Button>
                 )}
-                {listing && (
-                    <p className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={listing.folder}>
-                        {listing.folder}
-                    </p>
-                )}
             </div>
-            {error && <p className="px-4 py-6 text-sm text-destructive">{error}</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
             {!error && listing === null && (
-                <p className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-                    <FolderSearchIcon className="size-4" />
-                    {loading ? 'Looking…' : 'Choose a location to look in.'}
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <FolderSearchIcon className="size-4 shrink-0" />
+                    {loading
+                        ? 'Looking…'
+                        : `Lists the backups in ${app.name}'s folder, including ones another server made or this one forgot.`}
                 </p>
             )}
-            {!error && listing?.backups.length === 0 && (
-                <p className="px-4 py-6 text-sm text-muted-foreground">No backups of {app.name} in this folder.</p>
-            )}
-            {!error && listing && listing.backups.length > 0 && (
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Dump</TableHead>
-                            <TableHead className="hidden sm:table-cell">Uploaded</TableHead>
-                            <TableHead className="text-right">Size</TableHead>
-                            <TableHead className="text-right">
-                                <span className="sr-only">Actions</span>
-                            </TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {listing.backups.map((b) => (
-                            <TableRow key={b.key}>
-                                <TableCell className="w-full max-w-0">
-                                    <div className="truncate font-mono text-xs" title={b.name}>
-                                        {b.name}
+            {!error && listing && (
+                <div className="overflow-hidden rounded-lg border">
+                    <p
+                        className="truncate border-b bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground"
+                        title={listing.folder}
+                    >
+                        {listing.folder}
+                    </p>
+                    {listing.backups.length === 0 ? (
+                        <p className="px-3 py-4 text-sm text-muted-foreground">
+                            No backups of {app.name} in this folder.
+                        </p>
+                    ) : (
+                        <ul className="max-h-80 divide-y overflow-y-auto">
+                            {listing.backups.map((b) => (
+                                <li key={b.key} className="flex items-center gap-3 px-3 py-2">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate font-mono text-xs" title={b.name}>
+                                            {b.name}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            <span title={formatDateTime(b.modified)}>{timeAgo(b.modified)}</span>
+                                            {' · '}
+                                            <span className="tabular-nums">{formatBytes(b.size_bytes)}</span>
+                                            {' · '}
+                                            {b.backup_id ? `Backup #${b.backup_id}` : 'No record here'}
+                                        </p>
                                     </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        {b.backup_id ? `Backup #${b.backup_id}` : 'No record here'}
-                                    </div>
-                                </TableCell>
-                                <TableCell className="hidden text-sm sm:table-cell" title={formatDateTime(b.modified)}>
-                                    {timeAgo(b.modified)}
-                                </TableCell>
-                                <TableCell className="text-right tabular-nums">{formatBytes(b.size_bytes)}</TableCell>
-                                <TableCell className="text-right">
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -388,13 +381,13 @@ export function RestoreFromBucket({
                                     >
                                         Restore
                                     </Button>
-                                </TableCell>
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
             )}
-        </Panel>
+        </div>
     );
 }
 
@@ -435,15 +428,18 @@ export function RestoresPanel({ app, restores }: { app: App; restores: RestoreSu
     }
 
     return (
-        <Panel title="Restores" description="The newest first." flush>
+        <Panel title="Restores" description={`Into ${app.name}, newest first.`} flush>
             <Table>
                 <TableHeader>
                     <TableRow>
+                        <TableHead className="w-8">
+                            <span className="sr-only">Status</span>
+                        </TableHead>
                         <TableHead>Started</TableHead>
-                        <TableHead>Status</TableHead>
                         <TableHead className="hidden md:table-cell">From</TableHead>
+                        <TableHead className="hidden lg:table-cell">Safety backup</TableHead>
                         <TableHead className="hidden text-right sm:table-cell">Took</TableHead>
-                        <TableHead className="text-right">
+                        <TableHead>
                             <span className="sr-only">Actions</span>
                         </TableHead>
                     </TableRow>
@@ -451,45 +447,43 @@ export function RestoresPanel({ app, restores }: { app: App; restores: RestoreSu
                 <TableBody>
                     {restores.map((r) => (
                         <TableRow key={r.id}>
-                            <TableCell>
-                                <div title={formatDateTime(r.started_at)}>{timeAgo(r.started_at)}</div>
-                                <div className="text-xs text-muted-foreground">
-                                    {r.new_app
-                                        ? 'Into this new app'
-                                        : r.safety_backup_id
-                                          ? `Safety backup #${r.safety_backup_id}`
-                                          : 'No safety backup'}
-                                </div>
+                            <TableCell className="pr-0">
+                                <RunStatusBadge status={r.status} quiet />
                             </TableCell>
-                            <TableCell className="max-w-72">
-                                <RunStatusBadge status={r.status} />
-                                {r.message && (
-                                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={r.message}>
+                            <TableCell className="w-full max-w-0">
+                                <div className="flex items-baseline gap-2">
+                                    <span title={formatDateTime(r.started_at)}>{timeAgo(r.started_at)}</span>
+                                    {r.new_app && (
+                                        <span className="truncate text-xs text-muted-foreground">
+                                            Into this new app
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="truncate font-mono text-xs text-muted-foreground" title={r.name}>
+                                    {r.name}
+                                </p>
+                                {r.message && r.status !== 'succeeded' && (
+                                    <p className="line-clamp-2 text-xs text-muted-foreground" title={r.message}>
                                         {r.message}
                                     </p>
                                 )}
                             </TableCell>
-                            <TableCell className="hidden w-full max-w-0 md:table-cell">
-                                <div className="truncate font-mono text-xs" title={r.name}>
-                                    {r.name}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                    {r.uploaded ? 'Uploaded' : r.location}
-                                    {r.backup_id && `, backup #${r.backup_id}`}
-                                </div>
+                            <TableCell className="hidden whitespace-nowrap md:table-cell">
+                                {r.uploaded ? 'A file' : r.location}
+                                {r.backup_id && (
+                                    <span className="text-xs text-muted-foreground"> · backup #{r.backup_id}</span>
+                                )}
                             </TableCell>
-                            <TableCell className="hidden text-right tabular-nums sm:table-cell">
+                            <TableCell className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">
+                                {r.new_app ? '—' : r.safety_backup_id ? `#${r.safety_backup_id}` : 'None'}
+                            </TableCell>
+                            <TableCell className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
                                 {duration(r.started_at, r.finished_at)}
                             </TableCell>
-                            <TableCell className="text-right">
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    onClick={() => setOpened(r)}
-                                    aria-label="Show output"
-                                    title="Output"
-                                >
+                            <TableCell className="py-1.5 text-right">
+                                <Button variant="ghost" size="sm" onClick={() => setOpened(r)} aria-label="Details">
                                     <FileTextIcon />
+                                    <span className="hidden sm:inline">Details</span>
                                 </Button>
                             </TableCell>
                         </TableRow>
