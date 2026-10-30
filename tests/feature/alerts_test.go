@@ -440,6 +440,10 @@ func (s *AlertsTestSuite) TestRecoveryFailsWhatAnEarlierEchowaLeftPending() {
 	s.Equal(models.NotificationPending, rows[1].Status, "this process is still sending it")
 }
 
+func (s *AlertsTestSuite) TestPruneWithNoNotifications() {
+	s.Require().NoError(services.PruneNotifications(context.Background(), time.Now()))
+}
+
 func (s *AlertsTestSuite) TestPruneForgetsNotificationsAfter30Days() {
 	var kept []uint
 	for _, age := range []time.Duration{40 * 24 * time.Hour, 31 * 24 * time.Hour, 29 * 24 * time.Hour, time.Hour} {

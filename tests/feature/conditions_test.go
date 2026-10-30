@@ -265,6 +265,13 @@ func (s *ConditionsTestSuite) TestMetricConditions() {
 	var firing []models.AlertState
 	s.Require().NoError(facades.Orm().Query().Where("state", "firing").Order("subject").Get(&firing))
 	s.Len(firing, 2, "the disk and Docker, not the stopped app")
+
+	_, page := signedIn(s.T(), &s.TestCase).visit("/settings")
+	var subjects []string
+	for _, alert := range page.Props["alerts"].(map[string]any)["firing"].([]any) {
+		subjects = append(subjects, alert.(map[string]any)["subject"].(string))
+	}
+	s.ElementsMatch([]string{"Server", "Server, /data"}, subjects, "named as their messages name them")
 }
 
 func (s *ConditionsTestSuite) TestDatabaseConditions() {

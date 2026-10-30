@@ -593,7 +593,10 @@ func firing(ctx context.Context, rules []models.AlertRule, states []models.Alert
 			continue
 		}
 		var app *models.App
-		mount, _ := strings.CutPrefix(s.Subject, "mount:")
+		mount, isMount := strings.CutPrefix(s.Subject, "mount:")
+		if !isMount {
+			mount = ""
+		}
 		if id, ok := subjectApp(s.Subject); ok {
 			if app = apps[id]; app == nil {
 				continue
@@ -624,7 +627,7 @@ func subjectApp(subject string) (uint, bool) {
 	if !ok {
 		return 0, false
 	}
-	n, err := strconv.ParseUint(id, 10, 64)
+	n, err := strconv.ParseUint(id, 10, 0)
 
 	return uint(n), err == nil
 }

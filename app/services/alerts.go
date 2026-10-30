@@ -329,7 +329,7 @@ func PruneNotifications(ctx context.Context, now time.Time) error {
 		old := slices.IndexFunc(batch, func(n models.Notification) bool {
 			return n.CreatedAt == nil || !n.CreatedAt.StdTime().Before(cutoff)
 		})
-		if old == 0 {
+		if len(batch) == 0 || old == 0 {
 			return nil
 		}
 		if old < 0 {
