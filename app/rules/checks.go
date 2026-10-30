@@ -7,9 +7,11 @@ package rules
 import (
 	"net"
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/distribution/reference"
 
@@ -34,7 +36,17 @@ var (
 	bucketPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 	// Characters S3 calls safe in a key, in segments split by slashes.
 	keySegmentPattern = regexp.MustCompile(`^[A-Za-z0-9!_.*'()-]+$`)
+	// No hyphens, so the last hyphen of "echowa-<app>-<name>" always splits
+	// the app from the volume (ADR 0039).
+	volumeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 )
+
+// MaxVolumeNameLength keeps a volume's Docker name, "echowa-<app>-<name>",
+// short of Docker's limits.
+const MaxVolumeNameLength = 32
+
+// MaxMountPathLength is the longest path a volume mounts at.
+const MaxMountPathLength = 255
 
 // IsSlug: an app name. Lowercase letters, digits and inner hyphens, at most
 // MaxSlugLength characters. It must also work as a DNS label and as part of
@@ -168,6 +180,35 @@ func IsKeyPrefix(s string) bool {
 	}
 	for _, segment := range strings.Split(s, "/") {
 		if segment == "." || segment == ".." || !keySegmentPattern.MatchString(segment) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// IsVolumeName: a volume's short name. Lowercase letters, digits and
+// underscores, starting with a letter, at most MaxVolumeNameLength
+// characters. No hyphens: the Docker name must split at its last one.
+func IsVolumeName(s string) bool {
+	return len(s) <= MaxVolumeNameLength && volumeNamePattern.MatchString(s)
+}
+
+// IsMountPath: where a volume mounts in the container. An absolute path
+// that is already clean, so no "..", "." or doubled and trailing slashes,
+// and not the root or the kernel's /proc, /sys and /dev. It has no
+// whitespace or control characters.
+func IsMountPath(s string) bool {
+	if s == "" || len(s) > MaxMountPathLength || s != path.Clean(s) || !path.IsAbs(s) || s == "/" {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	for _, reserved := range []string{"/proc", "/sys", "/dev"} {
+		if s == reserved || strings.HasPrefix(s, reserved+"/") {
 			return false
 		}
 	}

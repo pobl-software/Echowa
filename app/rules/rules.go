@@ -27,6 +27,8 @@ func All() []validation.Rule {
 		&stringRule{"storage_endpoint", IsStorageEndpoint, "The :attribute must be an https:// URL with no path, such as https://<account>.r2.cloudflarestorage.com. Plain http:// works only for localhost."},
 		&stringRule{"s3_bucket", IsBucket, "The :attribute must be 3 to 63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit."},
 		&stringRule{"key_prefix", IsKeyPrefix, "The :attribute may only contain letters, digits, slashes and !_.*'()-, up to 200 characters."},
+		&stringRule{"volume_name", IsVolumeName, "The :attribute may only contain lowercase letters, digits and underscores, must start with a letter, and be at most 32 characters."},
+		&stringRule{"mount_path", IsMountPath, "The :attribute must be an absolute path such as /app/storage, with no .., trailing slash or spaces, and not /, /proc, /sys or /dev."},
 		&stringRule{"not_pooler_name", isNotPoolerName, "Another app's connection pooler already uses this name. Pick another."},
 	}
 }

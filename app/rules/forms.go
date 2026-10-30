@@ -161,6 +161,43 @@ func AppResourcesMessages(maxCPU, maxMemory, maxSwap int) validation.Option {
 	})
 }
 
+// AppVolume returns the rules for adding a volume to a custom app (ADR
+// 0039): its short name, which makes the Docker volume's, and the path it
+// mounts at.
+func AppVolume() map[string]any {
+	rules := AppVolumeTarget()
+	rules["name"] = "required|string|volume_name"
+
+	return rules
+}
+
+// AppVolumeTarget returns the rules for moving a volume to another path.
+// Its name never changes, since it's the Docker volume's.
+func AppVolumeTarget() map[string]any {
+	return map[string]any{
+		"target": "required|string|mount_path",
+	}
+}
+
+// AppVolumeFilters normalises the volume form before validation.
+func AppVolumeFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name":   "trim",
+		"target": "trim",
+	})
+}
+
+// AppVolumeMessages words the form's errors, which the rules' own messages
+// would show beside a field called "target".
+func AppVolumeMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"name.required":     "Give the volume a name.",
+		"name.volume_name":  "Use lowercase letters, digits and underscores, starting with a letter, at most 32 characters.",
+		"target.required":   "Enter the path in the container.",
+		"target.mount_path": "Use an absolute path such as /app/storage, with no .., no trailing slash and no spaces. Not /, /proc, /sys or /dev.",
+	})
+}
+
 // MaxNewDatabases is how many databases one request may create.
 const MaxNewDatabases = 10
 
