@@ -8,6 +8,7 @@ import (
 
 	"goravel/app/docker"
 	"goravel/app/facades"
+	"goravel/app/models"
 	"goravel/app/templates"
 )
 
@@ -32,6 +33,40 @@ func RemoveVolumes(ctx context.Context, appName string, names []string) {
 			facades.Log().Error(fmt.Errorf("delete app %s: %w", appName, err))
 		}
 	}
+}
+
+// VolumeRemoval is what RemoveDetached did with one volume. Err is nil when
+// the Docker volume and its row are both gone.
+type VolumeRemoval struct {
+	Volume models.AppVolume
+	Err    error
+}
+
+// RemoveDetached removes the Docker volumes a successful deploy left out of
+// its service, and then their rows (ADR 0039). volumes are the Removing
+// rows that deploy excluded from its spec, never ones marked since, which
+// its task may still mount. Each volume gets up to a minute for Swarm to
+// stop the task that used it. One Docker refuses stays Removing, and the
+// next deploy tries it again. The row goes only after the volume, so a
+// failure never loses track of data.
+func RemoveDetached(ctx context.Context, volumes []models.AppVolume) []VolumeRemoval {
+	removals := make([]VolumeRemoval, 0, len(volumes))
+	for _, v := range volumes {
+		removals = append(removals, VolumeRemoval{Volume: v, Err: removeDetached(ctx, v)})
+	}
+
+	return removals
+}
+
+func removeDetached(ctx context.Context, v models.AppVolume) error {
+	volumeCtx, cancel := context.WithTimeout(ctx, volumeTimeout)
+	defer cancel()
+	if err := removeVolume(volumeCtx, v.Name); err != nil {
+		return err
+	}
+	_, err := facades.Orm().WithContext(ctx).Query().Where("id", v.ID).Where("removed_at IS NOT NULL").Delete(&models.AppVolume{})
+
+	return err
 }
 
 func removeVolume(ctx context.Context, name string) error {

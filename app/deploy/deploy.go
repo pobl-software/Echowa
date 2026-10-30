@@ -209,8 +209,14 @@ func run(ctx context.Context, d *models.Deployment) error {
 		return r.fail(err)
 	}
 	spec := ServiceSpec(&app, digest, env, services.AppLimits(&app, host))
+	// Only these rows were left out of spec, so only these are removed
+	// below. One marked while this deploy runs is still mounted by it.
+	detached := slices.DeleteFunc(slices.Clone(app.Volumes), func(v models.AppVolume) bool { return !v.Removing() })
 	if err := r.move(models.DeploymentDeploying, nil); err != nil {
 		return err
+	}
+	for _, v := range detached {
+		r.log("Not mounting volume %s (%s): it was removed, and is deleted once the update succeeds.", v.Name, v.Target)
 	}
 	r.log("Updating service %s: %s.", spec.Name, describe(spec))
 	if err := services.Docker().DeployService(ctx, spec); err != nil {
@@ -232,6 +238,15 @@ func run(ctx context.Context, d *models.Deployment) error {
 
 	switch result.Outcome {
 	case docker.OutcomeCompleted:
+		// Before the final status, so the log stream still reads them.
+		for _, removal := range services.RemoveDetached(ctx, detached) {
+			if removal.Err != nil {
+				r.log("Couldn't remove volume %s, so it stays until the next deployment: %v", removal.Volume.Name, removal.Err)
+				facades.Log().Error(fmt.Errorf("deployment #%d: remove volume %s: %w", d.ID, removal.Volume.Name, removal.Err))
+				continue
+			}
+			r.log("Removed volume %s and its data.", removal.Volume.Name)
+		}
 		// The final status goes last, after the log: a deployment stream
 		// stops reading once it sees it (services.FollowDeployment).
 		r.log("Deployment succeeded: %s is now running %s.", spec.Name, digest)
@@ -284,6 +299,9 @@ func ServiceSpec(app *models.App, digest string, env map[string]string, limits s
 		Limits:   limits.Docker(),
 	}
 	for _, v := range app.Volumes {
+		if v.Removing() {
+			continue
+		}
 		spec.Volumes = append(spec.Volumes, docker.Volume{Name: v.Name, Target: v.Target})
 	}
 	// The same app always gives the same spec, whatever order the rows load in.

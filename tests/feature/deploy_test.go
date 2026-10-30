@@ -182,6 +182,140 @@ func (s *DeployTestSuite) TestPullFailure() {
 	s.Equal(previous.ID, *s.loadApp(app.ID).CurrentDeploymentID)
 }
 
+func (s *DeployTestSuite) volumeRows(app *models.App) []string {
+	var rows []models.AppVolume
+	s.Require().NoError(facades.Orm().Query().Where("app_id", app.ID).Order("id").Find(&rows))
+	names := []string{}
+	for _, v := range rows {
+		names = append(names, v.Name)
+	}
+
+	return names
+}
+
+func (s *DeployTestSuite) removeVolumeRow(app *models.App, name string) {
+	_, err := facades.Orm().Query().Model(&models.AppVolume{}).Where("app_id", app.ID).Where("name", name).
+		Update("removed_at", carbon.NewDateTime(carbon.Now()))
+	s.Require().NoError(err)
+}
+
+func (s *DeployTestSuite) TestDeployLeavesARemovingVolumeOutAndThenRemovesIt() {
+	app := createTestApp(s.T(), "db", nil)
+	addTestVolume(s.T(), app, "echowa-db-data", "/data")
+	addTestVolume(s.T(), app, "echowa-db-logs", "/logs")
+	s.request(app, "v1")
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+	s.Contains(s.docker.Deploys()[0].Volumes, docker.Volume{Name: "echowa-db-logs", Target: "/logs"})
+	s.removeVolumeRow(app, "echowa-db-logs")
+	d := s.request(app, "v1")
+
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	done := s.load(d.ID)
+	s.Equal(models.DeploymentSucceeded, done.Status)
+	s.Equal([]docker.Volume{{Name: "echowa-db-data", Target: "/data"}}, s.docker.Deploys()[1].Volumes)
+	s.Equal([]string{"echowa-db-logs"}, s.docker.RemovedVolumes())
+	s.Equal([]string{"echowa-db-data"}, s.volumeRows(app))
+	s.Contains(done.Log, "Not mounting volume echowa-db-logs (/logs)")
+	s.Contains(done.Log, "Removed volume echowa-db-logs and its data.")
+	s.True(strings.Index(done.Log, "Removed volume") < strings.Index(done.Log, "Deployment succeeded"), "the final status goes last")
+}
+
+func (s *DeployTestSuite) TestRolledBackDeployKeepsARemovingVolume() {
+	app := createTestApp(s.T(), "db", nil)
+	addTestVolume(s.T(), app, "echowa-db-data", "/data")
+	s.request(app, "v1")
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+	s.removeVolumeRow(app, "echowa-db-data")
+	s.docker.Wait = func(docker.ServiceSpec) (docker.UpdateResult, error) {
+		return docker.UpdateResult{Outcome: docker.OutcomeRolledBack, Message: "rollback completed"}, nil
+	}
+	d := s.request(app, "v2")
+
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	s.Equal(models.DeploymentRolledBack, s.load(d.ID).Status)
+	s.Empty(s.docker.RemovedVolumes())
+	s.Equal([]string{"echowa-db-data"}, s.volumeRows(app))
+	exists, err := s.docker.VolumeExists(context.Background(), "echowa-db-data")
+	s.Require().NoError(err)
+	s.True(exists)
+}
+
+func (s *DeployTestSuite) TestPausedDeployKeepsARemovingVolume() {
+	app := createTestApp(s.T(), "db", nil)
+	addTestVolume(s.T(), app, "echowa-db-data", "/data")
+	s.removeVolumeRow(app, "echowa-db-data")
+	s.docker.Wait = func(docker.ServiceSpec) (docker.UpdateResult, error) {
+		return docker.UpdateResult{Outcome: docker.OutcomePaused, Message: "update paused"}, nil
+	}
+	d := s.request(app, "v1")
+
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	s.Equal(models.DeploymentFailed, s.load(d.ID).Status)
+	s.Empty(s.docker.RemovedVolumes())
+	s.Equal([]string{"echowa-db-data"}, s.volumeRows(app))
+}
+
+func (s *DeployTestSuite) TestVolumeRemovedDuringADeployWaitsForTheNextOne() {
+	app := createTestApp(s.T(), "db", nil)
+	addTestVolume(s.T(), app, "echowa-db-data", "/data")
+	s.docker.Wait = func(docker.ServiceSpec) (docker.UpdateResult, error) {
+		s.removeVolumeRow(app, "echowa-db-data")
+		return docker.UpdateResult{Outcome: docker.OutcomeCompleted}, nil
+	}
+	first := s.request(app, "v1")
+
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	s.Equal(models.DeploymentSucceeded, s.load(first.ID).Status)
+	s.Equal([]docker.Volume{{Name: "echowa-db-data", Target: "/data"}}, s.docker.Deploys()[0].Volumes, "this deploy still mounted it")
+	s.Empty(s.docker.RemovedVolumes(), "its task still has the volume")
+	s.Equal([]string{"echowa-db-data"}, s.volumeRows(app))
+
+	s.docker.Wait = nil
+	s.request(app, "v1")
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	s.Empty(s.docker.Deploys()[1].Volumes)
+	s.Equal([]string{"echowa-db-data"}, s.docker.RemovedVolumes())
+	s.Empty(s.volumeRows(app))
+}
+
+func (s *DeployTestSuite) TestFailedVolumeRemovalKeepsTheRowForTheNextDeploy() {
+	app := createTestApp(s.T(), "db", nil)
+	addTestVolume(s.T(), app, "echowa-db-data", "/data")
+	s.removeVolumeRow(app, "echowa-db-data")
+	s.docker.VolumeRemove = func(string) error { return errors.New("docker is unhappy") }
+	d := s.request(app, "v1")
+
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	done := s.load(d.ID)
+	s.Equal(models.DeploymentSucceeded, done.Status, "a volume that stays doesn't fail the deploy")
+	s.Contains(done.Log, "Couldn't remove volume echowa-db-data, so it stays until the next deployment: docker is unhappy")
+	s.Equal([]string{"echowa-db-data"}, s.volumeRows(app))
+
+	s.docker.VolumeRemove = nil
+	next := s.request(app, "v1")
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+
+	s.Contains(s.load(next.ID).Log, "Removed volume echowa-db-data and its data.")
+	s.Empty(s.volumeRows(app))
+}
+
+func (s *DeployTestSuite) TestHasVolumesCountsARemovingVolume() {
+	app := createTestApp(s.T(), "db", nil)
+	addTestVolume(s.T(), app, "echowa-db-data", "/data")
+	s.removeVolumeRow(app, "echowa-db-data")
+
+	has, err := services.HasVolumes(context.Background(), app.ID)
+
+	s.Require().NoError(err)
+	s.True(has, "the running task mounts it until a deploy removes it")
+}
+
 func (s *DeployTestSuite) TestHealthFailureRollsBack() {
 	app := createTestApp(s.T(), "blog", nil)
 	healthcheck := "curl -f http://localhost:8080/up"
