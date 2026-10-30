@@ -11,6 +11,7 @@ import (
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/services"
 	"goravel/bootstrap"
 	"goravel/config"
@@ -33,6 +34,10 @@ func init() {
 		OpenedStorage = append(OpenedStorage, *loc)
 		return fakeStorage
 	}
+	// Nor to a notification provider. Suites that care call FakeNotify.
+	notify.Open = func(p *models.NotificationProvider) (notify.Sender, error) {
+		return fakeNotify.Open(p)
+	}
 }
 
 var (
@@ -41,6 +46,7 @@ var (
 	realStorage = backups.Open
 	fakeDocker  = &docker.Fake{}
 	fakeStorage = backups.NewFake()
+	fakeNotify  = &notify.Fake{}
 	openedMu    sync.Mutex
 )
 
@@ -67,6 +73,14 @@ func (tc *TestCase) FakeStorage() *backups.Fake {
 	OpenedStorage = nil
 
 	return fakeStorage
+}
+
+// FakeNotify gives the test a fresh recorder of what would have been sent
+// to notification providers.
+func (tc *TestCase) FakeNotify() *notify.Fake {
+	fakeNotify = &notify.Fake{}
+
+	return fakeNotify
 }
 
 // useTestDatabase points the default connection, and the metrics file, at

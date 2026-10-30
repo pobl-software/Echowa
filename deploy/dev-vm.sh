@@ -9,6 +9,8 @@
 #   http://localhost:3000            Echowa (UI and webhooks)
 #   http://<app>.localhost:8090      deployed apps, through Traefik
 #   http://localhost:7070            an S3 server for backups (deploy/s3)
+#   http://localhost:8125            Mailpit, SMTP on 2525 (deploy/notify)
+#   http://localhost:8095            ntfy (deploy/notify)
 #
 # Usage, from the repo root:
 #
@@ -88,6 +90,9 @@ up() {
 	log "Deploying an S3 server on port $S3_PORT (bucket $S3_BUCKET, keys in deploy/s3/stack.local.yml)"
 	in_vm sudo docker stack deploy --detach=false --quiet -c deploy/s3/stack.local.yml s3 >/dev/null
 	s3_bucket
+
+	log "Deploying Mailpit (SMTP on 2525, mail at http://localhost:8125) and ntfy (http://localhost:8095)"
+	in_vm sudo docker stack deploy --detach=false --quiet -c deploy/notify/stack.local.yml notify >/dev/null
 
 	log "Migrating $DATA_DIR/echowa.sqlite"
 	run_bin in_vm_quiet artisan migrate

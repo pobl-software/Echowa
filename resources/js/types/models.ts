@@ -89,6 +89,37 @@ export interface RegistryRow extends Registry {
     apps_count: number;
 }
 
+export type NotificationKind = 'slack' | 'discord' | 'teams' | 'ntfy' | 'smtp' | 'resend';
+
+// services.NotificationProviderSummary (ADR 0040). Secrets never leave the
+// server: stored names the ones it has.
+export interface NotificationProvider {
+    id: number;
+    name: string;
+    kind: NotificationKind;
+    enabled: boolean;
+    // The kind's plain settings (models.NotificationConfig).
+    config: {
+        server?: string;
+        host?: string;
+        port?: number;
+        security?: 'starttls' | 'tls' | 'none';
+        username?: string;
+        from?: string;
+        to?: string[];
+    };
+    // Where it sends, without a secret: a webhook's host, ntfy's server, an
+    // email's recipients.
+    target: string;
+    stored: Array<'webhook_url' | 'topic' | 'token' | 'password' | 'api_key'>;
+}
+
+// services.NotificationTest: how a Test send is going.
+export interface NotificationTest {
+    state: 'sending' | 'sent' | 'failed';
+    error?: string;
+}
+
 // models.StorageLocation. The secret key never leaves the server.
 export interface StorageLocation {
     id: number;

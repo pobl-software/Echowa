@@ -172,6 +172,14 @@ func Web() {
 			router.Post("/settings/storage/test", storage.Check)
 			router.Put("/settings/storage/{location}", storage.Update)
 			router.Delete("/settings/storage/{location}", storage.Destroy)
+
+			notifications := controllers.NewNotificationProviderController()
+			router.Post("/settings/notifications", notifications.Store)
+			router.Post("/settings/notifications/test", notifications.Test)
+			router.Get("/settings/notifications/test/{test}", notifications.TestResult)
+			router.Put("/settings/notifications/{provider}", notifications.Update)
+			router.Put("/settings/notifications/{provider}/enabled", notifications.Enabled)
+			router.Delete("/settings/notifications/{provider}", notifications.Destroy)
 		})
 	})
 

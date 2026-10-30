@@ -6,6 +6,7 @@ package rules
 
 import (
 	"net"
+	"net/mail"
 	"net/url"
 	"path"
 	"regexp"
@@ -135,30 +136,86 @@ func IsTimezone(s string) bool {
 // as https://<account>.r2.cloudflarestorage.com (ADR 0034). Plain http is
 // only for a loopback host, like the dev machine's S3 server.
 func IsStorageEndpoint(s string) bool {
-	u, err := url.Parse(strings.TrimSuffix(s, "/"))
-	if err != nil || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		return false
+	u, ok := serviceURL(strings.TrimSuffix(s, "/"))
+
+	return ok && u.Path == "" && u.RawQuery == ""
+}
+
+// IsServiceURL: a URL Echowa sends to, such as a webhook or an ntfy
+// server. https, or plain http for loopback only. A path and query are
+// allowed, a user or fragment aren't.
+func IsServiceURL(s string) bool {
+	_, ok := serviceURL(s)
+
+	return ok
+}
+
+func serviceURL(s string) (*url.URL, bool) {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || u.Fragment != "" || u.User != nil {
+		return nil, false
 	}
 	host := u.Hostname()
 	if !IsDomain(strings.ToLower(host)) && net.ParseIP(host) == nil {
-		return false
+		return nil, false
 	}
 	if p := u.Port(); p != "" {
 		n, err := strconv.Atoi(p)
 		if err != nil || !IsPort(n) {
+			return nil, false
+		}
+	}
+
+	return u, u.Scheme == "https" || (u.Scheme == "http" && IsLoopbackHost(host))
+}
+
+// IsLoopbackHost: localhost or a loopback address.
+func IsLoopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
+}
+
+// IsSMTPHost: a host name or an IP address, with no port.
+func IsSMTPHost(s string) bool {
+	return IsDomain(s) || net.ParseIP(s) != nil
+}
+
+var ntfyTopicPattern = regexp.MustCompile(`^[-_A-Za-z0-9]{1,64}$`)
+
+// IsNtfyTopic: what ntfy accepts as a topic name.
+func IsNtfyTopic(s string) bool {
+	return ntfyTopicPattern.MatchString(s)
+}
+
+// IsEmail: a bare address, such as alerts@example.com, with no name.
+func IsEmail(s string) bool {
+	a, err := mail.ParseAddress(s)
+
+	return err == nil && a.Name == "" && a.Address == s && len(s) <= 254
+}
+
+// MaxEmails is how many addresses a notification provider sends to.
+const MaxEmails = 10
+
+// EmailList splits a list of addresses on commas, semicolons and spaces.
+func EmailList(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' || unicode.IsSpace(r) })
+}
+
+// IsEmailList: one to MaxEmails addresses, each IsEmail.
+func IsEmailList(s string) bool {
+	list := EmailList(s)
+	if len(list) == 0 || len(list) > MaxEmails {
+		return false
+	}
+	for _, a := range list {
+		if !IsEmail(a) {
 			return false
 		}
 	}
 
-	switch u.Scheme {
-	case "https":
-		return true
-	case "http":
-		ip := net.ParseIP(host)
-		return host == "localhost" || (ip != nil && ip.IsLoopback())
-	}
-
-	return false
+	return true
 }
 
 // IsBucket: an S3 bucket name, 3 to 63 characters, that isn't an IP
