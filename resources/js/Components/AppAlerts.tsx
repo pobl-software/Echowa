@@ -1,15 +1,17 @@
 import { Link } from '@inertiajs/react';
+import { BellRingIcon } from 'lucide-react';
 
-import { AddAlertButton, AlertRuleTable, NoAlerts, SuggestedAlerts } from '@/Components/AlertRules';
+import { AddAlertButton, AlertRuleTable, FiringAlerts, NoAlerts, SuggestedAlerts } from '@/Components/AlertRules';
 import { Panel } from '@/Components/Panel';
 import { StatusPill } from '@/Components/StatusBadge';
+import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { buttonVariants } from '@/Components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
 import { formatDateTime, timeAgo } from '@/lib/time';
-import type { NotificationStatus, NotificationSummary, AppAlerts as Section } from '@/types/models';
+import type { FiringAlert, NotificationStatus, NotificationSummary, AppAlerts as Section } from '@/types/models';
 
-// AppAlerts is an app's Alerts section (ADR 0040): its own alerts, the
-// every-app ones that cover it, suggestions, and what was sent.
+// AppAlerts is an app's Alerts section (ADR 0040): what's firing, its own
+// alerts, the every-app ones that cover it, suggestions, and what was sent.
 export function AppAlerts({ app, alerts }: { app: { id: number; name: string }; alerts: Section }) {
     const base = `/apps/${app.id}/alerts`;
     const ready = alerts.providers.length > 0;
@@ -33,6 +35,8 @@ export function AppAlerts({ app, alerts }: { app: { id: number; name: string }; 
 
     return (
         <div className="space-y-6">
+            {alerts.firing.length > 0 && <FiringAlerts firing={alerts.firing} />}
+
             <Panel
                 flush={alerts.rules.length > 0}
                 title="Alerts"
@@ -93,6 +97,23 @@ export function AppAlerts({ app, alerts }: { app: { id: number; name: string }; 
                 )}
             </Panel>
         </div>
+    );
+}
+
+// ConditionAlert is one of the app's conditions firing now, on Overview.
+export function ConditionAlert({ app, alert }: { app: { id: number }; alert: FiringAlert }) {
+    return (
+        <Alert variant={alert.severity === 'critical' ? 'destructive' : 'default'}>
+            <BellRingIcon />
+            <AlertTitle>{alert.description}</AlertTitle>
+            <AlertDescription className="flex flex-col items-start gap-1 [&_p:not(:last-child)]:mb-0">
+                <p>
+                    {alert.value && `Now ${alert.value}. `}
+                    Fired <span title={formatDateTime(alert.since)}>{timeAgo(alert.since)}</span>.
+                </p>
+                <Link href={`/apps/${app.id}?tab=alerts`}>See its alerts</Link>
+            </AlertDescription>
+        </Alert>
     );
 }
 

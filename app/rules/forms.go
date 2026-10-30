@@ -513,6 +513,33 @@ func AlertRule(triggers []string) map[string]any {
 	return rules
 }
 
+// MaxAlertMinutes and MaxRepeatMinutes bound how long a condition waits
+// before it fires, a day, and how often it repeats, a week.
+const (
+	MaxAlertMinutes  = 24 * 60
+	MaxRepeatMinutes = 7 * 24 * 60
+)
+
+// AlertCondition returns the rules a condition's alert adds to
+// AlertRule's: how long it waits, how often it repeats, whether it says
+// it's resolved, and a threshold unless it's yes/no. A percentage is at
+// most 100.
+func AlertCondition(threshold, percent bool) map[string]any {
+	rules := map[string]any{
+		"for_minutes":     fmt.Sprintf("required|integer|min:0|max:%d", MaxAlertMinutes),
+		"repeat_minutes":  fmt.Sprintf("required|integer|min:0|max:%d", MaxRepeatMinutes),
+		"notify_resolved": "required|boolean",
+	}
+	switch {
+	case percent:
+		rules["threshold"] = "required|numeric|min:0|max:100"
+	case threshold:
+		rules["threshold"] = "required|numeric|min:0"
+	}
+
+	return rules
+}
+
 // AlertSuggestions returns the rules for adding suggested alerts: some of
 // triggers, the ones suggested on the page, and where to send them.
 func AlertSuggestions(triggers []string) map[string]any {
@@ -534,6 +561,12 @@ func AlertMessages() validation.Option {
 		"providers.required": "Choose where to send it.",
 		"providers.max":      fmt.Sprintf("At most %d providers.", MaxAlertProviders),
 		"severity.required":  "Choose a severity.",
+		"threshold.required": "Enter a threshold.",
+		"threshold.numeric":  "Enter a number.",
+		"threshold.min":      "At least 0.",
+		"threshold.max":      "At most 100%.",
+		"for_minutes.max":    fmt.Sprintf("At most %d minutes, a day.", MaxAlertMinutes),
+		"repeat_minutes.max": fmt.Sprintf("At most %d minutes, a week.", MaxRepeatMinutes),
 	})
 }
 

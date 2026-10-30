@@ -186,7 +186,7 @@ func alertsByProvider(ctx context.Context) (map[uint][]string, error) {
 		case rule.AppID != nil:
 			covers = names[*rule.AppID]
 		}
-		label := summarise(rule).Label + ", " + covers
+		label := summarise(rule, nil).Label + ", " + covers
 		for _, p := range rule.Providers {
 			byProvider[p.ID] = append(byProvider[p.ID], label)
 		}

@@ -17,6 +17,7 @@ import {
     DialogTrigger,
 } from '@/Components/ui/dialog';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/Components/ui/input-group';
 import {
     Select,
     SelectContent,
@@ -29,8 +30,18 @@ import {
 import { Switch } from '@/Components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
 import { notificationKinds } from '@/lib/notifications';
+import { formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
-import type { AlertRule, AlertSeverity, AlertTrigger, ProviderRef, SettingsAlerts } from '@/types/models';
+import type {
+    AlertRule,
+    AlertSeverity,
+    AlertState,
+    AlertTrigger,
+    AlertUnit,
+    FiringAlert,
+    ProviderRef,
+    SettingsAlerts,
+} from '@/types/models';
 
 const severities: { value: AlertSeverity; label: string; tone: 'neutral' | 'warning' | 'danger' }[] = [
     { value: 'info', label: 'Info', tone: 'neutral' },
@@ -46,6 +57,74 @@ export function SeverityPill({ severity }: { severity: AlertSeverity }) {
             {s.label}
         </StatusPill>
     );
+}
+
+const states: Record<AlertState, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+    ok: { label: 'OK', tone: 'success' },
+    pending: { label: 'Pending', tone: 'warning' },
+    firing: { label: 'Firing', tone: 'danger' },
+    off: { label: 'Off', tone: 'neutral' },
+};
+
+// A condition's state. Nothing for an event, or for an alert that's off,
+// which its switch already says.
+function StatePill({ state }: { state: AlertRule['state'] }) {
+    if (state === '' || state === 'off') {
+        return null;
+    }
+    const s = states[state];
+
+    return (
+        <StatusPill tone={s.tone} pulse={state === 'firing'}>
+            {s.label}
+        </StatusPill>
+    );
+}
+
+// A condition's threshold unit, as its field shows it.
+const unitSuffix: Record<AlertUnit, string> = {
+    '': '',
+    percent: '%',
+    gib: 'GiB',
+    minutes: 'minutes',
+    count: '',
+    per_second: 'per second',
+};
+
+// minutesText mirrors alerts.Minutes: "5 minutes", "1 hour 30 minutes".
+function minutesText(n: number) {
+    const plural = (k: number, unit: string) => (k === 1 ? `1 ${unit}` : `${k} ${unit}s`);
+    if (n < 60) {
+        return plural(n, 'minute');
+    }
+    return n % 60 === 0 ? plural(n / 60, 'hour') : `${plural(Math.floor(n / 60), 'hour')} ${plural(n % 60, 'minute')}`;
+}
+
+// describe mirrors alerts.Trigger.Describe, for the form's sentence as you
+// type: "Memory use above 90% of its limit for 5 minutes".
+function describe(t: AlertTrigger, threshold: string, forMinutes: string) {
+    const words = [t.label];
+    if (t.unit !== '') {
+        const n = Number(threshold);
+        let value = '…';
+        if (threshold.trim() !== '' && Number.isFinite(n)) {
+            const text = Number.isInteger(n) ? n.toLocaleString('en-US') : String(n);
+            value = t.unit === 'percent' ? `${text}%` : [text, unitSuffix[t.unit]].filter(Boolean).join(' ');
+            if (t.unit === 'minutes' && n === 1) {
+                value = '1 minute';
+            }
+        }
+        words.push(t.below ? 'below' : 'above', value);
+        if (t.of) {
+            words.push(t.of);
+        }
+    }
+    const m = Math.floor(Number(forMinutes));
+    if (m > 0) {
+        words.push('for', minutesText(m));
+    }
+
+    return words.join(' ');
 }
 
 // What an alert on Settings covers.
@@ -92,6 +171,7 @@ export function AlertRuleTable({ rules, triggers, providers, base, showCovers }:
                 <TableRow>
                     <TableHead>Alert</TableHead>
                     {showCovers && <TableHead className="hidden lg:table-cell">Covers</TableHead>}
+                    <TableHead className="hidden sm:table-cell">State</TableHead>
                     <TableHead className="hidden sm:table-cell">Severity</TableHead>
                     <TableHead className="hidden md:table-cell">Sends to</TableHead>
                     <TableHead>On</TableHead>
@@ -103,7 +183,7 @@ export function AlertRuleTable({ rules, triggers, providers, base, showCovers }:
                     <TableRow key={rule.id}>
                         {/* Takes the spare width, so the switch stays on a phone's screen. */}
                         <TableCell className="w-full max-w-0">
-                            <div className="truncate font-medium">{rule.label}</div>
+                            <div className="font-medium break-words">{rule.description}</div>
                             {!rule.known && (
                                 <div className="text-xs text-muted-foreground">
                                     From a newer version of Echowa: sends nothing on this one.
@@ -116,6 +196,7 @@ export function AlertRuleTable({ rules, triggers, providers, base, showCovers }:
                             )}
                             <div className="truncate text-xs text-muted-foreground md:hidden">
                                 <span className="sm:hidden">
+                                    {rule.state && rule.state !== 'off' && `${states[rule.state].label} · `}
                                     {severities.find((s) => s.value === rule.severity)?.label} ·{' '}
                                 </span>
                                 <ProviderNames providers={rule.providers} />
@@ -126,6 +207,9 @@ export function AlertRuleTable({ rules, triggers, providers, base, showCovers }:
                                 {covers(rule, triggers)}
                             </TableCell>
                         )}
+                        <TableCell className="hidden sm:table-cell">
+                            <StatePill state={rule.state} />
+                        </TableCell>
                         <TableCell className="hidden sm:table-cell">
                             <SeverityPill severity={rule.severity} />
                         </TableCell>
@@ -256,6 +340,11 @@ interface RuleForm {
     trigger: string;
     severity: AlertSeverity;
     providers: number[];
+    // A condition's, as typed.
+    threshold: string;
+    for_minutes: string;
+    repeat_minutes: string;
+    notify_resolved: boolean;
 }
 
 // AlertRuleDialog adds an alert, or edits one's severity and providers. A
@@ -279,11 +368,36 @@ export function AlertRuleDialog({
     const [open, setOpen] = useState(false);
     const initial = (): RuleForm =>
         rule
-            ? { trigger: rule.trigger, severity: rule.severity, providers: rule.providers.map((p) => p.id) }
-            : { trigger: '', severity: 'warning', providers: defaultProviders(providers) };
+            ? {
+                  trigger: rule.trigger,
+                  severity: rule.severity,
+                  providers: rule.providers.map((p) => p.id),
+                  threshold: rule.threshold === null ? '' : String(rule.threshold),
+                  for_minutes: String(rule.for_minutes),
+                  repeat_minutes: String(rule.repeat_minutes),
+                  notify_resolved: rule.notify_resolved,
+              }
+            : {
+                  trigger: '',
+                  severity: 'warning',
+                  providers: defaultProviders(providers),
+                  threshold: '',
+                  for_minutes: '0',
+                  repeat_minutes: '0',
+                  notify_resolved: true,
+              };
     const form = useForm<RuleForm>(initial());
     const chosen = triggers.find((t) => t.id === form.data.trigger);
+    const condition = chosen?.kind === 'condition' ? chosen : undefined;
     const groups = [...new Set(triggers.map((t) => t.group))];
+
+    const number = (value: string) => (value.trim() === '' ? null : Number(value));
+    form.transform((data) => ({
+        ...data,
+        threshold: number(data.threshold),
+        for_minutes: number(data.for_minutes),
+        repeat_minutes: number(data.repeat_minutes),
+    }));
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -313,9 +427,11 @@ export function AlertRuleDialog({
                     <DialogHeader>
                         <DialogTitle>{rule ? `Edit ${rule.label}` : 'Add an alert'}</DialogTitle>
                         <DialogDescription>
-                            {settings
-                                ? 'An alert about the server, or one that covers every app.'
-                                : 'Echowa sends it as soon as it happens.'}
+                            {condition
+                                ? 'Echowa checks it every minute, and sends when it fires.'
+                                : settings
+                                  ? 'An alert about the server, or one that covers every app.'
+                                  : 'Echowa sends it as soon as it happens.'}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -331,7 +447,13 @@ export function AlertRuleDialog({
                                     onValueChange={(value) => {
                                         const t = triggers.find((x) => x.id === value);
                                         if (t) {
-                                            form.setData((data) => ({ ...data, trigger: t.id, severity: t.severity }));
+                                            form.setData((data) => ({
+                                                ...data,
+                                                trigger: t.id,
+                                                severity: t.severity,
+                                                threshold: t.unit === '' ? '' : String(t.threshold),
+                                                for_minutes: String(t.for_minutes),
+                                            }));
                                         }
                                     }}
                                 >
@@ -365,6 +487,8 @@ export function AlertRuleDialog({
                             )}
                             {form.errors.trigger && <FieldError>{form.errors.trigger}</FieldError>}
                         </Field>
+
+                        {condition && <ConditionFields trigger={condition} form={form} />}
 
                         <Field>
                             <FieldLabel>Severity</FieldLabel>
@@ -417,6 +541,148 @@ export function AlertRuleDialog({
     );
 }
 
+type RuleFormHandle = ReturnType<typeof useForm<RuleForm>>;
+
+// ConditionFields are a condition's: its threshold, how long it must hold,
+// how often it repeats and whether it says it's resolved, with the alert
+// in words as you type.
+function ConditionFields({ trigger, form }: { trigger: AlertTrigger; form: RuleFormHandle }) {
+    const forMinutes = Math.max(0, Math.floor(Number(form.data.for_minutes)) || 0);
+    const suffix = [unitSuffix[trigger.unit], trigger.of].filter(Boolean).join(' ');
+
+    return (
+        <>
+            {trigger.unit !== '' && (
+                <Field data-invalid={!!form.errors.threshold || undefined}>
+                    <FieldLabel htmlFor="alert-threshold">{trigger.below ? 'Below' : 'Above'}</FieldLabel>
+                    <InputGroup className="max-w-72">
+                        <InputGroupInput
+                            id="alert-threshold"
+                            type="number"
+                            inputMode="decimal"
+                            step="any"
+                            min={0}
+                            max={trigger.unit === 'percent' ? 100 : undefined}
+                            className="tabular-nums"
+                            value={form.data.threshold}
+                            onChange={(e) => form.setData('threshold', e.target.value)}
+                            aria-invalid={!!form.errors.threshold || undefined}
+                        />
+                        {suffix && <InputGroupAddon align="inline-end">{suffix}</InputGroupAddon>}
+                    </InputGroup>
+                    {form.errors.threshold && <FieldError>{form.errors.threshold}</FieldError>}
+                </Field>
+            )}
+
+            <div className="grid gap-5 sm:grid-cols-2">
+                <Field data-invalid={!!form.errors.for_minutes || undefined}>
+                    <FieldLabel htmlFor="alert-for">For</FieldLabel>
+                    <MinutesInput
+                        id="alert-for"
+                        value={form.data.for_minutes}
+                        onChange={(value) => form.setData('for_minutes', value)}
+                        invalid={!!form.errors.for_minutes}
+                    />
+                    <FieldDescription>How long before it fires. 0 fires at the first check.</FieldDescription>
+                    {form.errors.for_minutes && <FieldError>{form.errors.for_minutes}</FieldError>}
+                </Field>
+                <Field data-invalid={!!form.errors.repeat_minutes || undefined}>
+                    <FieldLabel htmlFor="alert-repeat">Repeat every</FieldLabel>
+                    <MinutesInput
+                        id="alert-repeat"
+                        value={form.data.repeat_minutes}
+                        onChange={(value) => form.setData('repeat_minutes', value)}
+                        invalid={!!form.errors.repeat_minutes}
+                    />
+                    <FieldDescription>While it’s still firing. 0 never repeats.</FieldDescription>
+                    {form.errors.repeat_minutes && <FieldError>{form.errors.repeat_minutes}</FieldError>}
+                </Field>
+            </div>
+
+            <Field orientation="horizontal">
+                <Switch
+                    id="alert-resolved"
+                    checked={form.data.notify_resolved}
+                    onCheckedChange={(on) => form.setData('notify_resolved', on)}
+                />
+                <div className="grid gap-1">
+                    <FieldLabel htmlFor="alert-resolved">Send when it’s resolved</FieldLabel>
+                    <FieldDescription>
+                        {forMinutes === 0
+                            ? 'At the first check that finds it clear.'
+                            : `Once it’s been clear for ${minutesText(Math.min(forMinutes, 5))}.`}
+                    </FieldDescription>
+                </div>
+            </Field>
+
+            <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Fires when </span>
+                <span className="font-medium">{describe(trigger, form.data.threshold, form.data.for_minutes)}</span>
+            </p>
+        </>
+    );
+}
+
+function MinutesInput({
+    id,
+    value,
+    onChange,
+    invalid,
+}: {
+    id: string;
+    value: string;
+    onChange: (value: string) => void;
+    invalid: boolean;
+}) {
+    return (
+        <InputGroup className="max-w-40">
+            <InputGroupInput
+                id={id}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                className="tabular-nums"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                aria-invalid={invalid || undefined}
+            />
+            <InputGroupAddon align="inline-end">minutes</InputGroupAddon>
+        </InputGroup>
+    );
+}
+
+// FiringAlerts lists the conditions firing now, the most severe first.
+// subjects names what each is about, on Settings.
+export function FiringAlerts({ firing, subjects }: { firing: FiringAlert[]; subjects?: boolean }) {
+    return (
+        <Panel
+            flush
+            title="Firing"
+            description="Past their threshold now. Each sends again only if its alert repeats, and once more when it’s resolved."
+        >
+            <ul className="divide-y">
+                {firing.map((f) => (
+                    <li key={`${f.rule_id} ${f.subject}`} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                        <span className="mt-1.5 size-2 shrink-0 animate-pulse rounded-full bg-destructive" />
+                        <div className="min-w-0 flex-1 text-sm">
+                            <Link href={f.path} className="font-medium hover:underline">
+                                {subjects && `${f.subject}: `}
+                                {f.description}
+                            </Link>
+                            <div className="text-xs text-muted-foreground">
+                                {f.value && `Now ${f.value}. `}
+                                Fired <span title={formatDateTime(f.since)}>{timeAgo(f.since)}</span>.
+                            </div>
+                        </div>
+                        <SeverityPill severity={f.severity} />
+                    </li>
+                ))}
+            </ul>
+        </Panel>
+    );
+}
+
 // SuggestedAlerts offers the alerts that usually matter, to add in one go.
 // Give it a key that changes with the suggestions, so its checklist starts
 // over after an add.
@@ -462,7 +728,7 @@ export function SuggestedAlerts({
                                         }
                                     />
                                     <span className="min-w-0 flex-1">
-                                        <span className="block font-medium">{s.label}</span>
+                                        <span className="block font-medium">{s.description}</span>
                                         {settings && (
                                             <span className="block truncate text-xs text-muted-foreground">
                                                 {s.server ? 'The server' : s.only || 'Every app'}
@@ -527,6 +793,7 @@ export function SettingsAlertRules({ alerts, providers }: { alerts: SettingsAler
 
     return (
         <div id="alerts" className="space-y-6">
+            {alerts.firing.length > 0 && <FiringAlerts firing={alerts.firing} subjects />}
             {ready && alerts.suggestions.length > 0 && (
                 <SuggestedAlerts
                     key={alerts.suggestions.map((s) => s.id).join()}

@@ -111,18 +111,22 @@ func deliver(ctx context.Context, rules []models.AlertRule, e alerts.Event) {
 
 	for _, id := range ids {
 		t := targets[id]
+		severity := notify.Severity(t.rule.Severity)
+		if e.Severity != "" {
+			severity = e.Severity
+		}
 		n := models.Notification{
 			AlertRuleID:            &t.rule.ID,
 			NotificationProviderID: t.provider.ID,
 			Trigger:                e.Trigger,
-			Severity:               t.rule.Severity,
+			Severity:               string(severity),
 			Title:                  e.Title,
 			Summary:                e.Summary,
 		}
 		if e.App != nil {
 			n.AppID = &e.App.ID
 		}
-		enqueue(ctx, t.provider, n, message(notify.Severity(t.rule.Severity), e))
+		enqueue(ctx, t.provider, n, message(severity, e))
 	}
 }
 

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/contracts/validation"
@@ -107,6 +108,17 @@ func back(ctx http.Context, validator validation.Validator) http.Response {
 	return inertia.Back(ctx)
 }
 
+// alertRuleSet is the form's rules: AlertRule's, plus a condition's
+// fields when trigger is one. triggers is nil when the trigger is saved.
+func alertRuleSet(triggers []string, trigger string) map[string]any {
+	set := rules.AlertRule(triggers)
+	if t, ok := alerts.Find(trigger); ok && t.Kind == alerts.KindCondition {
+		maps.Copy(set, rules.AlertCondition(t.Unit != alerts.UnitNone, t.Unit == alerts.UnitPercent))
+	}
+
+	return set
+}
+
 func alertLabel(trigger string) string {
 	if t, ok := alerts.Find(trigger); ok {
 		return t.Label
@@ -121,7 +133,8 @@ func (r *AlertRuleController) Store(ctx http.Context) http.Response {
 		return resp
 	}
 	var in services.AlertRuleInput
-	providers, resp := validated(ctx, rules.AlertRule(place.triggers()), &in, func() []uint { return in.Providers })
+	set := alertRuleSet(place.triggers(), ctx.Request().Input("trigger"))
+	providers, resp := validated(ctx, set, &in, func() []uint { return in.Providers })
 	if resp != nil {
 		return resp
 	}
@@ -137,7 +150,8 @@ func (r *AlertRuleController) Store(ctx http.Context) http.Response {
 	return inertia.Redirect(ctx, place.url())
 }
 
-// Update saves the severity and providers. The trigger never changes.
+// Update saves the severity, providers and a condition's fields. The
+// trigger never changes.
 func (r *AlertRuleController) Update(ctx http.Context) http.Response {
 	var rule models.AlertRule
 	place, resp := findAlertRule(ctx, &rule)
@@ -145,7 +159,7 @@ func (r *AlertRuleController) Update(ctx http.Context) http.Response {
 		return resp
 	}
 	var in services.AlertRuleInput
-	providers, resp := validated(ctx, rules.AlertRule(nil), &in, func() []uint { return in.Providers })
+	providers, resp := validated(ctx, alertRuleSet(nil, rule.Trigger), &in, func() []uint { return in.Providers })
 	if resp != nil {
 		return resp
 	}
@@ -172,7 +186,7 @@ func (r *AlertRuleController) Enabled(ctx http.Context) http.Response {
 		return back(ctx, validator)
 	}
 	enabled := ctx.Request().InputBool("enabled")
-	if _, err := facades.Orm().WithContext(ctx.Context()).Query().Model(&rule).Update("enabled", enabled); err != nil {
+	if err := services.SetAlertRuleEnabled(ctx.Context(), &rule, enabled); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if enabled {

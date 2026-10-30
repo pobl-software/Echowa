@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"goravel/app/facades"
@@ -22,10 +23,15 @@ var short = struct {
 	since map[uint]time.Time
 }{since: map[uint]time.Time{}}
 
+// polled is the last poll's statuses, by app ID. The metric and database
+// conditions read it to tell a stopped app, without asking Docker again.
+var polled atomic.Pointer[map[uint]LiveStatus]
+
 // PollAppStatus reads every app's service, records which are short of
-// replicas and since when, and sends new kills for memory to their rules. The scheduler calls it every 30 seconds; now
-// is when the poll ran. An app Docker didn't answer for keeps its record,
-// since nothing is known about it.
+// replicas and since when, sends new kills for memory to their rules and
+// checks the health conditions. The scheduler calls it every 30 seconds;
+// now is when the poll ran. An app Docker didn't answer for keeps its
+// record, since nothing is known about it.
 func PollAppStatus(ctx context.Context, now time.Time) error {
 	var apps []models.App
 	if err := facades.Orm().WithContext(ctx).Query().Get(&apps); err != nil {
@@ -35,8 +41,12 @@ func PollAppStatus(ctx context.Context, now time.Time) error {
 	for _, app := range apps {
 		statuses[app.ID] = serviceStatus(ctx, app.ServiceName())
 	}
+	polled.Store(&statuses)
 	if err := notifyKills(ctx, apps, statuses); err != nil {
 		facades.Log().Error(fmt.Errorf("notify kills for memory: %w", err))
+	}
+	if err := evaluateHealth(ctx, apps, statuses, now); err != nil {
+		facades.Log().Error(fmt.Errorf("health alerts: %w", err))
 	}
 
 	short.Lock()
@@ -56,6 +66,17 @@ func PollAppStatus(ctx context.Context, now time.Time) error {
 	short.since = since
 
 	return nil
+}
+
+// polledStatus is the app's status from the last poll, if it has one.
+func polledStatus(appID uint) (LiveStatus, bool) {
+	statuses := polled.Load()
+	if statuses == nil {
+		return LiveStatus{}, false
+	}
+	status, ok := (*statuses)[appID]
+
+	return status, ok
 }
 
 // unhealthySince returns when the app fell short of replicas, if the

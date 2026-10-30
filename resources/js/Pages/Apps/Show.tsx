@@ -2,7 +2,7 @@ import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 
-import { AppAlerts } from '@/Components/AppAlerts';
+import { AppAlerts, ConditionAlert } from '@/Components/AppAlerts';
 import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
@@ -270,6 +270,9 @@ export default function AppsShow({
                     {section === 'overview' && (
                         <>
                             <OOMAlert status={status} />
+                            {alerts.firing.map((f) => (
+                                <ConditionAlert key={f.rule_id} app={app} alert={f} />
+                            ))}
                             {taskFailures.map((failure) => (
                                 <ScheduledTaskAlert key={failure.task_id} app={app} failure={failure} />
                             ))}

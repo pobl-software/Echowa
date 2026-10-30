@@ -3,6 +3,7 @@ package feature
 import (
 	"context"
 	"fmt"
+	"maps"
 	nethttp "net/http"
 	"slices"
 	"testing"
@@ -139,6 +140,68 @@ func (s *AlertRulesTestSuite) TestEditChangesTheSeverityAndProvidersButNeverTheT
 	s.Equal([]string{fmt.Sprintf("app:%d deploy.failed warning [Slack #db]", s.app.ID)}, s.rules())
 }
 
+func (s *AlertRulesTestSuite) TestAConditionsFieldsAreCheckedAndSaved() {
+	b := signedIn(s.T(), &s.TestCase)
+	b.visit(s.alertsURL(s.app))
+	memory := func(fields map[string]any) map[string]any {
+		form := map[string]any{"trigger": alerts.AppMemory, "severity": "warning", "providers": []uint{s.ops.ID},
+			"threshold": 85.5, "for_minutes": 5, "repeat_minutes": 30, "notify_resolved": false}
+		maps.Copy(form, fields)
+		return form
+	}
+
+	for _, tc := range []struct {
+		form   map[string]any
+		errors map[string]string
+	}{
+		{memory(map[string]any{"threshold": nil}), map[string]string{"threshold": "Enter a threshold."}},
+		{memory(map[string]any{"threshold": 150}), map[string]string{"threshold": "At most 100%."}},
+		{memory(map[string]any{"threshold": -1, "for_minutes": 2000, "repeat_minutes": nil}), map[string]string{
+			"threshold": "At least 0.", "for_minutes": "At most 1440 minutes, a day.", "repeat_minutes": ""}},
+	} {
+		b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/alerts", s.app.ID), s.alertsURL(s.app), tc.form)
+		errs := s.errors(b, s.alertsURL(s.app))
+		s.Len(errs, len(tc.errors), errs)
+		for field, message := range tc.errors {
+			s.Contains(errs, field, tc.form)
+			if message != "" {
+				s.Equal(message, errs[field], tc.form)
+			}
+		}
+	}
+	s.Empty(s.rules())
+
+	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/alerts", s.app.ID), s.alertsURL(s.app), memory(nil)).
+		AssertHeader("Location", s.alertsURL(s.app))
+	// A yes/no condition keeps no threshold, whatever the form sends.
+	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/alerts", s.app.ID), s.alertsURL(s.app), memory(map[string]any{
+		"trigger": alerts.Unhealthy, "threshold": 50, "notify_resolved": true,
+	})).AssertHeader("Location", s.alertsURL(s.app))
+
+	var saved []models.AlertRule
+	s.Require().NoError(facades.Orm().Query().Order("id").Get(&saved))
+	s.Require().Len(saved, 2)
+	s.Require().NotNil(saved[0].Threshold)
+	s.Equal(85.5, *saved[0].Threshold)
+	s.Equal([]any{5, 30, false}, []any{saved[0].ForMinutes, saved[0].RepeatMinutes, saved[0].NotifyResolved})
+	s.Nil(saved[1].Threshold)
+	s.True(saved[1].NotifyResolved)
+
+	b.submit(nethttp.MethodPut, fmt.Sprintf("/apps/%d/alerts/%d", s.app.ID, saved[0].ID), s.alertsURL(s.app), memory(map[string]any{
+		"threshold": 70, "for_minutes": 0, "notify_resolved": true,
+	})).AssertHeader("Location", s.alertsURL(s.app))
+	var edited models.AlertRule
+	s.Require().NoError(facades.Orm().Query().Find(&edited, saved[0].ID))
+	s.Equal(70.0, *edited.Threshold)
+	s.Equal(0, edited.ForMinutes)
+	s.True(edited.NotifyResolved)
+
+	_, page := b.visit(s.alertsURL(s.app))
+	rule := page.Props["alerts"].(map[string]any)["rules"].([]any)[0].(map[string]any)
+	s.Equal("Memory use above 70% of its limit", rule["description"])
+	s.Equal("ok", rule["state"])
+}
+
 func (s *AlertRulesTestSuite) TestAnAlertIsOnlyReachedFromWhereItLives() {
 	other := createTestApp(s.T(), "shop", nil)
 	theirs := createTestAlertRule(s.T(), alerts.DeployFailed, other, notify.Critical, s.ops)
@@ -214,7 +277,8 @@ func (s *AlertRulesTestSuite) TestAnAppsSectionListsItsAlertsTheEveryAppOnesAndW
 	for _, t := range section["suggestions"].([]any) {
 		suggested = append(suggested, t.(map[string]any)["id"].(string))
 	}
-	s.Equal([]string{alerts.KilledForMemory}, suggested, "the deploy and backup ones are covered")
+	s.Equal([]string{alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory, alerts.DBConnections,
+		alerts.LongestTransaction, alerts.TransactionIDAge}, suggested, "the deploy and backup ones are covered")
 
 	var triggers []string
 	for _, t := range section["triggers"].([]any) {
@@ -246,7 +310,7 @@ func (s *AlertRulesTestSuite) TestATaskAlertIsSuggestedOnlyForAnAppWithTasks() {
 	task := models.ScheduledTask{AppID: s.app.ID, Name: "Scheduler", Schedule: "* * * * *", Timezone: "UTC", Command: "true", TimeoutMinutes: 1, Enabled: true}
 	s.Require().NoError(facades.Orm().Query().Create(&task))
 
-	s.Equal([]string{alerts.DeployFailed, alerts.KilledForMemory, alerts.TaskFailed}, suggestions())
+	s.Equal([]string{alerts.DeployFailed, alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory, alerts.TaskFailed}, suggestions())
 }
 
 func (s *AlertRulesTestSuite) TestSuggestionsAreAddedAtTheirSeverity() {
@@ -276,19 +340,39 @@ func (s *AlertRulesTestSuite) TestSettingsSuggestsTheServersAndEveryAppsAlerts()
 	for _, t := range page.Props["alerts"].(map[string]any)["suggestions"].([]any) {
 		suggested = append(suggested, t.(map[string]any)["id"].(string))
 	}
-	s.Equal([]string{alerts.EchowaStarted, alerts.DeployFailed, alerts.KilledForMemory, alerts.BackupFailed, alerts.TaskFailed}, suggested)
+	s.Equal([]string{
+		alerts.EchowaStarted, alerts.ServerCPU, alerts.ServerMemory, alerts.DiskUsed, alerts.DockerUnreachable,
+		alerts.DeployFailed, alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory,
+		alerts.DBConnections, alerts.LongestTransaction, alerts.TransactionIDAge, alerts.BackupFailed, alerts.TaskFailed,
+	}, suggested)
 
 	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
-		"triggers": suggested, "providers": []uint{s.ops.ID},
+		"triggers": []string{alerts.EchowaStarted, alerts.DiskUsed, alerts.DeployFailed, alerts.Unhealthy}, "providers": []uint{s.ops.ID},
 	}).AssertHeader("Location", "/settings")
 
 	s.Equal([]string{
 		"server echowa.started info [Slack #ops]",
+		"server server.disk critical [Slack #ops]",
 		"all_apps deploy.failed critical [Slack #ops]",
-		"all_apps app.oom warning [Slack #ops]",
-		"all_apps backup.failed critical [Slack #ops]",
-		"all_apps task.failed warning [Slack #ops]",
+		"all_apps app.unhealthy critical [Slack #ops]",
 	}, s.rules())
+	var disk models.AlertRule
+	s.Require().NoError(facades.Orm().Query().Where("trigger", alerts.DiskUsed).First(&disk))
+	s.Require().NotNil(disk.Threshold)
+	s.Equal(90.0, *disk.Threshold, "a condition starts at its usual threshold and minutes")
+	s.Equal(5, disk.ForMinutes)
+	s.True(disk.NotifyResolved)
+
+	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
+		"triggers": suggested[1:], "providers": []uint{s.ops.ID},
+	})
+	s.NotEmpty(s.errors(b, "/settings"), "the ones just added aren't suggested any more")
+	remaining := slices.DeleteFunc(slices.Clone(suggested), func(id string) bool {
+		return slices.Contains([]string{alerts.EchowaStarted, alerts.DiskUsed, alerts.DeployFailed, alerts.Unhealthy}, id)
+	})
+	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
+		"triggers": remaining, "providers": []uint{s.ops.ID},
+	}).AssertHeader("Location", "/settings")
 	_, page = b.visit("/settings")
 	s.Empty(page.Props["alerts"].(map[string]any)["suggestions"])
 	section, err := services.AppAlertsSection(context.Background(), s.app)

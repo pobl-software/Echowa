@@ -44,10 +44,13 @@ type AlertState struct {
 	orm.Model
 	AlertRuleID uint   `json:"alert_rule_id"`
 	Subject     string `json:"subject"`
-	// State is a condition's ok, pending or firing.
-	State      string           `json:"state"`
-	Since      *carbon.DateTime `json:"since"`
-	Value      *float64         `json:"value"`
+	// State is a condition's ok, pending or firing (alerts.Phase), since
+	// when, and its figure at the last check.
+	State string           `json:"state"`
+	Since *carbon.DateTime `json:"since"`
+	Value *float64         `json:"value"`
+	// ClearSince is when a firing condition's figure stopped breaching.
+	ClearSince *carbon.DateTime `json:"clear_since"`
 	NotifiedAt *carbon.DateTime `json:"notified_at"`
 	// EventAt is when the newest event the rule notified happened, for an
 	// event read from a poll, such as a kill for memory.

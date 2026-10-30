@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 
 	"github.com/goravel/framework/contracts/database/orm"
@@ -108,15 +109,19 @@ func RotateWebhookSecret(ctx context.Context, app *models.App) error {
 	return nil
 }
 
-// DeleteApp deletes the app with its env vars, deployments and metrics.
-// Removing the Swarm service and pooler is the caller's job. A pooler sync
-// that was already running could start the pooler again, so one more sync
-// runs behind it and removes it.
+// DeleteApp deletes the app with its env vars, deployments, metrics and
+// the every-app alerts' states for it. Removing the Swarm service and
+// pooler is the caller's job. A pooler sync that was already running could
+// start the pooler again, so one more sync runs behind it and removes it.
 func DeleteApp(ctx context.Context, app *models.App) error {
 	if _, err := facades.Orm().WithContext(ctx).Query().Delete(app); err != nil {
 		return err
 	}
 	deleteAppMetrics(ctx, app.ID)
+	// A new app could get the ID again, and with it a firing alert.
+	if _, err := facades.Orm().WithContext(ctx).Query().Where("subject", models.AppSubject(app.ID)).Delete(&models.AlertState{}); err != nil {
+		facades.Log().Error(fmt.Errorf("deleting app %d's alert states: %w", app.ID, err))
+	}
 	if poolerSyncing(app.ID) {
 		StartPoolerSync(app)
 	}

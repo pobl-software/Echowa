@@ -121,6 +121,10 @@ export interface NotificationProvider {
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 export type NotificationStatus = 'pending' | 'sent' | 'failed' | 'suppressed';
+// alerts.Unit: what a condition's threshold is in. Empty is yes/no.
+export type AlertUnit = '' | 'percent' | 'gib' | 'minutes' | 'count' | 'per_second';
+// A condition's state at its worst, or off while the alert is off.
+export type AlertState = 'ok' | 'pending' | 'firing' | 'off';
 
 // services.AlertTriggerOption: a trigger in app/alerts' catalogue.
 export interface AlertTrigger {
@@ -136,6 +140,16 @@ export interface AlertTrigger {
     severity: AlertSeverity;
     // Offered where it fits and isn't set up yet.
     suggested: boolean;
+    kind: 'event' | 'condition';
+    // A condition's: its unit, what a percentage is of ("of its limit"),
+    // whether it breaches below, what a new alert starts at, and that
+    // alert in words.
+    unit: AlertUnit;
+    of: string;
+    below: boolean;
+    threshold: number;
+    for_minutes: number;
+    description: string;
 }
 
 // services.ProviderRef: a provider as an alert names it.
@@ -154,9 +168,33 @@ export interface AlertRule {
     // The trigger's label, or its ID when this version doesn't know it.
     label: string;
     known: boolean;
+    // A condition in words ("Memory use above 90% of its limit for 5
+    // minutes"), or an event's label.
+    description: string;
+    kind: 'event' | 'condition';
+    threshold: number | null;
+    for_minutes: number;
+    repeat_minutes: number;
+    notify_resolved: boolean;
     severity: AlertSeverity;
     enabled: boolean;
     providers: ProviderRef[];
+    // A condition's, at its worst over what the list is about. Empty for
+    // an event.
+    state: AlertState | '';
+}
+
+// services.FiringAlert: a condition firing now.
+export interface FiringAlert {
+    rule_id: number;
+    // The app's name, "Server", or "Server, /var" for a disk.
+    subject: string;
+    description: string;
+    severity: AlertSeverity;
+    // The last figure, "93% of its limit", or empty for yes/no.
+    value: string;
+    since: string | null;
+    path: string;
 }
 
 // services.NotificationSummary.
@@ -164,7 +202,7 @@ export interface NotificationSummary {
     id: number;
     title: string;
     summary: string;
-    severity: AlertSeverity;
+    severity: AlertSeverity | 'resolved';
     status: NotificationStatus;
     attempts: number;
     error: string | null;
@@ -175,6 +213,7 @@ export interface NotificationSummary {
 
 // services.AppAlerts: an app's Alerts section.
 export interface AppAlerts {
+    firing: FiringAlert[];
     rules: AlertRule[];
     // The every-app alerts that cover the app, edited on Settings.
     every_app: AlertRule[];
@@ -186,6 +225,8 @@ export interface AppAlerts {
 
 // services.SettingsAlerts: the server's alerts and every app's.
 export interface SettingsAlerts {
+    // The server's and every app's.
+    firing: FiringAlert[];
     rules: AlertRule[];
     triggers: AlertTrigger[];
     suggestions: AlertTrigger[];

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -243,4 +244,34 @@ func float[T uint64 | int](p *T) *float64 {
 	}
 
 	return ptr(float64(*p))
+}
+
+// Avg is the minute's average of one of t's figures for one entity (key
+// is empty for the host's). Nil when the minute didn't measure it.
+func (s Sample) Avg(t Table, key, figure string) *float64 {
+	i, j := tableIndex(t.Name), slices.IndexFunc(t.Figures, func(f Figure) bool { return f.Name == figure })
+	if i < 0 || j < 0 || i >= len(s.Rows) {
+		return nil
+	}
+	for _, row := range s.Rows[i] {
+		if row.Key == key {
+			return row.Figures[j].Avg
+		}
+	}
+
+	return nil
+}
+
+// Keys lists the entities t has a row for in the minute.
+func (s Sample) Keys(t Table) []string {
+	i := tableIndex(t.Name)
+	if i < 0 || i >= len(s.Rows) {
+		return nil
+	}
+	keys := make([]string, len(s.Rows[i]))
+	for j, row := range s.Rows[i] {
+		keys[j] = row.Key
+	}
+
+	return keys
 }

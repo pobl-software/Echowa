@@ -48,6 +48,22 @@ const (
 	TaskFailed       = "task.failed"
 	EchowaStarted    = "echowa.started"
 	ImagesPruned     = "prune.removed"
+
+	Unhealthy          = "app.unhealthy"
+	AppCPU             = "app.cpu"
+	AppMemory          = "app.memory"
+	DBConnections      = "db.connections"
+	DBSize             = "db.size"
+	LongestTransaction = "db.longest_transaction"
+	TransactionIDAge   = "db.transaction_id_age"
+	EvictedKeys        = "db.evicted_keys"
+	CacheHitRate       = "db.cache_hit"
+	ServerCPU          = "server.cpu"
+	ServerMemory       = "server.memory"
+	ServerSwap         = "server.swap"
+	ServerIOWait       = "server.iowait"
+	DiskUsed           = "server.disk"
+	DockerUnreachable  = "server.docker"
 )
 
 type Trigger struct {
@@ -65,12 +81,42 @@ type Trigger struct {
 	Severity notify.Severity
 	// Suggested says it's offered where it fits and isn't set up yet.
 	Suggested bool
+
+	// A condition's. Unit is what its figure and threshold are measured
+	// in, and Of what a percentage is of ("of its limit"). Below breaches
+	// under the threshold rather than over it. Threshold and ForMinutes
+	// are what a new alert on it starts at.
+	Unit       Unit
+	Of         string
+	Below      bool
+	Threshold  float64
+	ForMinutes int
+	// Summary says what a yes/no condition means when it fires.
+	Summary string
 }
 
 var catalogue = []Trigger{
 	{ID: DeployFailed, Kind: KindEvent, Scope: ScopeApp, Group: "Deploys", Label: "Deploy failed or rolled back", Severity: notify.Critical, Suggested: true},
 	{ID: DeploySucceeded, Kind: KindEvent, Scope: ScopeApp, Group: "Deploys", Label: "Deploy succeeded", Severity: notify.Info},
+	{ID: Unhealthy, Kind: KindCondition, Scope: ScopeApp, Group: "Health", Label: "Unhealthy", Severity: notify.Critical, Suggested: true,
+		ForMinutes: 2, Summary: "It runs fewer replicas than it wants."},
 	{ID: KilledForMemory, Kind: KindEvent, Scope: ScopeApp, Group: "Health", Label: "Killed for memory", Severity: notify.Warning, Suggested: true},
+	{ID: AppCPU, Kind: KindCondition, Scope: ScopeApp, Group: "Resources", Label: "CPU use", Severity: notify.Warning, Suggested: true,
+		Unit: UnitPercent, Of: "of its limit", Threshold: 90, ForMinutes: 10},
+	{ID: AppMemory, Kind: KindCondition, Scope: ScopeApp, Group: "Resources", Label: "Memory use", Severity: notify.Warning, Suggested: true,
+		Unit: UnitPercent, Of: "of its limit", Threshold: 90, ForMinutes: 5},
+	{ID: DBConnections, Kind: KindCondition, Scope: ScopeApp, Apps: withInspect(), Group: "Database", Label: "Connections", Severity: notify.Warning, Suggested: true,
+		Unit: UnitPercent, Of: "of the maximum", Threshold: 80, ForMinutes: 5},
+	{ID: DBSize, Kind: KindCondition, Scope: ScopeApp, Apps: withInspect(), Group: "Database", Label: "Database size", Severity: notify.Warning,
+		Unit: UnitGiB, Threshold: 10},
+	{ID: LongestTransaction, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres", "mysql"}, Group: "Database", Label: "Longest open transaction", Severity: notify.Warning, Suggested: true,
+		Unit: UnitMinutes, Threshold: 15},
+	{ID: TransactionIDAge, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres"}, Group: "Database", Label: "Transaction ID age", Severity: notify.Critical, Suggested: true,
+		Unit: UnitCount, Threshold: 1_500_000_000},
+	{ID: EvictedKeys, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"redis"}, Group: "Database", Label: "Evicted keys", Severity: notify.Warning,
+		Unit: UnitPerSecond, Threshold: 0, ForMinutes: 5},
+	{ID: CacheHitRate, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres", "mysql"}, Group: "Database", Label: "Cache hit rate", Severity: notify.Warning,
+		Unit: UnitPercent, Below: true, Threshold: 90, ForMinutes: 15},
 	{ID: BackupFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup failed or skipped", Severity: notify.Critical, Suggested: true},
 	{ID: BackupSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup succeeded", Severity: notify.Info},
 	{ID: RestoreFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore failed", Severity: notify.Critical},
@@ -78,6 +124,18 @@ var catalogue = []Trigger{
 	{ID: TaskFailed, Kind: KindEvent, Scope: ScopeApp, Apps: []string{Custom}, Group: "Tasks", Label: "Scheduled task failed or timed out", Severity: notify.Warning, Suggested: true},
 	{ID: EchowaStarted, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Echowa started", Severity: notify.Info, Suggested: true},
 	{ID: ImagesPruned, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Image prune removed images", Severity: notify.Info},
+	{ID: ServerCPU, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "Server CPU use", Severity: notify.Warning, Suggested: true,
+		Unit: UnitPercent, Threshold: 90, ForMinutes: 10},
+	{ID: ServerMemory, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "Server memory use", Severity: notify.Warning, Suggested: true,
+		Unit: UnitPercent, Threshold: 90, ForMinutes: 10},
+	{ID: ServerSwap, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "Swap use", Severity: notify.Warning,
+		Unit: UnitPercent, Threshold: 50, ForMinutes: 10},
+	{ID: ServerIOWait, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "CPU waiting on disk", Severity: notify.Warning,
+		Unit: UnitPercent, Threshold: 20, ForMinutes: 10},
+	{ID: DiskUsed, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "Disk use", Severity: notify.Critical, Suggested: true,
+		Unit: UnitPercent, Threshold: 90, ForMinutes: 5},
+	{ID: DockerUnreachable, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "Docker unreachable", Severity: notify.Critical, Suggested: true,
+		ForMinutes: 2, Summary: "Echowa can't reach Docker, so it can't deploy, check apps or read their metrics."},
 }
 
 // withBackups lists the templates with a Backups section.
@@ -85,6 +143,18 @@ func withBackups() []string {
 	var kinds []string
 	for _, t := range templates.All() {
 		if t.Backup != nil {
+			kinds = append(kinds, t.Slug)
+		}
+	}
+
+	return kinds
+}
+
+// withInspect lists the templates whose health Echowa reads (ADR 0027).
+func withInspect() []string {
+	var kinds []string
+	for _, t := range templates.All() {
+		if t.Inspect != nil {
 			kinds = append(kinds, t.Slug)
 		}
 	}
@@ -133,4 +203,7 @@ type Event struct {
 	// Path is the page it's about, under APP_URL, such as
 	// /apps/3?tab=backups.
 	Path string
+	// Severity, when set, is the message's instead of the rule's: a
+	// condition's resolve is notify.Resolved.
+	Severity notify.Severity
 }
