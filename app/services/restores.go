@@ -19,10 +19,12 @@ import (
 
 	"github.com/goravel/framework/support/carbon"
 
+	"goravel/app/alerts"
 	"goravel/app/backups"
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/templates"
 )
 
@@ -603,6 +605,34 @@ func finishRestore(rec *models.Restore, result restoreResult) {
 	if err != nil {
 		facades.Log().Error(fmt.Errorf("restore %d: %w", rec.ID, err))
 	}
+	notifyRestore(rec, result)
+}
+
+// notifyRestore tells the restore rules how rec ended.
+func notifyRestore(rec *models.Restore, result restoreResult) {
+	var app models.App
+	if err := facades.Orm().Query().Find(&app, rec.AppID); err != nil || app.ID == 0 {
+		return
+	}
+	e := alerts.Event{
+		Trigger: alerts.RestoreFailed,
+		App:     &app,
+		Summary: result.message,
+		Fields:  []notify.Field{{Label: "From", Value: path.Base(rec.Key)}},
+		Path:    fmt.Sprintf("/apps/%d?tab=backups", app.ID),
+	}
+	switch result.status {
+	case models.RestoreSucceeded:
+		e.Trigger, e.Title = alerts.RestoreSucceeded, app.Name+" restored"
+		if e.Summary == "" {
+			e.Summary = "The restore finished."
+		}
+	case models.RestoreInterrupted:
+		e.Title = "Restore of " + app.Name + " interrupted"
+	default:
+		e.Title = "Restore of " + app.Name + " failed"
+	}
+	Notify(e)
 }
 
 // RecoverRestores marks restores an earlier Echowa left running as

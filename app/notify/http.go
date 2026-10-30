@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // client never follows a redirect: a webhook that answers with one would
@@ -67,6 +69,50 @@ func withoutURL(err error) error {
 	return ue.Err
 }
 
+// StatusError is a provider's answer that wasn't a 2xx.
+type StatusError struct {
+	Code int
+	// RetryAfter is how long a 429 asked to wait, or 0.
+	RetryAfter time.Duration
+	message    string
+}
+
+func (e *StatusError) Error() string {
+	if e.message == "" {
+		return fmt.Sprintf("the provider answered %d", e.Code)
+	}
+
+	return e.message
+}
+
+// Permanent says whether trying err again can't help: the provider
+// refused the message itself, as a deleted webhook's 404 does. A rate
+// limit, a timeout and a server error are worth another try, and so is
+// anything that never reached the provider.
+func Permanent(err error) bool {
+	var se *StatusError
+	if errors.As(err, &se) {
+		return se.Code/100 == 4 && se.Code != http.StatusRequestTimeout && se.Code != http.StatusTooManyRequests
+	}
+	var te *textproto.Error
+	if errors.As(err, &te) {
+		return te.Code/100 == 5
+	}
+
+	return false
+}
+
+// RetryAfter is how long the provider asked to wait before the next try,
+// or 0.
+func RetryAfter(err error) time.Duration {
+	var se *StatusError
+	if errors.As(err, &se) {
+		return se.RetryAfter
+	}
+
+	return 0
+}
+
 // statusError says what the provider answered, with its own message when
 // its body has one: Slack's is plain text, Discord's, ntfy's and Resend's
 // are JSON with a message or error field.
@@ -91,14 +137,15 @@ func statusError(resp *http.Response, body []byte) error {
 	}
 	reason = truncate(strings.Join(strings.Fields(reason), " "), 200)
 
-	message := "the provider answered " + resp.Status
+	se := &StatusError{Code: resp.StatusCode, message: "the provider answered " + resp.Status}
 	if reason != "" {
-		message += ": " + reason
+		se.message += ": " + reason
 	}
 	after := resp.Header.Get("Retry-After")
-	if _, err := strconv.ParseFloat(after, 64); resp.StatusCode == http.StatusTooManyRequests && err == nil {
-		message += " (try again in " + after + "s)"
+	if seconds, err := strconv.ParseFloat(after, 64); resp.StatusCode == http.StatusTooManyRequests && err == nil && seconds >= 0 {
+		se.RetryAfter = time.Duration(seconds * float64(time.Second))
+		se.message += " (try again in " + after + "s)"
 	}
 
-	return errors.New(message)
+	return se
 }

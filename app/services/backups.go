@@ -18,10 +18,12 @@ import (
 
 	"github.com/goravel/framework/support/carbon"
 
+	"goravel/app/alerts"
 	"goravel/app/backups"
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/release"
 	"goravel/app/templates"
 )
@@ -127,6 +129,7 @@ func startBackup(app *models.App, loc *models.StorageLocation, trigger models.Ba
 			if err := facades.Orm().Query().Create(rec); err != nil {
 				return nil, err
 			}
+			notifyBackup(rec, backupResult{status: models.BackupSkipped, message: message})
 			return rec, ErrScheduleRunning
 		}
 	}
@@ -373,6 +376,40 @@ func finishBackup(rec *models.Backup, result backupResult) {
 	if err != nil {
 		facades.Log().Error(fmt.Errorf("backup %d: %w", rec.ID, err))
 	}
+	notifyBackup(rec, result)
+}
+
+// backupStartedBy says what started a backup, in a notification.
+var backupStartedBy = map[models.BackupTrigger]string{
+	models.BackupOnSchedule:    "Its schedule",
+	models.BackupByHand:        "Back up now",
+	models.BackupBeforeRestore: "A restore, for safety",
+}
+
+// notifyBackup tells the backup rules how rec ended.
+func notifyBackup(rec *models.Backup, result backupResult) {
+	var app models.App
+	if err := facades.Orm().Query().Find(&app, rec.AppID); err != nil || app.ID == 0 {
+		return
+	}
+	e := alerts.Event{
+		Trigger: alerts.BackupFailed,
+		App:     &app,
+		Summary: result.message,
+		Fields:  []notify.Field{{Label: "Started by", Value: backupStartedBy[rec.Trigger]}},
+		Path:    fmt.Sprintf("/apps/%d?tab=backups", app.ID),
+	}
+	switch result.status {
+	case models.BackupSucceeded:
+		e.Trigger, e.Title, e.Summary = alerts.BackupSucceeded, app.Name+" backed up", "The dump is "+sizeText(result.size)+"."
+	case models.BackupSkipped:
+		e.Title = "Backup of " + app.Name + " skipped"
+	case models.BackupInterrupted:
+		e.Title = "Backup of " + app.Name + " interrupted"
+	default:
+		e.Title = "Backup of " + app.Name + " failed"
+	}
+	Notify(e)
 }
 
 // RecoverBackups marks backups an earlier Echowa left running as

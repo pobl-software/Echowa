@@ -15,8 +15,8 @@ import (
 )
 
 // Schedule runs inside the server process (docs/mvp.md, "Image pruning",
-// "App status", "Metrics", "Scheduled tasks" and "Backups"; ADR 0021 for
-// the update check). Artisan
+// "App status", "Metrics", "Scheduled tasks", "Backups" and
+// "Notifications"; ADR 0021 for the update check). Artisan
 // commands start the scheduler too, so they get no events: only the server
 // prunes, polls, reads and rolls up metrics, and checks for updates.
 func Schedule() []schedule.Event {
@@ -96,6 +96,24 @@ func Schedule() []schedule.Event {
 				facades.Log().Error(fmt.Errorf("backup records prune: %w", err))
 			}
 		}).HourlyAt([]string{"50"}).SkipIfStillRunning().Name("echowa:prune-backup-records"),
+
+		facades.Schedule().Call(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := services.PruneNotifications(ctx, time.Now()); err != nil {
+				facades.Log().Error(fmt.Errorf("notifications prune: %w", err))
+			}
+		}).HourlyAt([]string{"55"}).SkipIfStillRunning().Name("echowa:prune-notifications"),
+
+		// Tells providers how many notifications the storm guard held
+		// back, once they have room (ADR 0040).
+		facades.Schedule().Call(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := services.SendHeldBack(ctx); err != nil {
+				facades.Log().Error(fmt.Errorf("held-back notifications: %w", err))
+			}
+		}).EveryMinute().SkipIfStillRunning().Name("echowa:send-held-back"),
 
 		facades.Schedule().Call(func() {
 			_, err := services.RunPrune(context.Background(), services.PruneScheduled)

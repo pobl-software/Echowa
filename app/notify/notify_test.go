@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -172,22 +173,27 @@ func TestResend(t *testing.T) {
 // for a webhook is the secret.
 func TestErrorsNameTheAnswerAndNeverTheURL(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		status int
-		body   string
-		want   string
+		name      string
+		status    int
+		body      string
+		want      string
+		permanent bool
+		after     time.Duration
 	}{
-		{"slack's plain text", http.StatusNotFound, "no_service", "the provider answered 404 Not Found: no_service"},
-		{"discord's JSON", http.StatusNotFound, `{"message": "Unknown Webhook", "code": 10015}`, "the provider answered 404 Not Found: Unknown Webhook"},
-		{"ntfy's JSON", http.StatusUnauthorized, `{"code":40101,"http":401,"error":"unauthorized"}`, "the provider answered 401 Unauthorized: unauthorized"},
-		{"a rate limit", http.StatusTooManyRequests, `{"message": "You are being rate limited."}`, "the provider answered 429 Too Many Requests: You are being rate limited. (try again in 3s)"},
-		{"a redirect, not followed", http.StatusFound, "", "the provider answered 302 Found"},
+		{"slack's plain text", http.StatusNotFound, "no_service", "the provider answered 404 Not Found: no_service", true, 0},
+		{"discord's JSON", http.StatusNotFound, `{"message": "Unknown Webhook", "code": 10015}`, "the provider answered 404 Not Found: Unknown Webhook", true, 0},
+		{"ntfy's JSON", http.StatusUnauthorized, `{"code":40101,"http":401,"error":"unauthorized"}`, "the provider answered 401 Unauthorized: unauthorized", true, 0},
+		{"a rate limit", http.StatusTooManyRequests, `{"message": "You are being rate limited."}`, "the provider answered 429 Too Many Requests: You are being rate limited. (try again in 3s)", false, 3 * time.Second},
+		{"a server error", http.StatusBadGateway, "", "the provider answered 502 Bad Gateway", false, 0},
+		{"a redirect, not followed", http.StatusFound, "", "the provider answered 302 Found", false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := server(t, tc.status, tc.body)
 			err := send(t, provider(models.NotifyDiscord, models.NotificationConfig{}, models.NotificationSecrets{WebhookURL: srv.URL + "/api/webhooks/1/hunter2"}))
 			require.Error(t, err)
 			assert.Equal(t, tc.want, err.Error())
+			assert.Equal(t, tc.permanent, Permanent(err), "trying again can't help")
+			assert.Equal(t, tc.after, RetryAfter(err))
 		})
 	}
 

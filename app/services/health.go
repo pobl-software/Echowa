@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -21,8 +22,8 @@ var short = struct {
 	since map[uint]time.Time
 }{since: map[uint]time.Time{}}
 
-// PollAppStatus reads every app's service and records which are short of
-// replicas, and since when. The scheduler calls it every 30 seconds; now
+// PollAppStatus reads every app's service, records which are short of
+// replicas and since when, and sends new kills for memory to their rules. The scheduler calls it every 30 seconds; now
 // is when the poll ran. An app Docker didn't answer for keeps its record,
 // since nothing is known about it.
 func PollAppStatus(ctx context.Context, now time.Time) error {
@@ -33,6 +34,9 @@ func PollAppStatus(ctx context.Context, now time.Time) error {
 	statuses := make(map[uint]LiveStatus, len(apps))
 	for _, app := range apps {
 		statuses[app.ID] = serviceStatus(ctx, app.ServiceName())
+	}
+	if err := notifyKills(ctx, apps, statuses); err != nil {
+		facades.Log().Error(fmt.Errorf("notify kills for memory: %w", err))
 	}
 
 	short.Lock()

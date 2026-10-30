@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/goravel/framework/support/carbon"
 
+	"goravel/app/alerts"
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/tasks"
 )
 
@@ -178,6 +181,38 @@ func finishRun(run *models.ScheduledTaskRun, result runResult) {
 	if err != nil {
 		facades.Log().Error(fmt.Errorf("scheduled task run %d: %w", run.ID, err))
 	}
+	if result.status == models.RunFailed || result.status == models.RunTimedOut {
+		notifyRun(run, result)
+	}
+}
+
+// notifyRun tells the task rules that run failed or timed out.
+func notifyRun(run *models.ScheduledTaskRun, result runResult) {
+	var task models.ScheduledTask
+	if err := facades.Orm().Query().Find(&task, run.ScheduledTaskID); err != nil || task.ID == 0 {
+		return
+	}
+	var app models.App
+	if err := facades.Orm().Query().Find(&app, task.AppID); err != nil || app.ID == 0 {
+		return
+	}
+	e := alerts.Event{
+		Trigger: alerts.TaskFailed,
+		App:     &app,
+		Title:   fmt.Sprintf("Task %s on %s failed", task.Name, app.Name),
+		Summary: result.message,
+		Path:    fmt.Sprintf("/apps/%d?tab=tasks", app.ID),
+	}
+	if result.status == models.RunTimedOut {
+		e.Title = fmt.Sprintf("Task %s on %s timed out", task.Name, app.Name)
+	}
+	if result.exitCode != nil {
+		e.Fields = append(e.Fields, notify.Field{Label: "Exit code", Value: strconv.Itoa(*result.exitCode)})
+		if e.Summary == "" {
+			e.Summary = fmt.Sprintf("The command exited with %d.", *result.exitCode)
+		}
+	}
+	Notify(e)
 }
 
 func minutes(n int) string {
