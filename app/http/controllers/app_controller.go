@@ -182,7 +182,7 @@ func (r *AppController) Store(ctx http.Context) http.Response {
 	if resp := r.checkRegistry(ctx, in); resp != nil {
 		return resp
 	}
-	leftover, err := services.LeftoverVolume(ctx.Context(), tmpl, in.Name)
+	leftover, err := services.LeftoverVolume(ctx.Context(), templates.VolumeNames(tmpl, in.Name))
 	if err != nil {
 		return failed(ctx, map[string]string{"name": "Couldn't check Docker for this app's volume: " + err.Error()})
 	}

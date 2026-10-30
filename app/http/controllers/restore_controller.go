@@ -226,7 +226,7 @@ func (r *RestoreController) NewApp(ctx http.Context) http.Response {
 	if err := services.CheckRestoreTag(tmpl, src.Manifest, tag); errors.As(err, &refused) {
 		return failed(ctx, map[string]string{"tag": refused.Reason})
 	}
-	leftover, err := services.LeftoverVolume(ctx.Context(), &tmpl, name)
+	leftover, err := services.LeftoverVolume(ctx.Context(), templates.VolumeNames(&tmpl, name))
 	if err != nil {
 		return failed(ctx, map[string]string{"name": "Couldn't check Docker for this app's volume: " + err.Error()})
 	}

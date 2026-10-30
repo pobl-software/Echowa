@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/goravel/framework/contracts/database/orm"
+	"github.com/goravel/framework/support/carbon"
+
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
@@ -83,17 +86,13 @@ func removeVolume(ctx context.Context, name string) error {
 	}
 }
 
-// LeftoverVolume returns the first volume a new app called appName would
-// mount that already exists, or "" if none do. Such a volume is left from a
-// deleted app, and mounting it would be worse than refusing: PostgreSQL
-// only reads POSTGRES_PASSWORD when its data directory is empty, so the new
-// app's password wouldn't work.
-func LeftoverVolume(ctx context.Context, tmpl *templates.Template, appName string) (string, error) {
-	if tmpl == nil {
-		return "", nil
-	}
-	for _, v := range tmpl.Volumes {
-		name := templates.VolumeName(appName, v.Name)
+// LeftoverVolume returns the first of names, the Docker volumes a new app
+// or volume would mount, that already exists, or "" if none do. Such a
+// volume is left from a deleted app, and mounting it would be worse than
+// refusing: PostgreSQL only reads POSTGRES_PASSWORD when its data directory
+// is empty, so the new app's password wouldn't work.
+func LeftoverVolume(ctx context.Context, names []string) (string, error) {
+	for _, name := range names {
 		exists, err := Docker().VolumeExists(ctx, name)
 		if err != nil {
 			return "", err
@@ -104,4 +103,73 @@ func LeftoverVolume(ctx context.Context, tmpl *templates.Template, appName strin
 	}
 
 	return "", nil
+}
+
+// VolumeClash says why a volume called dockerName at target can't join an
+// app's volumes, as the form's field and what to tell the admin, or returns
+// nil when it can. Removing rows count: they still hold their name and
+// path until a deploy deletes them. except is the volume being moved, which
+// can't clash with itself, and dockerName is "" when it keeps its name.
+func VolumeClash(volumes []models.AppVolume, dockerName, target string, except uint) map[string]string {
+	clash := map[string]string{}
+	for _, v := range volumes {
+		if v.ID == except {
+			continue
+		}
+		if dockerName != "" && v.Name == dockerName {
+			clash["name"] = "This app already has a volume with this name."
+			if v.Removing() {
+				clash["name"] = "A volume with this name is still being removed. Add it again after the next deployment."
+			}
+		}
+		if v.Target == target {
+			clash["target"] = "Another volume is already mounted at this path."
+			if v.Removing() {
+				clash["target"] = "A volume at this path is still being removed. Use the path again after the next deployment."
+			}
+		}
+	}
+	if len(clash) == 0 {
+		return nil
+	}
+
+	return clash
+}
+
+// AddVolume saves a volume called name at target for the app, and sets its
+// replicas to one in the same transaction, since a volume has one writer
+// (ADR 0025). The Docker volume is echowa-<app>-<name>. The caller has
+// checked VolumeClash and LeftoverVolume.
+func AddVolume(ctx context.Context, app *models.App, name, target string) (*models.AppVolume, error) {
+	volume := &models.AppVolume{AppID: app.ID, Name: templates.VolumeName(app.Name, name), Target: target}
+	err := facades.Orm().WithContext(ctx).Transaction(func(tx orm.Query) error {
+		if err := tx.Create(volume); err != nil {
+			return err
+		}
+		_, err := tx.Model(app).Update("replicas", 1)
+
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	app.Replicas = 1
+
+	return volume, nil
+}
+
+// MoveVolume mounts the volume at target. Its data goes with it: the name,
+// which is the Docker volume, never changes.
+func MoveVolume(ctx context.Context, volume *models.AppVolume, target string) error {
+	_, err := facades.Orm().WithContext(ctx).Query().Model(volume).Update("target", target)
+
+	return err
+}
+
+// MarkVolumeRemoved turns the volume into Removing. The next deploy leaves
+// it out and deletes it (RemoveDetached).
+func MarkVolumeRemoved(ctx context.Context, volume *models.AppVolume) error {
+	_, err := facades.Orm().WithContext(ctx).Query().Model(volume).Update("removed_at", carbon.NewDateTime(carbon.Now()))
+
+	return err
 }

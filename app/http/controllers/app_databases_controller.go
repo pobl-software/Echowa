@@ -67,7 +67,7 @@ func (r *AppDatabasesController) Store(ctx http.Context) http.Response {
 		if !ok {
 			return failed(ctx, map[string]string{fmt.Sprintf("databases.%d.template", i): "There's no template called " + d.Template + "."})
 		}
-		leftover, err := services.LeftoverVolume(ctx.Context(), &tmpl, d.Name)
+		leftover, err := services.LeftoverVolume(ctx.Context(), templates.VolumeNames(&tmpl, d.Name))
 		if err != nil {
 			return failed(ctx, map[string]string{fmt.Sprintf("databases.%d.name", i): "Couldn't check Docker for its volume: " + err.Error()})
 		}
