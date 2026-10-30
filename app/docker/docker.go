@@ -77,7 +77,8 @@ type Client interface {
 
 	// RemoveVolume removes a volume Echowa's services created. Removing a
 	// missing volume is not an error. The error wraps ErrVolumeInUse while a
-	// container, even a stopped task, still uses it.
+	// running container still uses it. The stopped containers of Swarm tasks
+	// an update replaced don't count: it removes them.
 	RemoveVolume(ctx context.Context, name string) error
 
 	// VolumeExists reports whether a volume with this name exists, whoever

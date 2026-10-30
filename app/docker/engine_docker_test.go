@@ -350,6 +350,61 @@ func TestEngineVolumeKeepsDataAcrossDeploys(t *testing.T) {
 	assert.ErrorIs(t, engine.RemoveVolume(ctx, unmanaged), ErrNotManaged)
 }
 
+func TestEngineRemovesAVolumeAnUpdateDropped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	cfg := DefaultConfig()
+	cfg.UpdateMonitor = 2 * time.Second
+	cfg.DeployTimeout = time.Minute
+	cfg.PollInterval = 500 * time.Millisecond
+	engine, err := New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = engine.Close() })
+	require.NoError(t, engine.Check(ctx), "needs a local Swarm manager: run `docker swarm init` (deploy/README.md)")
+	ensureNetwork(t, engine, cfg.Network)
+
+	name := fmt.Sprintf("echowa-it-drop-%d", time.Now().UnixNano()%1_000_000)
+	volume := name + "-data"
+	t.Cleanup(func() {
+		_ = engine.RemoveService(context.Background(), name)
+		_, _ = engine.api.VolumeRemove(context.Background(), volume, client.VolumeRemoveOptions{Force: true})
+	})
+
+	image, err := engine.PullImage(ctx, busybox, nil)
+	require.NoError(t, err)
+	spec := ServiceSpec{
+		Name: name, App: "it-drop", Image: image, Replicas: 1,
+		Args:    []string{"sh", "-c", "exec sleep 3600"},
+		Volumes: []Volume{{Name: volume, Target: "/data"}},
+	}
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err := engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	require.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+	assert.ErrorIs(t, engine.RemoveVolume(ctx, volume), ErrVolumeInUse, "a running task mounts it")
+
+	// Swarm keeps the replaced task's stopped container, which Docker
+	// counts as a user of the volume.
+	spec.Volumes = nil
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err = engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	require.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+	require.Eventually(t, func() bool {
+		err := engine.RemoveVolume(ctx, volume)
+		if err != nil && !errors.Is(err, ErrVolumeInUse) {
+			t.Logf("remove volume: %v", err)
+		}
+		return err == nil
+	}, 30*time.Second, time.Second, "the volume is removable once the old task has stopped")
+	exists, err := engine.VolumeExists(ctx, volume)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 func TestEngineHostPortSurvivesRedeploys(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
