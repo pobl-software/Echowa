@@ -40,7 +40,7 @@ func (r *SlowQueriesController) set(ctx http.Context, on bool, change string) ht
 		return inertia.Back(ctx)
 	}
 
-	if err := services.SetSlowQueries(ctx, &app, on); err != nil {
+	if err := services.SetSlowQueries(ctx.Context(), &app, on); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 
@@ -54,7 +54,7 @@ func (r *SlowQueriesController) Reset(ctx http.Context) http.Response {
 		return resp
 	}
 
-	if err := services.ResetSlowQueries(ctx, &app); err != nil {
+	if err := services.ResetSlowQueries(ctx.Context(), &app); err != nil {
 		inertia.Flash(ctx, "error", err.Error())
 		return inertia.Back(ctx)
 	}

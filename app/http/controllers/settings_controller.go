@@ -25,7 +25,7 @@ func NewSettingsController() *SettingsController {
 func (r *SettingsController) Index(ctx http.Context) http.Response {
 	cfg := services.PruneSettings()
 	current, last := services.PruneState()
-	locations, err := services.StorageLocations(ctx)
+	locations, err := services.StorageLocations(ctx.Context())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -85,7 +85,7 @@ func (r *SettingsController) CheckForUpdate(ctx http.Context) http.Response {
 // Update asks the root updater to install the newest release (ADR 0021).
 // The page then follows the updater's progress.
 func (r *SettingsController) Update(ctx http.Context) http.Response {
-	err := services.RequestUpdate(ctx, ctx.Request().Input("version"))
+	err := services.RequestUpdate(ctx.Context(), ctx.Request().Input("version"))
 	switch {
 	case errors.Is(err, services.ErrDevBuild), errors.Is(err, services.ErrNotNewest),
 		errors.Is(err, services.ErrDeploysRunning), errors.Is(err, services.ErrUpdating):

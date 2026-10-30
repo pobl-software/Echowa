@@ -15,6 +15,7 @@ require (
 	github.com/goravel/gin v1.18.0
 	github.com/goravel/openai v1.18.0
 	github.com/goravel/sqlite v1.18.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
 	github.com/ncruces/go-sqlite3 v0.25.0
@@ -25,6 +26,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
+	golang.org/x/tools v0.50.0
 )
 
 require (
@@ -182,7 +184,6 @@ require (
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/grpc v1.83.2 // indirect

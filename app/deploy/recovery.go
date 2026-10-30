@@ -85,7 +85,8 @@ func Recover(ctx context.Context) error {
 // RecoveryRunner runs Recover, services.RecoverTaskRuns for scheduled
 // tasks (ADR 0032), services.RecoverBackups, RecoverRestores and
 // RemoveUploads (ADR 0034), and SyncPoolers (ADR 0035), once when Echowa
-// starts serving, alongside Goravel's queue worker.
+// starts serving, alongside Goravel's queue worker. When Echowa stops, it
+// closes the open terminals (ADR 0038).
 type RecoveryRunner struct {
 	done chan struct{}
 }
@@ -129,6 +130,8 @@ func (r *RecoveryRunner) Run() error {
 }
 
 func (r *RecoveryRunner) Shutdown() error {
+	// Docker would leave their shells running, with nothing to end them.
+	services.CloseTerminals("Echowa stopped. Reconnect when it's back.")
 	close(r.done)
 
 	return nil

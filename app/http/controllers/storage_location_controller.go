@@ -26,7 +26,7 @@ func (r *StorageLocationController) Store(ctx http.Context) http.Response {
 		return resp
 	}
 
-	loc, err := services.CreateStorageLocation(ctx, in)
+	loc, err := services.CreateStorageLocation(ctx.Context(), in)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -45,7 +45,7 @@ func (r *StorageLocationController) Update(ctx http.Context) http.Response {
 		return resp
 	}
 	if in.MovesBackups(&loc) {
-		count, err := services.StorageLocationBackups(ctx, loc.ID)
+		count, err := services.StorageLocationBackups(ctx.Context(), loc.ID)
 		if err != nil {
 			return inertia.ServerError(ctx, err)
 		}
@@ -55,7 +55,7 @@ func (r *StorageLocationController) Update(ctx http.Context) http.Response {
 		}
 	}
 
-	if err := services.UpdateStorageLocation(ctx, &loc, in); err != nil {
+	if err := services.UpdateStorageLocation(ctx.Context(), &loc, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Saved "+loc.Name+".")
@@ -69,7 +69,7 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 		return resp
 	}
 
-	apps, err := services.LocationSchedules(ctx, loc.ID)
+	apps, err := services.LocationSchedules(ctx.Context(), loc.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -78,11 +78,11 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 		return inertia.Redirect(ctx, "/settings")
 	}
 
-	count, err := services.StorageLocationBackups(ctx, loc.ID)
+	count, err := services.StorageLocationBackups(ctx.Context(), loc.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	if err := services.DeleteStorageLocation(ctx, &loc); err != nil {
+	if err := services.DeleteStorageLocation(ctx.Context(), &loc); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if count > 0 {
@@ -100,7 +100,7 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 func (r *StorageLocationController) Check(ctx http.Context) http.Response {
 	var loc models.StorageLocation
 	if id := ctx.Request().InputInt("id"); id > 0 {
-		if err := facades.Orm().WithContext(ctx).Query().Where("id", id).FirstOrFail(&loc); err != nil {
+		if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", id).FirstOrFail(&loc); err != nil {
 			return ctx.Response().Json(http.StatusNotFound, http.Json{"message": "No such storage location."})
 		}
 	}
@@ -118,7 +118,7 @@ func (r *StorageLocationController) Check(ctx http.Context) http.Response {
 	}
 	in.Apply(&loc)
 
-	steps := services.CheckStorageLocation(ctx, &loc)
+	steps := services.CheckStorageLocation(ctx.Context(), &loc)
 
 	return ctx.Response().Json(http.StatusOK, http.Json{"steps": steps, "passed": backups.Passed(steps)})
 }

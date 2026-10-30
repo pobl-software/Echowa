@@ -31,7 +31,7 @@ type RegistryRow struct {
 
 func (r *RegistryController) Index(ctx http.Context) http.Response {
 	rows := []RegistryRow{}
-	err := facades.Orm().WithContext(ctx).Query().Model(&models.Registry{}).
+	err := facades.Orm().WithContext(ctx.Context()).Query().Model(&models.Registry{}).
 		Select("id", "name", "host", "username", "(SELECT COUNT(*) FROM apps WHERE apps.registry_id = registries.id) AS apps_count").
 		Order("name").Get(&rows)
 	if err != nil {
@@ -59,7 +59,7 @@ func (r *RegistryController) Store(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 
-	registry, err := services.CreateRegistry(ctx, in)
+	registry, err := services.CreateRegistry(ctx.Context(), in)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -98,7 +98,7 @@ func (r *RegistryController) Update(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 
-	if err := services.UpdateRegistry(ctx, &registry, in); err != nil {
+	if err := services.UpdateRegistry(ctx.Context(), &registry, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Saved "+registry.Name+".")
@@ -112,7 +112,7 @@ func (r *RegistryController) Destroy(ctx http.Context) http.Response {
 		return resp
 	}
 
-	err := services.DeleteRegistry(ctx, &registry)
+	err := services.DeleteRegistry(ctx.Context(), &registry)
 	if errors.Is(err, services.ErrRegistryInUse) {
 		inertia.Flash(ctx, "error", "Can't delete "+registry.Name+": apps still pull through it. Change their registry first.")
 		return inertia.Back(ctx)
@@ -133,7 +133,7 @@ func (r *RegistryController) Test(ctx http.Context) http.Response {
 		return resp
 	}
 
-	if err := services.Docker().RegistryLogin(ctx, *services.RegistryAuth(&registry)); err != nil {
+	if err := services.Docker().RegistryLogin(ctx.Context(), *services.RegistryAuth(&registry)); err != nil {
 		inertia.Flash(ctx, "error", "Login to "+registry.Host+" as "+registry.Username+" failed: "+err.Error())
 		return inertia.Back(ctx)
 	}

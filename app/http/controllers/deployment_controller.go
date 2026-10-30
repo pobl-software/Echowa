@@ -67,7 +67,7 @@ func (r *DeploymentController) Redeploy(ctx http.Context) http.Response {
 	}
 
 	_, digest, _ := strings.Cut(*deployment.Digest, "@")
-	redeploy, err := deploy.Request(ctx, &app, models.TriggerRollback, digest)
+	redeploy, err := deploy.Request(ctx.Context(), &app, models.TriggerRollback, digest)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

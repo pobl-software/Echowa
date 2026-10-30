@@ -17,7 +17,7 @@ func findOr404(ctx http.Context, param string, model any, preload ...string) htt
 		return notFound(ctx)
 	}
 
-	query := facades.Orm().WithContext(ctx).Query()
+	query := facades.Orm().WithContext(ctx.Context()).Query()
 	for _, relation := range preload {
 		query = query.With(relation)
 	}

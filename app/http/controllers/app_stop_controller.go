@@ -29,7 +29,7 @@ func (r *AppStopController) Stop(ctx http.Context) http.Response {
 		return resp
 	}
 
-	err := services.StopApp(ctx, &app)
+	err := services.StopApp(ctx.Context(), &app)
 	var active *services.DeploymentActive
 	var held *services.AppHeld
 	switch {
@@ -55,7 +55,7 @@ func (r *AppStopController) Start(ctx http.Context) http.Response {
 		return resp
 	}
 
-	switch services.AppLiveStatus(ctx, &app).State {
+	switch services.AppLiveStatus(ctx.Context(), &app).State {
 	case services.StateStopped:
 	case services.StateStopping:
 		inertia.Flash(ctx, "error", app.Name+" is still stopping.")
@@ -64,7 +64,7 @@ func (r *AppStopController) Start(ctx http.Context) http.Response {
 		inertia.Flash(ctx, "error", app.Name+" isn't stopped.")
 		return inertia.Back(ctx)
 	}
-	active, err := services.ActiveDeployment(ctx, &app)
+	active, err := services.ActiveDeployment(ctx.Context(), &app)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

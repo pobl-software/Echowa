@@ -10,8 +10,9 @@ import (
 	"goravel/app/http/middleware"
 )
 
-// Server-Sent Events routes, a backup's download, a database export and
-// the chunks of an upload to restore from. They stay open as long as they
+// Server-Sent Events routes, a backup's download, a database export, the
+// chunks of an upload to restore from and an app's terminal, a WebSocket.
+// They stay open as long as they
 // need, so they skip Goravel's global request timeout (GlobalMiddleware)
 // and use a session that's never saved (middleware.AuthenticateStream).
 // They also go without Goravel's response middleware, which keeps a copy
@@ -22,9 +23,10 @@ const (
 	backupDownload   = "/apps/{app}/backups/{backup}/download"
 	appExport        = "/apps/{app}/export"
 	restoreUpload    = "/apps/{app}/restores/uploads/{upload}"
+	appTerminal      = "/apps/{app}/terminal"
 )
 
-var streams = []string{appLogsStream, deploymentStream, backupDownload, appExport, restoreUpload}
+var streams = []string{appLogsStream, deploymentStream, backupDownload, appExport, restoreUpload, appTerminal}
 
 func Streams() {
 	routes := facades.Route().Middleware(&middleware.AuthenticateStream{}).WithoutMiddleware(gin.ResponseMiddleware())
@@ -35,10 +37,12 @@ func Streams() {
 		appBackups := controllers.NewBackupController()
 		router.Get(backupDownload, appBackups.Download)
 		router.Get(appExport, appBackups.Export)
-		// The only route here that changes anything, so it checks the CSRF
-		// token as the web group does.
+		// These two change things. A chunk checks the CSRF token as the web
+		// group does. A WebSocket can't send one, so the terminal checks
+		// its Origin instead.
 		uploads := controllers.NewRestoreUploadController()
 		router.Middleware(&middleware.VerifyCsrfToken{}).Put(restoreUpload, uploads.Update)
+		router.Get(appTerminal, controllers.NewTerminalController().Show)
 	})
 }
 

@@ -53,6 +53,8 @@ type Fake struct {
 	ExecToFunc func(ctx context.Context, service string, cmd []string, out io.Writer) (int, error)
 	// ExecStreamFunc answers ExecStream. Nil means the service isn't running.
 	ExecStreamFunc func(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
+	// ExecTTYFunc answers ExecTTY. Nil means the service isn't running.
+	ExecTTYFunc func(ctx context.Context, service string, cmd []string, size TerminalSize) (Terminal, error)
 	// Logs holds what StreamServiceLogs yields per service. With Follow, it
 	// then waits for lines added with WriteLog until ctx ends.
 	Logs map[string][]LogLine
@@ -525,6 +527,14 @@ func (f *Fake) ExecStream(ctx context.Context, service string, cmd []string, std
 	return 0, fmt.Errorf("%s: %w", service, ErrNotRunning)
 }
 
+func (f *Fake) ExecTTY(ctx context.Context, service string, cmd []string, size TerminalSize) (Terminal, error) {
+	if f.ExecTTYFunc != nil {
+		return f.ExecTTYFunc(ctx, service, cmd, size)
+	}
+
+	return nil, fmt.Errorf("%s: %w", service, ErrNotRunning)
+}
+
 func (f *Fake) Host(context.Context) (Host, error) {
 	host := f.HostInfo
 	if host.DataRoot == "" {
@@ -562,4 +572,113 @@ func (f *Fake) Prunes() []PruneOptions {
 	defer f.mu.Unlock()
 
 	return slices.Clone(f.prunes)
+}
+
+// FakeTerminal is a Terminal in memory, for ExecTTYFunc to return. Print
+// is the command's output and Exit its end. Typed, Sizes and Closed say
+// what was done with it. It's safe for concurrent use.
+type FakeTerminal struct {
+	ID string // what Container returns
+
+	out  *io.PipeReader
+	outW *io.PipeWriter
+
+	mu     sync.Mutex
+	typed  strings.Builder
+	sizes  []TerminalSize
+	code   int
+	exited bool
+	closed bool
+}
+
+func NewFakeTerminal(container string) *FakeTerminal {
+	out, outW := io.Pipe()
+
+	return &FakeTerminal{ID: container, out: out, outW: outW}
+}
+
+// Read returns what Print writes, then io.EOF after Exit, or an error after
+// Close.
+func (t *FakeTerminal) Read(p []byte) (int, error) {
+	return t.out.Read(p)
+}
+
+func (t *FakeTerminal) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.exited || t.closed {
+		return 0, io.ErrClosedPipe
+	}
+
+	return t.typed.Write(p)
+}
+
+func (t *FakeTerminal) Resize(_ context.Context, size TerminalSize) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sizes = append(t.sizes, size)
+
+	return nil
+}
+
+func (t *FakeTerminal) ExitCode(context.Context) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.exited {
+		return 0, errors.New("the command is still running")
+	}
+
+	return t.code, nil
+}
+
+func (t *FakeTerminal) Close() error {
+	t.mu.Lock()
+	t.closed = true
+	t.mu.Unlock()
+	// After Exit, Read still gives io.EOF: a pipe keeps its first error.
+	_ = t.outW.CloseWithError(errors.New("terminal closed"))
+
+	return nil
+}
+
+func (t *FakeTerminal) Container() string {
+	return t.ID
+}
+
+// Print writes s as the command's output. It returns once all of it has
+// been read, or the terminal has ended.
+func (t *FakeTerminal) Print(s string) {
+	_, _ = io.WriteString(t.outW, s)
+}
+
+// Exit ends the command with code.
+func (t *FakeTerminal) Exit(code int) {
+	t.mu.Lock()
+	t.code, t.exited = code, true
+	t.mu.Unlock()
+	_ = t.outW.Close()
+}
+
+// Typed is everything written to the terminal.
+func (t *FakeTerminal) Typed() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.typed.String()
+}
+
+// Sizes lists every Resize, in order.
+func (t *FakeTerminal) Sizes() []TerminalSize {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return slices.Clone(t.sizes)
+}
+
+// Closed reports whether Close was called.
+func (t *FakeTerminal) Closed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return t.closed
 }

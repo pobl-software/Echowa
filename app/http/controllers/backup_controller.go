@@ -35,7 +35,7 @@ func (r *BackupController) Store(ctx http.Context) http.Response {
 		return resp
 	}
 	var loc models.StorageLocation
-	err := facades.Orm().WithContext(ctx).Query().Where("id", ctx.Request().InputInt("location")).FirstOrFail(&loc)
+	err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", ctx.Request().InputInt("location")).FirstOrFail(&loc)
 	if err != nil {
 		return failed(ctx, map[string]string{"location": "Choose a storage location."})
 	}
@@ -74,7 +74,7 @@ func (r *BackupController) Destroy(ctx http.Context) http.Response {
 		inertia.Flash(ctx, "info", "This backup is still running. Delete it once it has finished.")
 		return inertia.Redirect(ctx, backupsURL(&app))
 	}
-	if err := services.DeleteBackup(ctx, &rec, rec.StorageLocation); err != nil {
+	if err := services.DeleteBackup(ctx.Context(), &rec, rec.StorageLocation); err != nil {
 		inertia.Flash(ctx, "error", fmt.Sprintf("Couldn't delete the backup from %s, so it was kept: %s", rec.StorageLocation.Name, backups.Describe(err)))
 		return inertia.Redirect(ctx, backupsURL(&app))
 	}
@@ -95,7 +95,7 @@ func (r *BackupController) Download(ctx http.Context) http.Response {
 	if rec.Status != models.BackupSucceeded {
 		return notFound(ctx)
 	}
-	body, err := backups.Open(rec.StorageLocation).Get(ctx, rec.Key)
+	body, err := backups.Open(rec.StorageLocation).Get(ctx.Context(), rec.Key)
 	if errors.Is(err, backups.ErrNotFound) {
 		return ctx.Response().String(http.StatusNotFound, "The dump isn't in "+rec.StorageLocation.Name+" any more.")
 	}
@@ -138,7 +138,7 @@ func (r *BackupController) Export(ctx http.Context) http.Response {
 		return notFound(ctx)
 	}
 	ctx.Response().Header("Cache-Control", "no-store")
-	export, err := services.StartExport(ctx, &app, format, time.Now())
+	export, err := services.StartExport(ctx.Context(), &app, format, time.Now())
 	var busy *services.ExportBusy
 	var failed *docker.ExecError
 	switch {
@@ -187,7 +187,7 @@ func findBackup(ctx http.Context, app *models.App, rec *models.Backup) http.Resp
 	if resp := findBackupApp(ctx, app); resp != nil {
 		return resp
 	}
-	err := facades.Orm().WithContext(ctx).Query().With("StorageLocation").
+	err := facades.Orm().WithContext(ctx.Context()).Query().With("StorageLocation").
 		Where("id", ctx.Request().RouteInt("backup")).Where("app_id", app.ID).FirstOrFail(rec)
 	if err != nil || rec.StorageLocation == nil {
 		return notFound(ctx)

@@ -62,23 +62,23 @@ func (r *AppServicesController) Store(ctx http.Context) http.Response {
 		return resp
 	}
 
-	service, err := services.CreateApp(ctx, in.AppInput, nil)
+	service, err := services.CreateApp(ctx.Context(), in.AppInput, nil)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if in.CopyEnv {
-		env, err := services.EnvVars(ctx, app.ID)
+		env, err := services.EnvVars(ctx.Context(), app.ID)
 		if err != nil {
 			return inertia.ServerError(ctx, err)
 		}
-		if err := services.SetEnvVars(ctx, service.ID, env); err != nil {
+		if err := services.SetEnvVars(ctx.Context(), service.ID, env); err != nil {
 			return inertia.ServerError(ctx, err)
 		}
 	}
-	if err := services.LinkApps(ctx, app.ID, service.ID); err != nil {
+	if err := services.LinkApps(ctx.Context(), app.ID, service.ID); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	if _, err := deploy.Request(ctx, service, models.TriggerManual, service.DefaultTag); err != nil {
+	if _, err := deploy.Request(ctx.Context(), service, models.TriggerManual, service.DefaultTag); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", fmt.Sprintf("Created %s, deploying now.", service.Name))
@@ -120,7 +120,7 @@ func (r *AppServicesController) Link(ctx http.Context) http.Response {
 		ids[i] = id
 	}
 	var linked []models.App
-	if err := facades.Orm().WithContext(ctx).Query().WhereIn("id", ids).Where("template IS NULL").Order("name").Get(&linked); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().WhereIn("id", ids).Where("template IS NULL").Order("name").Get(&linked); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if len(linked) != len(in.Link) {
@@ -131,7 +131,7 @@ func (r *AppServicesController) Link(ctx http.Context) http.Response {
 		if service.ID == app.ID {
 			return failed(ctx, map[string]string{"link": "An app can't be its own service."})
 		}
-		nested, err := services.HasServices(ctx, service.ID)
+		nested, err := services.HasServices(ctx.Context(), service.ID)
 		if err != nil {
 			return inertia.ServerError(ctx, err)
 		}
@@ -141,7 +141,7 @@ func (r *AppServicesController) Link(ctx http.Context) http.Response {
 		names = append(names, service.Name)
 	}
 	for _, service := range linked {
-		if err := services.LinkApps(ctx, app.ID, service.ID); err != nil {
+		if err := services.LinkApps(ctx.Context(), app.ID, service.ID); err != nil {
 			return inertia.ServerError(ctx, err)
 		}
 	}
@@ -160,7 +160,7 @@ func (r *AppServicesController) Destroy(ctx http.Context) http.Response {
 		return resp
 	}
 
-	if err := services.UnlinkApp(ctx, app.ID, service.ID); err != nil {
+	if err := services.UnlinkApp(ctx.Context(), app.ID, service.ID); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", fmt.Sprintf("Unlinked %s. It keeps running.", service.Name))
@@ -183,7 +183,7 @@ func (r *AppServicesController) findParent(ctx http.Context, app *models.App) ht
 // refuseIfService keeps an app that's another app's service from having
 // services of its own, so the tree stays one level deep (ADR 0037).
 func (r *AppServicesController) refuseIfService(ctx http.Context, app *models.App, field string) http.Response {
-	parents, err := services.ServiceOf(ctx, app.ID)
+	parents, err := services.ServiceOf(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

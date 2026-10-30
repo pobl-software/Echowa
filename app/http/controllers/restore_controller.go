@@ -32,10 +32,10 @@ func (r *RestoreController) Browse(ctx http.Context) http.Response {
 		return resp
 	}
 	var loc models.StorageLocation
-	if err := facades.Orm().WithContext(ctx).Query().Where("id", ctx.Request().QueryInt("location")).FirstOrFail(&loc); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", ctx.Request().QueryInt("location")).FirstOrFail(&loc); err != nil {
 		return notFound(ctx)
 	}
-	list, err := services.ListBucketBackups(ctx, &app, &loc)
+	list, err := services.ListBucketBackups(ctx.Context(), &app, &loc)
 	if err != nil {
 		return ctx.Response().Json(http.StatusBadGateway, http.Json{
 			"error": fmt.Sprintf("Couldn't list %s: %s", loc.Name, backups.Describe(err)),
@@ -64,7 +64,7 @@ func (r *RestoreController) Preview(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	preview, err := services.PreviewRestore(ctx, &app, src)
+	preview, err := services.PreviewRestore(ctx.Context(), &app, src)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -100,7 +100,7 @@ func (r *RestoreController) Store(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	preview, err := services.PreviewRestore(ctx, &app, src)
+	preview, err := services.PreviewRestore(ctx.Context(), &app, src)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -114,7 +114,7 @@ func (r *RestoreController) Store(ctx http.Context) http.Response {
 		safety = src.Location
 		if src.Upload != nil {
 			var loc models.StorageLocation
-			err := facades.Orm().WithContext(ctx).Query().Where("id", ctx.Request().InputInt("safety_location")).FirstOrFail(&loc)
+			err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", ctx.Request().InputInt("safety_location")).FirstOrFail(&loc)
 			if err != nil {
 				return failed(ctx, map[string]string{"safety_location": "Choose where the safety backup goes."})
 			}
@@ -141,7 +141,7 @@ func (r *RestoreController) Show(ctx http.Context) http.Response {
 		return resp
 	}
 	var rec models.Restore
-	err := facades.Orm().WithContext(ctx).Query().
+	err := facades.Orm().WithContext(ctx.Context()).Query().
 		Where("id", ctx.Request().RouteInt("restore")).Where("app_id", app.ID).FirstOrFail(&rec)
 	if err != nil {
 		return notFound(ctx)
@@ -154,18 +154,18 @@ func (r *RestoreController) Show(ctx http.Context) http.Response {
 // a folder, the backups in it, for restoring into a new app.
 func (r *RestoreController) BrowseLocation(ctx http.Context) http.Response {
 	var loc models.StorageLocation
-	if err := facades.Orm().WithContext(ctx).Query().Where("id", ctx.Request().QueryInt("location")).FirstOrFail(&loc); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", ctx.Request().QueryInt("location")).FirstOrFail(&loc); err != nil {
 		return notFound(ctx)
 	}
 	var body http.Json
 	var err error
 	if folder := ctx.Request().Query("folder"); folder != "" {
 		var list []services.BucketBackup
-		list, err = services.FolderBackups(ctx, &loc, folder)
+		list, err = services.FolderBackups(ctx.Context(), &loc, folder)
 		body = http.Json{"backups": list}
 	} else {
 		var folders []string
-		folders, err = services.LocationFolders(ctx, &loc)
+		folders, err = services.LocationFolders(ctx.Context(), &loc)
 		body = http.Json{"folders": folders}
 	}
 	if err != nil {
@@ -226,7 +226,7 @@ func (r *RestoreController) NewApp(ctx http.Context) http.Response {
 	if err := services.CheckRestoreTag(tmpl, src.Manifest, tag); errors.As(err, &refused) {
 		return failed(ctx, map[string]string{"tag": refused.Reason})
 	}
-	leftover, err := services.LeftoverVolume(ctx, &tmpl, name)
+	leftover, err := services.LeftoverVolume(ctx.Context(), &tmpl, name)
 	if err != nil {
 		return failed(ctx, map[string]string{"name": "Couldn't check Docker for this app's volume: " + err.Error()})
 	}
@@ -238,12 +238,12 @@ func (r *RestoreController) NewApp(ctx http.Context) http.Response {
 
 	in := services.TemplateInput(tmpl, name)
 	in.DefaultTag = tag
-	app, err := services.CreateApp(ctx, in, &tmpl)
+	app, err := services.CreateApp(ctx.Context(), in, &tmpl)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	_, err = services.StartNewAppRestore(app, src, func() (uint, error) {
-		d, err := deploy.Request(ctx, app, models.TriggerManual, tag)
+		d, err := deploy.Request(ctx.Context(), app, models.TriggerManual, tag)
 		if err != nil {
 			return 0, err
 		}
@@ -263,7 +263,7 @@ func (r *RestoreController) NewApp(ctx http.Context) http.Response {
 func newAppSource(ctx http.Context, backupID, locationID int, key string) (*services.RestoreSource, error) {
 	if backupID > 0 {
 		var rec models.Backup
-		err := facades.Orm().WithContext(ctx).Query().With("StorageLocation").
+		err := facades.Orm().WithContext(ctx.Context()).Query().With("StorageLocation").
 			Where("id", backupID).Where("status", models.BackupSucceeded).First(&rec)
 		if err != nil {
 			return nil, err
@@ -271,17 +271,17 @@ func newAppSource(ctx http.Context, backupID, locationID int, key string) (*serv
 		if rec.ID == 0 || rec.StorageLocation == nil {
 			return nil, &services.RestoreRefusal{Reason: "That backup isn't there any more."}
 		}
-		return services.FolderSource(ctx, rec.StorageLocation, backups.ManifestKey(rec.Key))
+		return services.FolderSource(ctx.Context(), rec.StorageLocation, backups.ManifestKey(rec.Key))
 	}
 	var loc models.StorageLocation
-	if err := facades.Orm().WithContext(ctx).Query().Where("id", locationID).First(&loc); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", locationID).First(&loc); err != nil {
 		return nil, err
 	}
 	if loc.ID == 0 {
 		return nil, &services.RestoreRefusal{Reason: "Choose a backup to restore."}
 	}
 
-	return services.FolderSource(ctx, &loc, key)
+	return services.FolderSource(ctx.Context(), &loc, key)
 }
 
 // restoreSource is the app's upload with ID upload, the backup with ID
@@ -292,15 +292,15 @@ func restoreSource(ctx http.Context, app *models.App, backupID, locationID int, 
 		return services.UploadSource(app, upload)
 	}
 	if backupID > 0 {
-		return services.BackupSource(ctx, app, uint(backupID))
+		return services.BackupSource(ctx.Context(), app, uint(backupID))
 	}
 	var loc models.StorageLocation
-	if err := facades.Orm().WithContext(ctx).Query().Where("id", locationID).First(&loc); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", locationID).First(&loc); err != nil {
 		return nil, err
 	}
 	if loc.ID == 0 {
 		return nil, &services.RestoreRefusal{Reason: "Choose a backup to restore."}
 	}
 
-	return services.BucketSource(ctx, app, &loc, key)
+	return services.BucketSource(ctx.Context(), app, &loc, key)
 }

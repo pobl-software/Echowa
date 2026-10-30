@@ -55,7 +55,7 @@ func (r *ExternalAccessController) Store(ctx http.Context) http.Response {
 		return failed(ctx, map[string]string{"external_port": fmt.Sprintf("Something on this server already listens on port %d.", port)})
 	}
 
-	if err := services.EnableExternalAccess(ctx, &app, port, tmpl); err != nil {
+	if err := services.EnableExternalAccess(ctx.Context(), &app, port, tmpl); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 
@@ -72,7 +72,7 @@ func (r *ExternalAccessController) Destroy(ctx http.Context) http.Response {
 		return inertia.Redirect(ctx, fmt.Sprintf("/apps/%d?tab=connection", app.ID))
 	}
 
-	if err := services.SetExternalPort(ctx, &app, nil); err != nil {
+	if err := services.SetExternalPort(ctx.Context(), &app, nil); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 
@@ -86,7 +86,7 @@ func (r *ExternalAccessController) CA(ctx http.Context) http.Response {
 	if resp := findOr404(ctx, "app", &app); resp != nil {
 		return resp
 	}
-	env, err := services.EnvVars(ctx, app.ID)
+	env, err := services.EnvVars(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -104,7 +104,7 @@ func (r *ExternalAccessController) CA(ctx http.Context) http.Response {
 // settings change doesn't also pull a newer tag. A stopped app keeps the
 // change for when it's started, since a deploy would start it.
 func redeployCurrent(ctx http.Context, app *models.App, change string) http.Response {
-	switch services.AppLiveStatus(ctx, app).State {
+	switch services.AppLiveStatus(ctx.Context(), app).State {
 	case services.StateStopped, services.StateStopping:
 		inertia.Flash(ctx, "success", fmt.Sprintf("%s. It applies when you start %s.", change, app.Name))
 		return inertia.Back(ctx)
@@ -125,7 +125,7 @@ func requestCurrent(ctx http.Context, app *models.App) (*models.Deployment, erro
 	ref := app.DefaultTag
 	if app.CurrentDeploymentID != nil {
 		var current models.Deployment
-		err := facades.Orm().WithContext(ctx).Query().Where("id", *app.CurrentDeploymentID).First(&current)
+		err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", *app.CurrentDeploymentID).First(&current)
 		if err != nil {
 			return nil, err
 		}
@@ -134,5 +134,5 @@ func requestCurrent(ctx http.Context, app *models.App) (*models.Deployment, erro
 		}
 	}
 
-	return deploy.Request(ctx, app, models.TriggerManual, ref)
+	return deploy.Request(ctx.Context(), app, models.TriggerManual, ref)
 }

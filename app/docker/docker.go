@@ -120,6 +120,17 @@ type Client interface {
 	// ended and nothing reads stdin any more.
 	ExecStream(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
 
+	// ExecTTY starts cmd with a terminal of size in the service's newest
+	// running task container, for the admin to type into. cmd is a
+	// constant compiled into Echowa. It runs as the image's user, in its
+	// working directory, with the container's env and
+	// TERM=xterm-256color, started by the image's sh. ctx bounds the
+	// start only: the terminal lasts until the command ends or Close. The
+	// error wraps ErrNotRunning or ErrNotManaged as Exec's does. An image
+	// without sh isn't an error: the terminal shows Docker's reason and
+	// the command exits 127.
+	ExecTTY(ctx context.Context, service string, cmd []string, size TerminalSize) (Terminal, error)
+
 	// Host is what the daemon reports about the machine it runs on.
 	Host(ctx context.Context) (Host, error)
 }

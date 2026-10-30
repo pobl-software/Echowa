@@ -33,7 +33,7 @@ var dummyHash = sync.OnceValue(func() string {
 // Attempt returns the user with these credentials, or nil.
 func Attempt(ctx http.Context, email, password string) (*models.User, error) {
 	var user models.User
-	if err := facades.Orm().WithContext(ctx).Query().Where("email", strings.ToLower(email)).First(&user); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("email", strings.ToLower(email)).First(&user); err != nil {
 		return nil, err
 	}
 	if user.ID == 0 {
@@ -62,7 +62,7 @@ func Login(ctx http.Context, user *models.User, remember bool) error {
 		return err
 	}
 	hashed := hashToken(token)
-	if _, err := facades.Orm().WithContext(ctx).Query().Model(user).Update("remember_token", hashed); err != nil {
+	if _, err := facades.Orm().WithContext(ctx.Context()).Query().Model(user).Update("remember_token", hashed); err != nil {
 		return err
 	}
 	user.RememberToken = &hashed
@@ -71,14 +71,17 @@ func Login(ctx http.Context, user *models.User, remember bool) error {
 	return nil
 }
 
-// Logout ends the session and forgets the "remember me" token everywhere.
+// Logout ends the session, forgets the "remember me" token everywhere and
+// closes every terminal: there's one admin, so they're all theirs.
 func Logout(ctx http.Context) error {
 	if id, err := facades.Auth(ctx).ID(); err == nil {
-		if _, err := facades.Orm().WithContext(ctx).Query().Table("users").Where("id", id).Update("remember_token", nil); err != nil {
+		if _, err := facades.Orm().WithContext(ctx.Context()).Query().Table("users").Where("id", id).Update("remember_token", nil); err != nil {
 			return err
 		}
 	}
 	forgetRememberCookie(ctx)
+	// In the background: a hang-up can take longer than the request may.
+	go CloseTerminals("You signed out.")
 
 	return facades.Auth(ctx).Logout()
 }
@@ -100,7 +103,7 @@ func LoginFromRememberCookie(ctx http.Context) {
 	}
 
 	var user models.User
-	if err := facades.Orm().WithContext(ctx).Query().Where("id", id).First(&user); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", id).First(&user); err != nil {
 		facades.Log().Error(fmt.Errorf("remember cookie: %w", err))
 		return
 	}
