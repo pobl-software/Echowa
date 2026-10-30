@@ -54,27 +54,11 @@ func (s *AlertsTestSuite) SetupTest() {
 }
 
 func (s *AlertsTestSuite) provider(name string) models.NotificationProvider {
-	p := models.NotificationProvider{Name: name, Kind: models.NotifySlack, Enabled: true}
-	p.SetSecrets(models.NotificationSecrets{WebhookURL: "https://hooks.slack.com/services/T0/B0/" + strings.ReplaceAll(name, " ", "")})
-	s.Require().NoError(facades.Orm().Query().Create(&p))
-
-	return p
+	return createTestProvider(s.T(), name)
 }
 
-// rule makes an enabled rule on trigger for app (nil for every app, or
-// the server's for a server trigger) that names providers.
 func (s *AlertsTestSuite) rule(trigger string, app *models.App, severity notify.Severity, providers ...models.NotificationProvider) models.AlertRule {
-	rule := models.AlertRule{Scope: models.AlertAllApps, Trigger: trigger, Severity: string(severity), Enabled: true, NotifyResolved: true}
-	if t, _ := alerts.Find(trigger); t.Scope == alerts.ScopeServer {
-		rule.Scope = models.AlertServer
-	}
-	if app != nil {
-		rule.Scope, rule.AppID = models.AlertApp, &app.ID
-	}
-	s.Require().NoError(facades.Orm().Query().Create(&rule))
-	s.Require().NoError(facades.Orm().Query().Model(&rule).Association("Providers").Append(providers))
-
-	return rule
+	return createTestAlertRule(s.T(), trigger, app, severity, providers...)
 }
 
 func (s *AlertsTestSuite) deploy(app *models.App, ref string) *models.Deployment {

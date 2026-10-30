@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goravel/framework/support/carbon"
+
 	"goravel/app/facades"
 	"goravel/app/models"
 	"goravel/app/notify"
@@ -112,11 +114,26 @@ type NotificationProviderSummary struct {
 	Target string `json:"target"`
 	// Stored lists the secrets it has, so the form can say which are kept.
 	Stored []string `json:"stored"`
+	// Last is how the newest notification to it went, or nil.
+	Last *ProviderLast `json:"last"`
+	// UsedBy names the alerts that send to it, so deleting it can say
+	// which lose it.
+	UsedBy []string `json:"used_by"`
+}
+
+type ProviderLast struct {
+	Status models.NotificationStatus `json:"status"`
+	Error  *string                   `json:"error"`
+	At     *carbon.DateTime          `json:"at"`
 }
 
 func NotificationProviders(ctx context.Context) ([]NotificationProviderSummary, error) {
 	var providers []models.NotificationProvider
 	if err := facades.Orm().WithContext(ctx).Query().Order("name").Get(&providers); err != nil {
+		return nil, err
+	}
+	usedBy, err := alertsByProvider(ctx)
+	if err != nil {
 		return nil, err
 	}
 	rows := make([]NotificationProviderSummary, 0, len(providers))
@@ -125,10 +142,57 @@ func NotificationProviders(ctx context.Context) ([]NotificationProviderSummary, 
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, NotificationProviderSummary{NotificationProvider: p, Target: providerTarget(&p, secrets), Stored: storedSecrets(secrets)})
+		row := NotificationProviderSummary{NotificationProvider: p, Target: providerTarget(&p, secrets), Stored: storedSecrets(secrets), UsedBy: usedBy[p.ID]}
+		if row.UsedBy == nil {
+			row.UsedBy = []string{}
+		}
+		var last models.Notification
+		if err := facades.Orm().WithContext(ctx).Query().Where("notification_provider_id", p.ID).Order("id desc").First(&last); err != nil {
+			return nil, err
+		}
+		if last.ID != 0 {
+			row.Last = &ProviderLast{Status: last.Status, Error: last.Error, At: last.CreatedAt}
+			if last.SentAt != nil {
+				row.Last.At = last.SentAt
+			}
+		}
+		rows = append(rows, row)
 	}
 
 	return rows, nil
+}
+
+// alertsByProvider names each provider's alerts: "Deploy failed or rolled
+// back, every app".
+func alertsByProvider(ctx context.Context) (map[uint][]string, error) {
+	var rules []models.AlertRule
+	if err := facades.Orm().WithContext(ctx).Query().With("Providers").Order("id").Get(&rules); err != nil {
+		return nil, err
+	}
+	var apps []models.App
+	if err := facades.Orm().WithContext(ctx).Query().Select("id", "name").Get(&apps); err != nil {
+		return nil, err
+	}
+	names := map[uint]string{}
+	for _, app := range apps {
+		names[app.ID] = app.Name
+	}
+	byProvider := map[uint][]string{}
+	for _, rule := range rules {
+		covers := "the server"
+		switch {
+		case rule.Scope == models.AlertAllApps:
+			covers = "every app"
+		case rule.AppID != nil:
+			covers = names[*rule.AppID]
+		}
+		label := summarise(rule).Label + ", " + covers
+		for _, p := range rule.Providers {
+			byProvider[p.ID] = append(byProvider[p.ID], label)
+		}
+	}
+
+	return byProvider, nil
 }
 
 func providerTarget(p *models.NotificationProvider, secrets models.NotificationSecrets) string {

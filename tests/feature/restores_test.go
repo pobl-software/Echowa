@@ -278,13 +278,9 @@ func (s *BackupsTestSuite) TestAFailedSafetyBackupRestoresNothing() {
 	s.scriptRestore(postgres186, "PGDMP new data", 0, nil)
 	s.storage.PutErr = errors.New("the bucket is full")
 	sent := s.FakeNotify()
-	ops := models.NotificationProvider{Name: "Slack #ops", Kind: models.NotifySlack, Enabled: true}
-	s.Require().NoError(facades.Orm().Query().Create(&ops))
-	for _, trigger := range []string{alerts.BackupFailed, alerts.RestoreFailed} {
-		rule := models.AlertRule{Scope: models.AlertAllApps, Trigger: trigger, Severity: "critical", Enabled: true}
-		s.Require().NoError(facades.Orm().Query().Create(&rule))
-		s.Require().NoError(facades.Orm().Query().Model(&rule).Association("Providers").Append([]models.NotificationProvider{ops}))
-	}
+	ops := createTestProvider(s.T(), "Slack #ops")
+	createTestAlertRule(s.T(), alerts.BackupFailed, nil, notify.Critical, ops)
+	createTestAlertRule(s.T(), alerts.RestoreFailed, nil, notify.Critical, ops)
 	b := signedIn(s.T(), &s.TestCase)
 
 	s.restore(b, s.app, map[string]any{"backup": old.ID, "safety": true, "confirm": "shop-db"})

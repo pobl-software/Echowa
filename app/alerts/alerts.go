@@ -61,25 +61,23 @@ type Trigger struct {
 	// Tasks or Server.
 	Group string
 	Label string
-	// Default is what it's suggested with, or nil if it isn't.
-	Default *Default
-}
-
-type Default struct {
+	// Severity is what a new alert on it starts at.
 	Severity notify.Severity
+	// Suggested says it's offered where it fits and isn't set up yet.
+	Suggested bool
 }
 
 var catalogue = []Trigger{
-	{ID: DeployFailed, Kind: KindEvent, Scope: ScopeApp, Group: "Deploys", Label: "Deploy failed or rolled back", Default: &Default{Severity: notify.Critical}},
-	{ID: DeploySucceeded, Kind: KindEvent, Scope: ScopeApp, Group: "Deploys", Label: "Deploy succeeded"},
-	{ID: KilledForMemory, Kind: KindEvent, Scope: ScopeApp, Group: "Health", Label: "Killed for memory", Default: &Default{Severity: notify.Warning}},
-	{ID: BackupFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup failed or skipped", Default: &Default{Severity: notify.Critical}},
-	{ID: BackupSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup succeeded"},
-	{ID: RestoreFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore failed"},
-	{ID: RestoreSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore finished"},
-	{ID: TaskFailed, Kind: KindEvent, Scope: ScopeApp, Apps: []string{Custom}, Group: "Tasks", Label: "Scheduled task failed or timed out", Default: &Default{Severity: notify.Warning}},
-	{ID: EchowaStarted, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Echowa started", Default: &Default{Severity: notify.Info}},
-	{ID: ImagesPruned, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Image prune removed images"},
+	{ID: DeployFailed, Kind: KindEvent, Scope: ScopeApp, Group: "Deploys", Label: "Deploy failed or rolled back", Severity: notify.Critical, Suggested: true},
+	{ID: DeploySucceeded, Kind: KindEvent, Scope: ScopeApp, Group: "Deploys", Label: "Deploy succeeded", Severity: notify.Info},
+	{ID: KilledForMemory, Kind: KindEvent, Scope: ScopeApp, Group: "Health", Label: "Killed for memory", Severity: notify.Warning, Suggested: true},
+	{ID: BackupFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup failed or skipped", Severity: notify.Critical, Suggested: true},
+	{ID: BackupSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup succeeded", Severity: notify.Info},
+	{ID: RestoreFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore failed", Severity: notify.Critical},
+	{ID: RestoreSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore finished", Severity: notify.Info},
+	{ID: TaskFailed, Kind: KindEvent, Scope: ScopeApp, Apps: []string{Custom}, Group: "Tasks", Label: "Scheduled task failed or timed out", Severity: notify.Warning, Suggested: true},
+	{ID: EchowaStarted, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Echowa started", Severity: notify.Info, Suggested: true},
+	{ID: ImagesPruned, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Image prune removed images", Severity: notify.Info},
 }
 
 // withBackups lists the templates with a Backups section.

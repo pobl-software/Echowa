@@ -2,6 +2,7 @@ import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 
+import { AppAlerts } from '@/Components/AppAlerts';
 import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
@@ -34,6 +35,7 @@ import { formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { AppLive, AppSeries, DatabaseLive, DatabaseSeries } from '@/types/metrics';
 import {
+    type AppAlerts as AlertsSection,
     type App,
     type AppVolume,
     type AppWork,
@@ -109,6 +111,8 @@ interface Props {
     // What holds the app's lock (ADR 0034), so Deploy says what it would
     // wait for. Empty when nothing does.
     busy: AppWork;
+    // The Alerts section's (ADR 0040).
+    alerts: AlertsSection;
 }
 
 // The section lives in ?tab= so redirects (e.g. after saving settings) and
@@ -152,6 +156,7 @@ export default function AppsShow({
     taskFailures,
     backups,
     busy,
+    alerts,
 }: Props) {
     // The nav needs to know whether the template is one Echowa backs up.
     const navApp = { ...app, backups: template?.backups ?? false };
@@ -534,6 +539,8 @@ export default function AppsShow({
                         ) : (
                             <AppMetrics ranges={ranges} series={series} live={metrics} />
                         ))}
+
+                    {section === 'alerts' && <AppAlerts app={app} alerts={alerts} />}
 
                     {section === 'danger' && (
                         <Panel title="Delete app" tone="danger" description="This can't be undone.">

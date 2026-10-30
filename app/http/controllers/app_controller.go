@@ -384,6 +384,10 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 			}
 			return services.ScheduledTasks(c, app.ID, time.Now())
 		},
+		// The Alerts section's (ADR 0040).
+		"alerts": func(c context.Context) (any, error) {
+			return services.AppAlertsSection(c, &app)
+		},
 		// Overview's alerts for tasks that failed (ADR 0032).
 		"taskFailures": func(c context.Context) (any, error) {
 			if app.Template != nil {

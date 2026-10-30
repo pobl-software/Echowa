@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 
 	"github.com/goravel/framework/contracts/validation"
 	frameworkvalidation "github.com/goravel/framework/validation"
@@ -490,6 +491,49 @@ func NotificationProviderFilters() validation.Option {
 		"username": "trim",
 		"from":     "trim",
 		"to":       "trim",
+	})
+}
+
+// MaxAlertProviders is how many providers one alert may name.
+const MaxAlertProviders = 20
+
+// AlertRule returns the rules for an alert's form (ADR 0040). triggers are
+// the ones the page may choose from, and only a new alert sends one: a
+// saved alert's trigger never changes.
+func AlertRule(triggers []string) map[string]any {
+	rules := map[string]any{
+		"severity":    "required|in:info,warning,critical",
+		"providers":   fmt.Sprintf("required|array|max:%d", MaxAlertProviders),
+		"providers.*": "integer|distinct",
+	}
+	if triggers != nil {
+		rules["trigger"] = "required|string|in:" + strings.Join(triggers, ",")
+	}
+
+	return rules
+}
+
+// AlertSuggestions returns the rules for adding suggested alerts: some of
+// triggers, the ones suggested on the page, and where to send them.
+func AlertSuggestions(triggers []string) map[string]any {
+	return map[string]any{
+		"triggers":    "required|array",
+		"triggers.*":  "string|distinct|in:" + strings.Join(triggers, ","),
+		"providers":   fmt.Sprintf("required|array|max:%d", MaxAlertProviders),
+		"providers.*": "integer|distinct",
+	}
+}
+
+// AlertMessages words the alert forms' errors.
+func AlertMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"trigger.required":   "Choose what to alert on.",
+		"trigger.in":         "Choose one of the listed alerts.",
+		"triggers.required":  "Choose at least one alert.",
+		"triggers.*.in":      "That alert isn't suggested here any more.",
+		"providers.required": "Choose where to send it.",
+		"providers.max":      fmt.Sprintf("At most %d providers.", MaxAlertProviders),
+		"severity.required":  "Choose a severity.",
 	})
 }
 

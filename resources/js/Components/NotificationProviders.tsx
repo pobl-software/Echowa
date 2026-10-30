@@ -33,6 +33,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from '@/Components/ui/toast';
 import { postJson, RequestError } from '@/lib/http';
 import { kindOrder, notificationKinds } from '@/lib/notifications';
+import { formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { NotificationKind, NotificationProvider, NotificationTest } from '@/types/models';
 
@@ -152,6 +153,7 @@ export function NotificationProviders({ providers }: { providers: NotificationPr
                             <TableHead>Name</TableHead>
                             <TableHead className="hidden sm:table-cell">Kind</TableHead>
                             <TableHead className="hidden md:table-cell">Sends to</TableHead>
+                            <TableHead className="hidden lg:table-cell">Last sent</TableHead>
                             <TableHead>On</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -212,6 +214,9 @@ function ProviderRow({ provider }: { provider: NotificationProvider }) {
             <TableCell className="hidden max-w-64 truncate font-mono text-xs md:table-cell" title={provider.target}>
                 {provider.target}
             </TableCell>
+            <TableCell className="hidden whitespace-nowrap lg:table-cell">
+                <LastSent last={provider.last} />
+            </TableCell>
             <TableCell>
                 <Switch
                     checked={provider.enabled}
@@ -262,12 +267,52 @@ function ProviderRow({ provider }: { provider: NotificationProvider }) {
                         onConfirm={() =>
                             router.delete(`/settings/notifications/${provider.id}`, { preserveScroll: true })
                         }
+                        details={
+                            provider.used_by.length > 0 && (
+                                <>
+                                    These alerts stop sending here:
+                                    <ul className="mt-2 list-disc space-y-0.5 pl-5">
+                                        {provider.used_by.map((alert) => (
+                                            <li key={alert}>{alert}</li>
+                                        ))}
+                                    </ul>
+                                    <p className="mt-2">
+                                        One with no other provider sends nothing until you choose one.
+                                    </p>
+                                </>
+                            )
+                        }
                     >
                         Echowa forgets this provider and its secrets. Nothing changes at {kind.label}.
                     </ConfirmDelete>
                 </div>
             </TableCell>
         </TableRow>
+    );
+}
+
+// LastSent says how the newest notification to a provider went.
+function LastSent({ last }: { last: NotificationProvider['last'] }) {
+    if (!last) {
+        return <span className="text-muted-foreground">Nothing yet</span>;
+    }
+    const when = timeAgo(last.at);
+    switch (last.status) {
+        case 'failed':
+            return (
+                <span className="text-destructive" title={last.error ?? undefined}>
+                    Failed {when}
+                </span>
+            );
+        case 'suppressed':
+            return <span className="text-muted-foreground">Held back {when}</span>;
+        case 'pending':
+            return <span className="text-muted-foreground">Sending…</span>;
+    }
+    return (
+        <span className="text-muted-foreground" title={formatDateTime(last.at)}>
+            Sent {when}
+        </span>
     );
 }
 

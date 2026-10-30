@@ -112,6 +112,83 @@ export interface NotificationProvider {
     // email's recipients.
     target: string;
     stored: Array<'webhook_url' | 'topic' | 'token' | 'password' | 'api_key'>;
+    // How the newest notification to it went, or null.
+    last: { status: NotificationStatus; error: string | null; at: string | null } | null;
+    // The alerts that send to it, in words ("Deploy failed or rolled back,
+    // every app").
+    used_by: string[];
+}
+
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+export type NotificationStatus = 'pending' | 'sent' | 'failed' | 'suppressed';
+
+// services.AlertTriggerOption: a trigger in app/alerts' catalogue.
+export interface AlertTrigger {
+    id: string;
+    group: string;
+    label: string;
+    // About the server. The rest are about apps, and on Settings make
+    // every-app alerts.
+    server: boolean;
+    // The apps it's limited to ("PostgreSQL and MySQL apps"), or empty.
+    only: string;
+    // What a new alert on it starts at.
+    severity: AlertSeverity;
+    // Offered where it fits and isn't set up yet.
+    suggested: boolean;
+}
+
+// services.ProviderRef: a provider as an alert names it.
+export interface ProviderRef {
+    id: number;
+    name: string;
+    kind: NotificationKind;
+    enabled: boolean;
+}
+
+// services.AlertRuleSummary.
+export interface AlertRule {
+    id: number;
+    scope: 'server' | 'all_apps' | 'app';
+    trigger: string;
+    // The trigger's label, or its ID when this version doesn't know it.
+    label: string;
+    known: boolean;
+    severity: AlertSeverity;
+    enabled: boolean;
+    providers: ProviderRef[];
+}
+
+// services.NotificationSummary.
+export interface NotificationSummary {
+    id: number;
+    title: string;
+    summary: string;
+    severity: AlertSeverity;
+    status: NotificationStatus;
+    attempts: number;
+    error: string | null;
+    provider: ProviderRef;
+    created_at: string | null;
+    sent_at: string | null;
+}
+
+// services.AppAlerts: an app's Alerts section.
+export interface AppAlerts {
+    rules: AlertRule[];
+    // The every-app alerts that cover the app, edited on Settings.
+    every_app: AlertRule[];
+    triggers: AlertTrigger[];
+    suggestions: AlertTrigger[];
+    providers: ProviderRef[];
+    recent: NotificationSummary[];
+}
+
+// services.SettingsAlerts: the server's alerts and every app's.
+export interface SettingsAlerts {
+    rules: AlertRule[];
+    triggers: AlertTrigger[];
+    suggestions: AlertTrigger[];
 }
 
 // services.NotificationTest: how a Test send is going.

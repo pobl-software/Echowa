@@ -33,12 +33,18 @@ func (r *SettingsController) Index(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
+	alertRules, err := services.SettingsAlertsSection(ctx.Context())
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
 
 	return inertia.Render(ctx, "Settings/Index", gonertia.Props{
 		"update":                updateProps(),
 		"storageLocations":      locations,
 		"storagePrefix":         services.SuggestedStoragePrefix(),
 		"notificationProviders": providers,
+		// The server's alerts and every app's (ADR 0040).
+		"alerts": alertRules,
 		"prune": map[string]any{
 			"keep":    cfg.Keep,
 			"min_age": humanDuration(cfg.MinAge),
