@@ -112,6 +112,7 @@ server you understand completely, with the numbers to show it's healthy.
 - PostgreSQL, MySQL and Redis from templates
 - Backups of PostgreSQL and MySQL to S3, with restores and exports
 - Host, app and database metrics, with a year of history
+- Alerts to Slack, Discord, Teams, ntfy or email
 - Live logs and live deploy output in the browser
 - Scheduled tasks in your app's own container
 - One-click rollback to any earlier digest

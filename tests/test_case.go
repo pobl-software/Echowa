@@ -83,9 +83,9 @@ func (tc *TestCase) FakeNotify() *notify.Fake {
 	return fakeNotify
 }
 
-// useTestDatabase points the default connection, and the metrics file, at
-// fresh SQLite files in a temp directory, so RefreshDatabase can never wipe
-// the development database. It runs after the config files' init() (they're imported) but
+// useTestDatabase points the default connection, the metrics file and the
+// session files at a temp directory, so RefreshDatabase can never wipe the
+// development database, nor a test sign the dev machine's browser out. It runs after the config files' init() (they're imported) but
 // before Boot() opens any connections. See ADR 0014.
 func useTestDatabase() {
 	dir, err := os.MkdirTemp("", "echowa-test-")
@@ -98,4 +98,8 @@ func useTestDatabase() {
 	facades.Config().Add(key+".database", database)
 	facades.Config().Add(key+".dsn", config.SQLiteDSN(database))
 	facades.Config().Add("database.metrics.database", filepath.Join(dir, "metrics.sqlite"))
+	// Sessions too: resetting the admin's password deletes every session
+	// file, and the dev machine's Echowa keeps its own in the repo's
+	// storage/framework/sessions.
+	facades.Config().Add("session.files", filepath.Join(dir, "sessions"))
 }
