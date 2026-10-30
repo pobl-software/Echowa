@@ -128,9 +128,7 @@ func (e *Engine) RegistryLogin(ctx context.Context, auth RegistryAuth) error {
 // image was just pulled by digest, so Swarm finds it locally, and nothing
 // is stored in the Swarm.
 func (e *Engine) DeployService(ctx context.Context, spec ServiceSpec) error {
-	// Swarm bumps the service version whenever an update's status changes,
-	// so an update can race with one in progress. Inspect and retry.
-	for attempt := 1; ; attempt++ {
+	return retryOutOfSequence(func() error {
 		current, err := e.inspect(ctx, spec.Name)
 		if errors.Is(err, ErrServiceNotFound) {
 			desired, err := swarmSpec(spec, e.cfg, 0)
@@ -161,13 +159,58 @@ func (e *Engine) DeployService(ctx context.Context, spec ServiceSpec) error {
 			Version: current.Version,
 			Spec:    desired,
 		})
-		if err == nil {
+		if err != nil {
+			return fmt.Errorf("update service %s: %w", spec.Name, err)
+		}
+
+		return nil
+	})
+}
+
+// StopService sends the inspected spec back with 0 replicas, so nothing
+// else about it changes, not even ForceUpdate.
+func (e *Engine) StopService(ctx context.Context, name string) error {
+	return retryOutOfSequence(func() error {
+		current, err := e.inspect(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !managed(current) {
+			return fmt.Errorf("%s: %w", name, ErrNotManaged)
+		}
+		if desiredReplicas(current) == 0 {
 			return nil
 		}
-		if attempt < 3 && strings.Contains(err.Error(), "update out of sequence") {
+
+		desired := current.Spec
+		replicated := swarm.ReplicatedService{}
+		if desired.Mode.Replicated != nil {
+			replicated = *desired.Mode.Replicated
+		}
+		replicated.Replicas = new(uint64)
+		desired.Mode.Replicated = &replicated
+		_, err = e.api.ServiceUpdate(ctx, current.ID, client.ServiceUpdateOptions{
+			Version: current.Version,
+			Spec:    desired,
+		})
+		if err != nil {
+			return fmt.Errorf("stop service %s: %w", name, err)
+		}
+
+		return nil
+	})
+}
+
+// retryOutOfSequence runs one inspect and update, again if Swarm bumped the
+// service version in between, which it does whenever an update's status
+// changes.
+func retryOutOfSequence(update func() error) error {
+	for attempt := 1; ; attempt++ {
+		err := update()
+		if err != nil && attempt < 3 && strings.Contains(err.Error(), "update out of sequence") {
 			continue
 		}
-		return fmt.Errorf("update service %s: %w", spec.Name, err)
+		return err
 	}
 }
 

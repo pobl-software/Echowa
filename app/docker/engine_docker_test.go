@@ -399,6 +399,70 @@ func TestEngineHostPortSurvivesRedeploys(t *testing.T) {
 	assert.Eventually(t, func() bool { return !answers() }, 20*time.Second, 250*time.Millisecond, "the port closes without a host port")
 }
 
+func TestEngineStopsAndStartsAService(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	cfg := DefaultConfig()
+	cfg.UpdateMonitor = 2 * time.Second
+	cfg.DeployTimeout = time.Minute
+	cfg.PollInterval = 500 * time.Millisecond
+	engine, err := New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = engine.Close() })
+	require.NoError(t, engine.Check(ctx), "needs a local Swarm manager: run `docker swarm init` (deploy/README.md)")
+	ensureNetwork(t, engine, cfg.Network)
+
+	name := fmt.Sprintf("echowa-it-stop-%d", time.Now().UnixNano()%1_000_000)
+	t.Cleanup(func() { _ = engine.RemoveService(context.Background(), name) })
+	image, err := engine.PullImage(ctx, whoami+":v1.12.0", nil)
+	require.NoError(t, err)
+	spec := ServiceSpec{Name: name, App: "it-stop", Image: image, Replicas: 1, Route: &Route{Domain: name + ".localhost", Port: 80}}
+	require.NoError(t, engine.DeployService(ctx, spec))
+	_, err = engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	waitForRunning(t, engine, name, 1)
+	before, err := engine.inspect(ctx, name)
+	require.NoError(t, err)
+
+	require.NoError(t, engine.StopService(ctx, name))
+	stopping, err := engine.ServiceStatus(ctx, name)
+	require.NoError(t, err)
+	assert.Zero(t, stopping.Desired, "Swarm wants no tasks at once")
+	waitForRunning(t, engine, name, 0)
+
+	after, err := engine.inspect(ctx, name)
+	require.NoError(t, err)
+	assert.Equal(t, before.Spec.TaskTemplate.ForceUpdate, after.Spec.TaskTemplate.ForceUpdate, "the tasks keep their generation")
+	matches, err := engine.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, matches, "a stopped service still matches the spec it ran")
+
+	require.NoError(t, engine.StopService(ctx, name), "stopping a stopped service is fine")
+
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err := engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	assert.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+	started, err := engine.inspect(ctx, name)
+	require.NoError(t, err)
+	assert.Greater(t, started.Spec.TaskTemplate.ForceUpdate, before.Spec.TaskTemplate.ForceUpdate)
+
+	unmanaged := name + "-unmanaged"
+	_, err = engine.api.ServiceCreate(ctx, client.ServiceCreateOptions{Spec: swarm.ServiceSpec{
+		Annotations:  swarm.Annotations{Name: unmanaged},
+		TaskTemplate: swarm.TaskSpec{ContainerSpec: &swarm.ContainerSpec{Image: image}},
+		Mode:         swarm.ServiceMode{Replicated: &swarm.ReplicatedService{Replicas: new(uint64)}},
+	}})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = engine.api.ServiceRemove(context.Background(), unmanaged, client.ServiceRemoveOptions{})
+	})
+	assert.ErrorIs(t, engine.StopService(ctx, unmanaged), ErrNotManaged)
+	assert.ErrorIs(t, engine.StopService(ctx, name+"-missing"), ErrServiceNotFound)
+}
+
 func TestEngineCheckReportsUnreachableDaemon(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Host = "unix:///nonexistent/docker.sock"

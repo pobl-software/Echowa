@@ -17,6 +17,7 @@ const (
 	WorkBackup  AppWork = "backup"
 	WorkRestore AppWork = "restore"
 	WorkExport  AppWork = "export"
+	WorkStop    AppWork = "stop"
 )
 
 // Describe is the work as the pages name it: "a deploy", "an export".

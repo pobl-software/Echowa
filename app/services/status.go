@@ -18,6 +18,8 @@ const (
 	StateRunning     = "running"      // all desired replicas running
 	StateDegraded    = "degraded"     // some, but not all, running
 	StateDown        = "down"         // none running
+	StateStopping    = "stopping"     // stopped by the admin, tasks still ending
+	StateStopped     = "stopped"      // stopped by the admin, none running
 	StateNotDeployed = "not_deployed" // no Swarm service yet
 	StateUnknown     = "unknown"      // Docker didn't answer
 )
@@ -72,8 +74,13 @@ func serviceStatus(ctx context.Context, name string) LiveStatus {
 		Limits:      limitsFromDocker(status.Limits),
 		OOMKilledAt: status.OOMKilledAt,
 	}
+	// Echowa never sets 0 replicas except to stop an app.
 	switch {
-	case status.Desired > 0 && status.Running >= status.Desired:
+	case status.Desired == 0 && status.Running > 0:
+		live.State = StateStopping
+	case status.Desired == 0:
+		live.State = StateStopped
+	case status.Running >= status.Desired:
 		live.State = StateRunning
 	case status.Running > 0:
 		live.State = StateDegraded

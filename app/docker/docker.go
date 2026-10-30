@@ -33,6 +33,15 @@ type Client interface {
 	// changed, so a redeploy always restarts the app.
 	DeployService(ctx context.Context, spec ServiceSpec) error
 
+	// StopService scales the service to 0 replicas and changes nothing
+	// else: not its ForceUpdate, so its tasks keep their generation, and
+	// not its labels, so ServiceMatches still compares with the spec it
+	// ran. Swarm stops the tasks within their grace period and removes
+	// them, with their containers and logs. Stopping a stopped service is
+	// not an error. The error wraps ErrServiceNotFound if there's no such
+	// service.
+	StopService(ctx context.Context, name string) error
+
 	// ServiceMatches reports whether the service exists and its spec is the
 	// one DeployService makes from spec, so deploying spec again would only
 	// restart its tasks.

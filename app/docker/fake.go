@@ -62,6 +62,7 @@ type Fake struct {
 	openLogs  int
 	services  map[string]fakeService
 	removed   []string
+	stopped   []string
 	// volumes exist from a deploy that mounts them, or AddVolume, until
 	// RemoveVolume.
 	volumes        map[string]bool
@@ -72,7 +73,10 @@ type Fake struct {
 }
 
 type fakeService struct {
-	spec     ServiceSpec
+	spec ServiceSpec
+	// stopped means scaled to 0: the spec stays as deployed, as Swarm's
+	// labels do.
+	stopped  bool
 	previous *ServiceSpec
 	state    UpdateState
 	message  string
@@ -178,6 +182,28 @@ func (f *Fake) DeployService(_ context.Context, spec ServiceSpec) error {
 	return nil
 }
 
+// StopService stops the service's task at once and records the name. It
+// leaves the spec and the generation as they were.
+func (f *Fake) StopService(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	svc, ok := f.services[name]
+	if !ok {
+		return fmt.Errorf("%s: %w", name, ErrServiceNotFound)
+	}
+	if svc.stopped {
+		return nil
+	}
+	for i := range svc.tasks {
+		svc.tasks[i].Running = false
+	}
+	svc.stopped = true
+	f.services[name] = svc
+	f.stopped = append(f.stopped, name)
+
+	return nil
+}
+
 // ServiceMatches compares spec with the one the service was last deployed
 // or rolled back to.
 func (f *Fake) ServiceMatches(_ context.Context, spec ServiceSpec) (bool, error) {
@@ -199,11 +225,16 @@ func (f *Fake) ServiceStatus(_ context.Context, name string) (ServiceStatus, err
 		return ServiceStatus{}, fmt.Errorf("%s: %w", name, ErrServiceNotFound)
 	}
 
+	desired := svc.spec.Replicas
+	if svc.stopped {
+		desired = 0
+	}
+
 	return ServiceStatus{
 		Name:          name,
 		Image:         svc.spec.Image,
-		Desired:       svc.spec.Replicas,
-		Running:       svc.spec.Replicas,
+		Desired:       desired,
+		Running:       desired,
 		UpdateState:   svc.state,
 		UpdateMessage: svc.message,
 		Limits:        svc.spec.Limits,
@@ -432,6 +463,15 @@ func (f *Fake) RemovedVolumes() []string {
 	defer f.mu.Unlock()
 
 	return slices.Clone(f.removedVolumes)
+}
+
+// Stopped returns every name passed to StopService that wasn't already
+// stopped, in order.
+func (f *Fake) Stopped() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.stopped)
 }
 
 // Removed returns every name passed to RemoveService, in order.

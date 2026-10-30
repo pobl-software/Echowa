@@ -268,7 +268,7 @@ func (s *BackupsTestSuite) TestAnOlderServerIsRefusedAndANewerMajorVersionWarned
 		return nil, fmt.Errorf("echowa-shop-db: %w", docker.ErrNotRunning)
 	}
 	body = s.getJSON(b, preview, nethttp.StatusOK)
-	s.Equal("shop-db has no running task to restore into. Deploy it first.", body["refusal"])
+	s.Equal("shop-db has no running task to restore into. Start or deploy it first.", body["refusal"])
 }
 
 func (s *BackupsTestSuite) TestAFailedSafetyBackupRestoresNothing() {

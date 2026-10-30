@@ -23,6 +23,7 @@ import { PoolingSection } from '@/Components/PoolingSection';
 import { OOMAlert, ResourceLimits } from '@/Components/ResourceLimits';
 import { ScheduledTaskAlert, ScheduledTasks } from '@/Components/ScheduledTasks';
 import { DeploymentStatusBadge, LiveStatusBadge } from '@/Components/StatusBadge';
+import { StopStartButton } from '@/Components/StopStartButton';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button, buttonVariants } from '@/Components/ui/button';
 import { formatDateTime, timeAgo } from '@/lib/time';
@@ -157,20 +158,23 @@ export default function AppsShow({
     // The Connection section's Connect and pooling share one fetch.
     const connectSecrets = useConnectSecrets(app.id, app.pooling);
 
-    // While a deployment runs, refresh its status and the service's.
+    // While a deployment runs, or the app's tasks are still ending, refresh
+    // its status and the service's.
     const deploying = deployments.some((d) => runningStatuses.includes(d.status));
+    const stopping = status.state === 'stopping';
+    const stopped = stopping || status.state === 'stopped';
     const { start, stop } = usePoll(
         2000,
         { only: ['app', 'status', 'lastDeployment', 'deployments'] },
         { autoStart: false },
     );
     useEffect(() => {
-        if (deploying) {
+        if (deploying || stopping) {
             start();
         } else {
             stop();
         }
-    }, [deploying, start, stop]);
+    }, [deploying, stopping, start, stop]);
 
     const show = (value: AppSection) => {
         setSection(value);
@@ -217,7 +221,8 @@ export default function AppsShow({
                                 <span className="hidden sm:inline">Open</span>
                             </a>
                         )}
-                        <DeployDialog app={app} busy={busy} />
+                        <StopStartButton app={app} status={status} disabled={deploying || busy !== ''} />
+                        <DeployDialog app={app} busy={busy} stopped={stopped} />
                     </>
                 }
             >
@@ -247,7 +252,11 @@ export default function AppsShow({
                                     {
                                         label: 'Replicas',
                                         value: status.desired ? `${status.running} / ${status.desired}` : app.replicas,
-                                        hint: status.desired ? 'running / desired' : 'desired',
+                                        hint: status.desired
+                                            ? 'running / desired'
+                                            : stopped
+                                              ? 'desired when started'
+                                              : 'desired',
                                     },
                                     {
                                         label: 'Running image',

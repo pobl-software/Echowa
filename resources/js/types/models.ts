@@ -3,7 +3,7 @@
 
 export type DeploymentStatus = 'queued' | 'pulling' | 'deploying' | 'succeeded' | 'failed' | 'rolled_back';
 export type DeploymentTrigger = 'manual' | 'webhook' | 'rollback';
-export type LiveState = 'running' | 'degraded' | 'down' | 'not_deployed' | 'unknown';
+export type LiveState = 'running' | 'degraded' | 'down' | 'stopping' | 'stopped' | 'not_deployed' | 'unknown';
 
 // services.LiveStatus
 export interface LiveStatus {
@@ -196,7 +196,7 @@ export interface ExportFormat {
 }
 
 // services.AppWork: what holds an app's lock, or empty (ADR 0034).
-export type AppWork = '' | 'deploy' | 'backup' | 'restore' | 'export';
+export type AppWork = '' | 'deploy' | 'backup' | 'restore' | 'export' | 'stop';
 
 // models.RestoreStatus (ADR 0034).
 export type RestoreStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';

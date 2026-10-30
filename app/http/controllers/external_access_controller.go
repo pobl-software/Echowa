@@ -101,26 +101,38 @@ func (r *ExternalAccessController) CA(ctx http.Context) http.Response {
 }
 
 // redeployCurrent queues a deploy of the image the app runs now, so a
-// settings change doesn't also pull a newer tag. Before the first
-// successful deploy, it deploys the default tag.
+// settings change doesn't also pull a newer tag. A stopped app keeps the
+// change for when it's started, since a deploy would start it.
 func redeployCurrent(ctx http.Context, app *models.App, change string) http.Response {
-	ref := app.DefaultTag
-	if app.CurrentDeploymentID != nil {
-		var current models.Deployment
-		err := facades.Orm().WithContext(ctx).Query().Where("id", *app.CurrentDeploymentID).First(&current)
-		if err != nil {
-			return inertia.ServerError(ctx, err)
-		}
-		if current.Digest != nil {
-			_, ref, _ = strings.Cut(*current.Digest, "@")
-		}
+	switch services.AppLiveStatus(ctx, app).State {
+	case services.StateStopped, services.StateStopping:
+		inertia.Flash(ctx, "success", fmt.Sprintf("%s. It applies when you start %s.", change, app.Name))
+		return inertia.Back(ctx)
 	}
 
-	deployment, err := deploy.Request(ctx, app, models.TriggerManual, ref)
+	deployment, err := requestCurrent(ctx, app)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", fmt.Sprintf("%s. Deployment #%d applies it.", change, deployment.ID))
 
 	return inertia.Redirect(ctx, fmt.Sprintf("/apps/%d/deployments/%d", app.ID, deployment.ID))
+}
+
+// requestCurrent queues a deploy of the image the app runs now. Before the
+// first successful deploy, it deploys the default tag.
+func requestCurrent(ctx http.Context, app *models.App) (*models.Deployment, error) {
+	ref := app.DefaultTag
+	if app.CurrentDeploymentID != nil {
+		var current models.Deployment
+		err := facades.Orm().WithContext(ctx).Query().Where("id", *app.CurrentDeploymentID).First(&current)
+		if err != nil {
+			return nil, err
+		}
+		if current.Digest != nil {
+			_, ref, _ = strings.Cut(*current.Digest, "@")
+		}
+	}
+
+	return deploy.Request(ctx, app, models.TriggerManual, ref)
 }

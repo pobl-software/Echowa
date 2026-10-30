@@ -109,7 +109,9 @@ export function ResourceLimits({
         swap_mib: app.swap_mib,
     };
     const deployed = app.current_deployment_id !== null;
-    const live = status.state !== 'not_deployed' && status.state !== 'unknown';
+    // A stopped service keeps the limits it ran with until it's started.
+    const stopped = status.state === 'stopped' || status.state === 'stopping';
+    const live = status.state !== 'not_deployed' && status.state !== 'unknown' && !stopped;
     const pending =
         deployed &&
         live &&
@@ -179,7 +181,13 @@ export function ResourceLimits({
                             dirty={form.isDirty}
                             processing={form.processing}
                             onDiscard={discard}
-                            note={deployed ? 'Saving redeploys the image it runs.' : 'They apply on the first deploy.'}
+                            note={
+                                stopped
+                                    ? 'They apply when you start it.'
+                                    : deployed
+                                      ? 'Saving redeploys the image it runs.'
+                                      : 'They apply on the first deploy.'
+                            }
                         />
                     }
                 >
