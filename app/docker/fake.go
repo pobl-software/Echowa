@@ -597,8 +597,8 @@ func NewFakeTerminal(container string) *FakeTerminal {
 	return &FakeTerminal{ID: container, out: out, outW: outW}
 }
 
-// Read returns what Print writes, then io.EOF after Exit, or an error after
-// Close.
+// Read returns what Print writes, then io.EOF once the command has ended,
+// by Exit or Close.
 func (t *FakeTerminal) Read(p []byte) (int, error) {
 	return t.out.Read(p)
 }
@@ -631,12 +631,16 @@ func (t *FakeTerminal) ExitCode(context.Context) (int, error) {
 	return t.code, nil
 }
 
+// Close hangs up, as Engine's does: a command still running exits with
+// 129, 128 plus SIGHUP, so Read gives io.EOF before Close returns.
 func (t *FakeTerminal) Close() error {
 	t.mu.Lock()
 	t.closed = true
+	if !t.exited {
+		t.code, t.exited = 129, true
+	}
 	t.mu.Unlock()
-	// After Exit, Read still gives io.EOF: a pipe keeps its first error.
-	_ = t.outW.CloseWithError(errors.New("terminal closed"))
+	_ = t.outW.Close()
 
 	return nil
 }

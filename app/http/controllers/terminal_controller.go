@@ -150,27 +150,32 @@ func serveTerminal(conn *websocket.Conn, app *models.App, size docker.TerminalSi
 				break
 			}
 		}
-		if errors.Is(err, io.EOF) {
-			code, cerr := exitCode(term)
-			if cerr != nil {
-				facades.Log().Error(cerr)
-				endTerminal(conn, terminalMessage{Type: "closed", Reason: "The shell ended."})
-				break
-			}
-			endTerminal(conn, terminalMessage{Type: "exit", Code: &code})
-			break
-		}
 		if err != nil {
-			reason := term.Reason()
-			if reason == "" {
-				reason = "The terminal was closed."
-			}
-			endTerminal(conn, terminalMessage{Type: "closed", Reason: reason})
+			endTerminal(conn, endMessage(term, err))
 			break
 		}
 	}
 	_ = conn.Close()
 	<-browserGone
+}
+
+// endMessage says why the terminal ended, once reading it gave err. A
+// reason comes first: Echowa ending the terminal hangs up the shell, whose
+// exit can end the stream before the connection closes.
+func endMessage(term *services.Terminal, err error) terminalMessage {
+	if reason := term.Reason(); reason != "" {
+		return terminalMessage{Type: "closed", Reason: reason}
+	}
+	if !errors.Is(err, io.EOF) {
+		return terminalMessage{Type: "closed", Reason: "The terminal was closed."}
+	}
+	code, err := exitCode(term)
+	if err != nil {
+		facades.Log().Error(err)
+		return terminalMessage{Type: "closed", Reason: "The shell ended."}
+	}
+
+	return terminalMessage{Type: "exit", Code: &code}
 }
 
 func exitCode(term *services.Terminal) (int, error) {
