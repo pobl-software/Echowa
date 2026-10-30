@@ -8,9 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"goravel/app/alerts"
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 )
 
 // Who started a prune.
@@ -110,11 +112,33 @@ func finishPrune(run PruneRun) PruneRun {
 	now := time.Now()
 	run.FinishedAt = &now
 	pruning.Lock()
-	defer pruning.Unlock()
 	pruning.current = nil
 	pruning.last = &run
+	pruning.Unlock()
+	if len(run.Removed) > 0 {
+		notifyPrune(run)
+	}
 
 	return run
+}
+
+// notifyPrune tells the server's rules what a prune removed.
+func notifyPrune(run PruneRun) {
+	title := fmt.Sprintf("Image prune removed %d images", len(run.Removed))
+	if len(run.Removed) == 1 {
+		title = "Image prune removed 1 image"
+	}
+	startedBy := "The daily prune"
+	if run.Trigger == PruneManual {
+		startedBy = "Prune now"
+	}
+	Notify(alerts.Event{
+		Trigger: alerts.ImagesPruned,
+		Title:   title,
+		Summary: "It freed " + sizeText(run.SpaceReclaimed) + ".",
+		Fields:  []notify.Field{{Label: "Started by", Value: startedBy}},
+		Path:    "/settings",
+	})
 }
 
 func prune(ctx context.Context, started *PruneRun) PruneRun {

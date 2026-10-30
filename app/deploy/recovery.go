@@ -82,11 +82,12 @@ func Recover(ctx context.Context) error {
 	return nil
 }
 
-// RecoveryRunner runs Recover, services.RecoverTaskRuns for scheduled
-// tasks (ADR 0032), services.RecoverBackups, RecoverRestores and
-// RemoveUploads (ADR 0034), and SyncPoolers (ADR 0035), once when Echowa
-// starts serving, alongside Goravel's queue worker. When Echowa stops, it
-// closes the open terminals (ADR 0038).
+// RecoveryRunner runs services.RecoverNotifications (ADR 0040), Recover,
+// services.RecoverTaskRuns for scheduled tasks (ADR 0032),
+// services.RecoverBackups, RecoverRestores and RemoveUploads (ADR 0034),
+// then sends NotifyStarted and runs SyncPoolers (ADR 0035), once when
+// Echowa starts serving, alongside Goravel's queue worker. When Echowa
+// stops, it closes the open terminals (ADR 0038).
 type RecoveryRunner struct {
 	done chan struct{}
 }
@@ -106,6 +107,9 @@ func (r *RecoveryRunner) ShouldRun() bool {
 
 // Run recovers, then waits for shutdown like the other runners.
 func (r *RecoveryRunner) Run() error {
+	if err := services.RecoverNotifications(context.Background()); err != nil {
+		facades.Log().Error(fmt.Errorf("notification recovery: %w", err))
+	}
 	if err := Recover(context.Background()); err != nil {
 		facades.Log().Error(fmt.Errorf("deployment recovery: %w", err))
 	}
@@ -121,6 +125,7 @@ func (r *RecoveryRunner) Run() error {
 	if err := services.RemoveUploads(); err != nil {
 		facades.Log().Error(fmt.Errorf("remove uploads: %w", err))
 	}
+	services.NotifyStarted()
 	if err := services.SyncPoolers(context.Background()); err != nil {
 		facades.Log().Error(fmt.Errorf("connection poolers: %w", err))
 	}

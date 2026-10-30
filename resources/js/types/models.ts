@@ -89,6 +89,161 @@ export interface RegistryRow extends Registry {
     apps_count: number;
 }
 
+export type NotificationKind = 'slack' | 'discord' | 'teams' | 'ntfy' | 'smtp' | 'resend';
+
+// services.NotificationProviderSummary (ADR 0040). Secrets never leave the
+// server: stored names the ones it has.
+export interface NotificationProvider {
+    id: number;
+    name: string;
+    kind: NotificationKind;
+    enabled: boolean;
+    // The kind's plain settings (models.NotificationConfig).
+    config: {
+        server?: string;
+        host?: string;
+        port?: number;
+        security?: 'starttls' | 'tls' | 'none';
+        username?: string;
+        from?: string;
+        to?: string[];
+    };
+    // Where it sends, without a secret: a webhook's host, ntfy's server, an
+    // email's recipients.
+    target: string;
+    stored: Array<'webhook_url' | 'topic' | 'token' | 'password' | 'api_key'>;
+    // How the newest notification to it went, or null.
+    last: { status: NotificationStatus; error: string | null; at: string | null } | null;
+    // The alerts that send to it, in words ("Deploy failed or rolled back,
+    // every app").
+    used_by: string[];
+}
+
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+export type NotificationStatus = 'pending' | 'sent' | 'failed' | 'suppressed';
+// alerts.Unit: what a condition's threshold is in. Empty is yes/no.
+export type AlertUnit = '' | 'percent' | 'gib' | 'minutes' | 'hours' | 'days' | 'count' | 'per_second';
+// A condition's state at its worst, or off while the alert is off.
+export type AlertState = 'ok' | 'pending' | 'firing' | 'off';
+
+// services.AlertTriggerOption: a trigger in app/alerts' catalogue.
+export interface AlertTrigger {
+    id: string;
+    group: string;
+    label: string;
+    // About the server. The rest are about apps, and on Settings make
+    // every-app alerts.
+    server: boolean;
+    // The apps it's limited to ("PostgreSQL and MySQL apps"), or empty.
+    only: string;
+    // What a new alert on it starts at.
+    severity: AlertSeverity;
+    // Offered where it fits and isn't set up yet.
+    suggested: boolean;
+    kind: 'event' | 'condition';
+    // A condition's: its unit, what a percentage is of ("of its limit"),
+    // whether it breaches below, the words before its threshold in place
+    // of above or below ("less than"), whether its figure moves with the
+    // clock (a backup's age, so no For) and it's checked hourly, what a
+    // new alert starts at, and that alert in words.
+    unit: AlertUnit;
+    of: string;
+    below: boolean;
+    compare: string;
+    clock: boolean;
+    hourly: boolean;
+    threshold: number;
+    for_minutes: number;
+    description: string;
+}
+
+// services.ProviderRef: a provider as an alert names it.
+export interface ProviderRef {
+    id: number;
+    name: string;
+    kind: NotificationKind;
+    enabled: boolean;
+}
+
+// services.AlertRuleSummary.
+export interface AlertRule {
+    id: number;
+    scope: 'server' | 'all_apps' | 'app';
+    trigger: string;
+    // The trigger's label, or its ID when this version doesn't know it.
+    label: string;
+    known: boolean;
+    // A condition in words ("Memory use above 90% of its limit for 5
+    // minutes"), or an event's label.
+    description: string;
+    kind: 'event' | 'condition';
+    threshold: number | null;
+    for_minutes: number;
+    repeat_minutes: number;
+    notify_resolved: boolean;
+    severity: AlertSeverity;
+    enabled: boolean;
+    providers: ProviderRef[];
+    // A condition's, at its worst over what the list is about. Empty for
+    // an event.
+    state: AlertState | '';
+}
+
+// services.FiringAlert: a condition firing now.
+export interface FiringAlert {
+    rule_id: number;
+    // The app's name, "Server", or "Server, /var" for a disk.
+    subject: string;
+    description: string;
+    severity: AlertSeverity;
+    // The last figure in words, "Now 93% of its limit.", or empty for
+    // yes/no.
+    now: string;
+    since: string | null;
+    path: string;
+}
+
+// services.NotificationSummary.
+export interface NotificationSummary {
+    id: number;
+    title: string;
+    summary: string;
+    severity: AlertSeverity | 'resolved';
+    status: NotificationStatus;
+    attempts: number;
+    error: string | null;
+    provider: ProviderRef;
+    created_at: string | null;
+    sent_at: string | null;
+}
+
+// services.AppAlerts: an app's Alerts section.
+export interface AppAlerts {
+    firing: FiringAlert[];
+    rules: AlertRule[];
+    // The every-app alerts that cover the app, edited on Settings.
+    every_app: AlertRule[];
+    triggers: AlertTrigger[];
+    suggestions: AlertTrigger[];
+    providers: ProviderRef[];
+    recent: NotificationSummary[];
+}
+
+// services.SettingsAlerts: the server's alerts and every app's.
+export interface SettingsAlerts {
+    // The server's and every app's.
+    firing: FiringAlert[];
+    rules: AlertRule[];
+    triggers: AlertTrigger[];
+    suggestions: AlertTrigger[];
+}
+
+// services.NotificationTest: how a Test send is going.
+export interface NotificationTest {
+    state: 'sending' | 'sent' | 'failed';
+    error?: string;
+}
+
 // models.StorageLocation. The secret key never leaves the server.
 export interface StorageLocation {
     id: number;

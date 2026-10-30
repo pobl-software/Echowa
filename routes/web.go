@@ -172,6 +172,26 @@ func Web() {
 			router.Post("/settings/storage/test", storage.Check)
 			router.Put("/settings/storage/{location}", storage.Update)
 			router.Delete("/settings/storage/{location}", storage.Destroy)
+
+			notifications := controllers.NewNotificationProviderController()
+			router.Post("/settings/notifications", notifications.Store)
+			router.Post("/settings/notifications/test", notifications.Test)
+			router.Get("/settings/notifications/test/{test}", notifications.TestResult)
+			router.Put("/settings/notifications/{provider}", notifications.Update)
+			router.Put("/settings/notifications/{provider}/enabled", notifications.Enabled)
+			router.Delete("/settings/notifications/{provider}", notifications.Destroy)
+
+			// Alerts (ADR 0040): an app's own in its Alerts section, the
+			// server's and every app's on Settings. One controller, which
+			// tells them apart by {app}.
+			alertRules := controllers.NewAlertRuleController()
+			for _, prefix := range []string{"/apps/{app}/alerts", "/settings/alerts"} {
+				router.Post(prefix, alertRules.Store)
+				router.Post(prefix+"/suggested", alertRules.Suggested)
+				router.Put(prefix+"/{rule}", alertRules.Update)
+				router.Put(prefix+"/{rule}/enabled", alertRules.Enabled)
+				router.Delete(prefix+"/{rule}", alertRules.Destroy)
+			}
 		})
 	})
 

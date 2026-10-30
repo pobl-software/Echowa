@@ -21,9 +21,11 @@ import (
 	"github.com/goravel/framework/contracts/queue"
 	"github.com/goravel/framework/support/carbon"
 
+	"goravel/app/alerts"
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/rules"
 	"goravel/app/services"
 	"goravel/app/templates"
@@ -436,8 +438,38 @@ func (r *recorder) finish(status models.DeploymentStatus, message string) error 
 	if message != "" {
 		fields["error"] = message
 	}
+	if err := r.move(status, fields); err != nil {
+		return err
+	}
+	r.notify(message)
 
-	return r.move(status, fields)
+	return nil
+}
+
+// notify tells the deploy rules how the deployment ended.
+func (r *recorder) notify(message string) {
+	var app models.App
+	if err := facades.Orm().WithContext(r.ctx).Query().Find(&app, r.d.AppID); err != nil || app.ID == 0 {
+		return
+	}
+	e := alerts.Event{
+		App:     &app,
+		Summary: message,
+		Fields: []notify.Field{
+			{Label: "Deployment", Value: fmt.Sprintf("#%d", r.d.ID)},
+			{Label: "Image", Value: pullRef(&app, r.d.Ref)},
+		},
+		Path: fmt.Sprintf("/apps/%d/deployments/%d", app.ID, r.d.ID),
+	}
+	switch r.d.Status {
+	case models.DeploymentSucceeded:
+		e.Trigger, e.Title, e.Summary = alerts.DeploySucceeded, app.Name+" deployed", "The new version is running."
+	case models.DeploymentRolledBack:
+		e.Trigger, e.Title = alerts.DeployFailed, "Deploy of "+app.Name+" rolled back"
+	default:
+		e.Trigger, e.Title = alerts.DeployFailed, "Deploy of "+app.Name+" failed"
+	}
+	services.Notify(e)
 }
 
 // fail records err and ends the deployment as failed.

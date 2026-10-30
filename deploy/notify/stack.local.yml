@@ -1,0 +1,30 @@
+# Somewhere for notifications to go in development (ADR 0040), so every
+# kind but the hosted ones can be tried without an account.
+# deploy/dev-vm.sh up deploys it:
+#
+#   Mailpit   SMTP on localhost:2525 (encryption None, no username), and
+#             the mail it caught at http://localhost:8125. Not Mailpit's
+#             own 1025 and 8025, which a Mailpit on the Mac would hide
+#   ntfy      http://localhost:8095: Server http://localhost:8095, any
+#             topic, and open http://localhost:8095/<topic> to watch it
+#
+# Development only: neither asks for a password, and both speak plain text.
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.27.10
+    ports:
+      - "2525:1025"
+      - "8125:8025"
+    deploy:
+      replicas: 1
+
+  ntfy:
+    image: binwiederhier/ntfy:v2.14.0
+    command: ["serve"]
+    environment:
+      NTFY_BASE_URL: http://localhost:8095
+    ports:
+      - "8095:80"
+    deploy:
+      replicas: 1

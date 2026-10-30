@@ -120,19 +120,23 @@ func beginUpdateCheck() bool {
 	return true
 }
 
+// finishUpdateCheck keeps the answer, and tells the update alerts about
+// a newer release.
 func finishUpdateCheck(latest LatestRelease, err error) {
 	now := time.Now()
 	updateCheck.Lock()
-	defer updateCheck.Unlock()
 	updateCheck.Checking, updateCheck.CheckedAt = false, &now
 	if err != nil {
 		// The last good answer stays: a flaky network shouldn't hide a
 		// release already seen.
 		updateCheck.Error = err.Error()
+		updateCheck.Unlock()
 		facades.Log().Warning(fmt.Errorf("update check: %w", err))
 		return
 	}
 	updateCheck.Latest, updateCheck.Error = &latest, ""
+	updateCheck.Unlock()
+	notifyUpdate(latest)
 }
 
 // ResetUpdateCheck forgets the last check, for tests.

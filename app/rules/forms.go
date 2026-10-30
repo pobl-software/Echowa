@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 
 	"github.com/goravel/framework/contracts/validation"
 	frameworkvalidation "github.com/goravel/framework/validation"
@@ -421,6 +422,151 @@ func StorageLocationFilters() validation.Option {
 		"prefix":        "trim",
 		"access_key_id": "trim",
 		"secret_key":    "trim",
+	})
+}
+
+// NotificationProvider returns the rules for a notification provider's
+// form (ADR 0040): its name, its kind and the kind's fields. id is 0 when
+// creating; a saved provider's kind never changes, so it isn't sent. On
+// update a secret sent as null keeps the stored one.
+func NotificationProvider(kind string, id uint) map[string]any {
+	rules := NotificationProviderCheck(kind, id)
+	rules["name"] = "required|string|max:100|" + unique("notification_providers", "name", id)
+
+	return rules
+}
+
+// NotificationProviderCheck returns the rules for testing a provider's
+// form before it's saved: everything but its name.
+func NotificationProviderCheck(kind string, id uint) map[string]any {
+	// Goravel's nullable passes an empty string too, so an update that
+	// empties a required secret is caught by NotificationProviderInput's
+	// Problem instead.
+	secret := func(required bool, format string) string {
+		rule := "nullable|string|max:2000"
+		if required && id == 0 {
+			rule = "required|string|max:2000"
+		}
+		if format != "" {
+			rule += "|" + format
+		}
+		return rule
+	}
+	rules := map[string]any{}
+	if id == 0 {
+		rules["kind"] = "required|in:slack,discord,teams,ntfy,smtp,resend"
+	}
+	switch kind {
+	case "slack", "discord", "teams":
+		rules["webhook_url"] = secret(true, "service_url")
+	case "ntfy":
+		rules["server"] = "required|string|max:255|service_url"
+		rules["topic"] = secret(true, "ntfy_topic")
+		rules["token"] = secret(false, "")
+	case "smtp":
+		rules["host"] = "required|string|max:253|smtp_host"
+		rules["port"] = "required|integer|between:1,65535"
+		rules["security"] = "required|in:starttls,tls,none"
+		rules["username"] = "nullable|string|max:200"
+		rules["password"] = secret(false, "")
+		rules["from"] = "required|string|email_address"
+		rules["to"] = "required|string|max:2600|email_list"
+	case "resend":
+		rules["api_key"] = secret(true, "")
+		rules["from"] = "required|string|email_address"
+		rules["to"] = "required|string|max:2600|email_list"
+	}
+
+	return rules
+}
+
+// NotificationProviderFilters normalises the provider form before
+// validation. Secrets aren't filtered: a filter turns null, which keeps
+// the stored secret, into an empty string.
+func NotificationProviderFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name":     "trim",
+		"server":   "trim",
+		"host":     "trim|lower",
+		"username": "trim",
+		"from":     "trim",
+		"to":       "trim",
+	})
+}
+
+// MaxAlertProviders is how many providers one alert may name.
+const MaxAlertProviders = 20
+
+// AlertRule returns the rules for an alert's form (ADR 0040). triggers are
+// the ones the page may choose from, and only a new alert sends one: a
+// saved alert's trigger never changes.
+func AlertRule(triggers []string) map[string]any {
+	rules := map[string]any{
+		"severity":    "required|in:info,warning,critical",
+		"providers":   fmt.Sprintf("required|array|max:%d", MaxAlertProviders),
+		"providers.*": "integer|distinct",
+	}
+	if triggers != nil {
+		rules["trigger"] = "required|string|in:" + strings.Join(triggers, ",")
+	}
+
+	return rules
+}
+
+// MaxAlertMinutes and MaxRepeatMinutes bound how long a condition waits
+// before it fires, a day, and how often it repeats, a week.
+const (
+	MaxAlertMinutes  = 24 * 60
+	MaxRepeatMinutes = 7 * 24 * 60
+)
+
+// AlertCondition returns the rules a condition's alert adds to
+// AlertRule's: how long it waits, how often it repeats, whether it says
+// it's resolved, and a threshold unless it's yes/no. A percentage is at
+// most 100.
+func AlertCondition(threshold, percent bool) map[string]any {
+	rules := map[string]any{
+		"for_minutes":     fmt.Sprintf("required|integer|min:0|max:%d", MaxAlertMinutes),
+		"repeat_minutes":  fmt.Sprintf("required|integer|min:0|max:%d", MaxRepeatMinutes),
+		"notify_resolved": "required|boolean",
+	}
+	switch {
+	case percent:
+		rules["threshold"] = "required|numeric|min:0|max:100"
+	case threshold:
+		rules["threshold"] = "required|numeric|min:0"
+	}
+
+	return rules
+}
+
+// AlertSuggestions returns the rules for adding suggested alerts: some of
+// triggers, the ones suggested on the page, and where to send them.
+func AlertSuggestions(triggers []string) map[string]any {
+	return map[string]any{
+		"triggers":    "required|array",
+		"triggers.*":  "string|distinct|in:" + strings.Join(triggers, ","),
+		"providers":   fmt.Sprintf("required|array|max:%d", MaxAlertProviders),
+		"providers.*": "integer|distinct",
+	}
+}
+
+// AlertMessages words the alert forms' errors.
+func AlertMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"trigger.required":   "Choose what to alert on.",
+		"trigger.in":         "Choose one of the listed alerts.",
+		"triggers.required":  "Choose at least one alert.",
+		"triggers.*.in":      "That alert isn't suggested here any more.",
+		"providers.required": "Choose where to send it.",
+		"providers.max":      fmt.Sprintf("At most %d providers.", MaxAlertProviders),
+		"severity.required":  "Choose a severity.",
+		"threshold.required": "Enter a threshold.",
+		"threshold.numeric":  "Enter a number.",
+		"threshold.min":      "At least 0.",
+		"threshold.max":      "At most 100%.",
+		"for_minutes.max":    fmt.Sprintf("At most %d minutes, a day.", MaxAlertMinutes),
+		"repeat_minutes.max": fmt.Sprintf("At most %d minutes, a week.", MaxRepeatMinutes),
 	})
 }
 

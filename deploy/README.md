@@ -496,6 +496,55 @@ failed`. Connections that succeed aren't logged.
 **Turn off** removes the pooler, and apps still on the pooled URL lose
 their connection, so move them to the direct URL first.
 
+### Notifications and alerts
+
+Echowa can tell you when something needs you: a deploy failed, an app is
+short of replicas, a backup failed, a disk is filling up. You add the
+places messages go once, then choose the alerts that send to them.
+
+1. **Add a provider.** In **Settings, Notifications**, pick a kind and
+   fill in its form. **Send a test** sends a sample message before you
+   save. Secrets (webhook URLs, the ntfy topic, passwords, API keys) are
+   stored encrypted and never shown again.
+
+   | Kind | What it needs |
+   |---|---|
+   | Slack | An incoming webhook URL: create a Slack app with Incoming Webhooks on and add a webhook to the channel. Mattermost's incoming webhooks work too. |
+   | Discord | A webhook URL: the channel's settings, Integrations, Webhooks, New Webhook. |
+   | Microsoft Teams | A workflow's URL: in Teams, a workflow from "Post to a channel when a webhook request is received". Old Office 365 connector URLs no longer work. |
+   | ntfy | A server (`https://ntfy.sh` or your own) and a topic, plus an access token if the server wants one. On ntfy.sh anyone who knows a topic can read it, so make it long and random. |
+   | Email (SMTP) | Host, port, STARTTLS (usually 587) or TLS (usually 465), a username and password, and the from and to addresses. Plain SMTP is only allowed to the server itself. |
+   | Resend | An API key that can send, a from address on a domain you verified with Resend, and the to addresses. |
+
+2. **Add alerts.** Each app's **Alerts** section (under Observe) lists
+   the alerts that usually matter for its kind: tick the ones you want,
+   choose the providers and add them in one click. **Add alert** makes
+   any other.
+   **Settings, Alerts** holds the server's alerts and the ones that cover
+   every app, so a new app is covered from the start.
+
+There are two kinds of alert. An **event** sends once, when it happens:
+a deploy failed, rolled back or succeeded, an app's task was killed for
+memory, a backup or restore ended, a scheduled task failed, Echowa
+started, a newer release is out, an image prune removed images. A
+**condition** is checked every minute and fires once it has held for its
+minutes: an app unhealthy, CPU or memory near its limit, a database's
+connections, size, longest transaction or cache hit rate, a PostgreSQL
+pooler down, no successful backup for over a day, a certificate close to
+expiry (checked hourly), the server's CPU, memory, swap or disks, Docker
+unreachable. A condition can repeat while it's still firing, and sends a
+**Resolved** message once it's clear. Its state survives a restart of
+Echowa, so a restart neither sends it again nor loses it.
+
+Each message names the server and links back to the page it's about,
+using `APP_URL`, so set that to the URL you open. An app's Alerts section
+lists the last 50 sent about it, with **Failed** and the provider's
+answer when one didn't go through. Echowa tries each message three
+times, and stops at once when a provider refuses it, as it does for a
+deleted webhook. To keep a bad night from flooding a channel, a provider
+gets at most 20 messages in 10 minutes; the rest are held back and
+summed up in one message once there's room.
+
 ### Upgrading Echowa
 
 Echowa checks for a new release every day. When there is one, **Settings,

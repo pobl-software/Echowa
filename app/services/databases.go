@@ -31,8 +31,9 @@ var (
 )
 
 // CheckDatabases runs the health command of every template app that has
-// one, and stores the round as the minute's figures (ADR 0027). An app
-// with no running task is skipped. The scheduler calls it every minute.
+// one, stores the round as the minute's figures (ADR 0027) and checks the
+// database conditions. An app with no running task is skipped. The
+// scheduler calls it every minute.
 func CheckDatabases(ctx context.Context, now time.Time) {
 	var apps []models.App
 	if err := facades.Orm().WithContext(ctx).Query().WhereNotNull("template").Get(&apps); err != nil {
@@ -61,6 +62,9 @@ func CheckDatabases(ctx context.Context, now time.Time) {
 
 	if err := storeSample(ctx, metrics.DatabaseSample(now, dbs)); err != nil {
 		facades.Log().Error(fmt.Errorf("database check: storing: %w", err))
+	}
+	if err := evaluateDatabases(ctx, apps, dbs, now); err != nil {
+		facades.Log().Error(fmt.Errorf("database alerts: %w", err))
 	}
 }
 

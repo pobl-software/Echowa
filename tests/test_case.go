@@ -11,6 +11,7 @@ import (
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/services"
 	"goravel/bootstrap"
 	"goravel/config"
@@ -33,6 +34,10 @@ func init() {
 		OpenedStorage = append(OpenedStorage, *loc)
 		return fakeStorage
 	}
+	// Nor to a notification provider. Suites that care call FakeNotify.
+	notify.Open = func(p *models.NotificationProvider) (notify.Sender, error) {
+		return fakeNotify.Open(p)
+	}
 }
 
 var (
@@ -41,6 +46,7 @@ var (
 	realStorage = backups.Open
 	fakeDocker  = &docker.Fake{}
 	fakeStorage = backups.NewFake()
+	fakeNotify  = &notify.Fake{}
 	openedMu    sync.Mutex
 )
 
@@ -69,9 +75,17 @@ func (tc *TestCase) FakeStorage() *backups.Fake {
 	return fakeStorage
 }
 
-// useTestDatabase points the default connection, and the metrics file, at
-// fresh SQLite files in a temp directory, so RefreshDatabase can never wipe
-// the development database. It runs after the config files' init() (they're imported) but
+// FakeNotify gives the test a fresh recorder of what would have been sent
+// to notification providers.
+func (tc *TestCase) FakeNotify() *notify.Fake {
+	fakeNotify = &notify.Fake{}
+
+	return fakeNotify
+}
+
+// useTestDatabase points the default connection, the metrics file and the
+// session files at a temp directory, so RefreshDatabase can never wipe the
+// development database, nor a test sign the dev machine's browser out. It runs after the config files' init() (they're imported) but
 // before Boot() opens any connections. See ADR 0014.
 func useTestDatabase() {
 	dir, err := os.MkdirTemp("", "echowa-test-")
@@ -84,4 +98,8 @@ func useTestDatabase() {
 	facades.Config().Add(key+".database", database)
 	facades.Config().Add(key+".dsn", config.SQLiteDSN(database))
 	facades.Config().Add("database.metrics.database", filepath.Join(dir, "metrics.sqlite"))
+	// Sessions too: resetting the admin's password deletes every session
+	// file, and the dev machine's Echowa keeps its own in the repo's
+	// storage/framework/sessions.
+	facades.Config().Add("session.files", filepath.Join(dir, "sessions"))
 }

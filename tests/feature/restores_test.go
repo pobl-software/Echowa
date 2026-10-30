@@ -14,11 +14,13 @@ import (
 
 	"github.com/goravel/framework/support/carbon"
 
+	"goravel/app/alerts"
 	"goravel/app/backups"
 	"goravel/app/deploy"
 	"goravel/app/docker"
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/notify"
 	"goravel/app/services"
 )
 
@@ -275,14 +277,27 @@ func (s *BackupsTestSuite) TestAFailedSafetyBackupRestoresNothing() {
 	old := s.backedUp(s.app, postgres186, "PGDMP old data")
 	s.scriptRestore(postgres186, "PGDMP new data", 0, nil)
 	s.storage.PutErr = errors.New("the bucket is full")
+	sent := s.FakeNotify()
+	ops := createTestProvider(s.T(), "Slack #ops")
+	createTestAlertRule(s.T(), alerts.BackupFailed, nil, notify.Critical, ops)
+	createTestAlertRule(s.T(), alerts.RestoreFailed, nil, notify.Critical, ops)
 	b := signedIn(s.T(), &s.TestCase)
 
 	s.restore(b, s.app, map[string]any{"backup": old.ID, "safety": true, "confirm": "shop-db"})
 	services.WaitForRestores()
+	services.WaitForNotifications()
 
 	rec := s.restores(s.app.ID)[0]
 	s.Equal(models.RestoreFailed, rec.Status)
 	s.Contains(*rec.Message, "The safety backup failed, so nothing was restored. The upload to R2 failed")
+	messages := map[string]notify.Message{}
+	for _, m := range sent.Sent() {
+		messages[m.Message.Title] = m.Message
+	}
+	s.Len(sent.Sent(), 2)
+	s.Contains(messages["Backup of shop-db failed"].Fields, notify.Field{Label: "Started by", Value: "A restore, for safety"})
+	s.Equal(*rec.Message, messages["Restore of shop-db failed"].Summary)
+	s.Contains(messages["Restore of shop-db failed"].Fields, notify.Field{Label: "From", Value: path.Base(old.Key)})
 	s.Empty(s.restoredSoFar(), "the restore never ran")
 	s.Require().NotNil(rec.SafetyBackupID)
 	var safety models.Backup

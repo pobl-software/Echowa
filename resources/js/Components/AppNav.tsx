@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react';
 import {
     ArchiveIcon,
+    BellIcon,
     BoxesIcon,
     BracesIcon,
     CalendarClockIcon,
@@ -47,6 +48,8 @@ export const appSections = [
     { group: 'Observe', id: 'logs', label: 'Logs', icon: ScrollTextIcon },
     // A template app's includes what the database reports (ADR 0027).
     { group: 'Observe', id: 'metrics', label: 'Metrics', icon: ChartLineIcon },
+    // Where its notifications go, and what was sent (ADR 0040).
+    { group: 'Observe', id: 'alerts', label: 'Alerts', icon: BellIcon },
     // A shell in a custom app's container (ADR 0038).
     { group: 'Manage', id: 'terminal', label: 'Terminal', icon: SquareTerminalIcon, kind: 'custom' },
     { group: 'Manage', id: 'danger', label: 'Danger zone', icon: TriangleAlertIcon },

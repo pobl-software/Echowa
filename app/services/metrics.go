@@ -44,8 +44,8 @@ var (
 )
 
 // ReadMetrics takes one reading and keeps it as the latest. When it starts
-// a new minute, the previous minute is stored. The scheduler calls it every
-// 15 seconds.
+// a new minute, the previous minute is stored and the metric conditions
+// checked against it. The scheduler calls it every 15 seconds.
 func ReadMetrics(ctx context.Context) {
 	r, err := collector().Read(ctx)
 	// Docker being down would otherwise log four times a minute.
@@ -60,6 +60,9 @@ func ReadMetrics(ctx context.Context) {
 	if sample, closed := minute.Add(r); closed {
 		if err := storeSample(ctx, sample); err != nil {
 			facades.Log().Error(fmt.Errorf("metrics: storing %s: %w", sample.At.UTC().Format(time.DateTime), err))
+		}
+		if err := CheckMetricAlerts(ctx, sample, sample.At.Add(time.Minute)); err != nil {
+			facades.Log().Error(fmt.Errorf("metric alerts: %w", err))
 		}
 	}
 }

@@ -22,6 +22,9 @@ interface ConfirmDeleteProps {
     onOpenChange?: (open: boolean) => void;
     title: string;
     children: ReactNode;
+    // Block content under the description, such as a list: the
+    // description is a paragraph.
+    details?: ReactNode;
     confirmLabel?: string;
     // Default for an action that only interrupts, such as a restart.
     variant?: 'destructive' | 'default';
@@ -36,6 +39,7 @@ export function ConfirmDelete({
     trigger,
     title,
     children,
+    details,
     confirmLabel = 'Delete',
     variant = 'destructive',
     confirmText,
@@ -62,6 +66,7 @@ export function ConfirmDelete({
                     <AlertDialogTitle>{title}</AlertDialogTitle>
                     <AlertDialogDescription>{children}</AlertDialogDescription>
                 </AlertDialogHeader>
+                {details && <div className="text-sm text-muted-foreground">{details}</div>}
                 {confirmText !== undefined && (
                     <Field>
                         <FieldLabel htmlFor={inputId}>
