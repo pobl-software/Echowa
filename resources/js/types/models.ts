@@ -525,12 +525,16 @@ export interface LogDeploy {
     deployment: { id: number; ref: string; started_at: string } | null;
 }
 
-// models.AppVolume: a Docker named volume mounted at target.
+// models.AppVolume: a Docker named volume mounted at target. It's Mounted
+// until removed_at is set, then Removing: the next deploy leaves it out and,
+// once it succeeds, deletes the volume and its data (ADR 0039). Times are
+// server timestamps; see parseServerTime.
 export interface AppVolume {
     id: number;
     app_id: number;
     name: string;
     target: string;
+    removed_at: string | null;
 }
 
 // services.PruneRun. Times are RFC 3339, with a zone.

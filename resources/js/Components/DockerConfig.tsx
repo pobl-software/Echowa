@@ -11,7 +11,10 @@ import {
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 
+import type { AppSection } from '@/Components/AppNav';
+
 import { ConfigPanel, ConfigSection, SaveBar } from '@/Components/ConfigPanel';
+import { SectionLink } from '@/Components/SectionLink';
 import { TextField } from '@/Components/TextField';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/Components/ui/input-group';
@@ -30,10 +33,13 @@ export function DockerConfig({
     app,
     registries,
     template,
+    onSelect,
 }: {
     app: App;
     registries: RegistryOption[];
     template?: TemplateOption;
+    // Switches to another section, such as a custom app's Volumes.
+    onSelect: (section: AppSection) => void;
 }) {
     const form = useForm({
         repository: app.repository,
@@ -110,7 +116,7 @@ export function DockerConfig({
                             error={form.errors.default_tag}
                         />
                     </div>
-                    {hasVolumes && (
+                    {template && hasVolumes && (
                         <FieldDescription className="-mt-2">
                             Its volume holds data this version wrote, which another major version may not read:
                             PostgreSQL starts with an empty database. Change the tag&apos;s major version only on
@@ -301,13 +307,24 @@ export function DockerConfig({
                     </Field>
                 </ConfigSection>
 
-                {hasVolumes && (
+                {hasVolumes && template && (
                     <ConfigSection
                         icon={HardDriveIcon}
                         title="Volumes"
                         description="Data here survives deploys. Set when the app was created."
                     >
-                        <AppVolumes volumes={volumes} />
+                        <VolumeList volumes={volumes} />
+                    </ConfigSection>
+                )}
+                {hasVolumes && !template && (
+                    <ConfigSection icon={HardDriveIcon} title="Volumes" description="Data here survives deploys.">
+                        <p className="text-sm text-muted-foreground">
+                            Add, move and remove them in{' '}
+                            <SectionLink app={app} section="volumes" onSelect={onSelect}>
+                                <span className="text-foreground">Volumes</span>
+                            </SectionLink>
+                            .
+                        </p>
                     </ConfigSection>
                 )}
             </ConfigPanel>
@@ -324,9 +341,9 @@ function Route({ label, children }: { label: string; children: ReactNode }) {
     );
 }
 
-// AppVolumes lists an app's volumes: where each is mounted, and its Docker
-// name. They come from its template.
-function AppVolumes({ volumes }: { volumes: AppVolume[] }) {
+// VolumeList lists a template app's volumes: where each is mounted, and its
+// Docker name.
+function VolumeList({ volumes }: { volumes: AppVolume[] }) {
     return (
         <ul className="divide-y rounded-lg border text-sm">
             {volumes.map((volume) => (

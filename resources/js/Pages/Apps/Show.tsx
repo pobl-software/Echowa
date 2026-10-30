@@ -1,12 +1,13 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react';
-import { Fragment, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useState } from 'react';
 
 import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
 import { AppMetrics } from '@/Components/AppMetrics';
 import { AppNavAside, AppNavTabs, type AppSection, appSections, sectionsFor } from '@/Components/AppNav';
+import { AppVolumes } from '@/Components/AppVolumes';
 import { ConfigPanel } from '@/Components/ConfigPanel';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
 import { ConnectSection, useConnectSecrets } from '@/Components/ConnectSection';
@@ -24,6 +25,7 @@ import { Panel, Stats } from '@/Components/Panel';
 import { PoolingSection } from '@/Components/PoolingSection';
 import { OOMAlert, ResourceLimits } from '@/Components/ResourceLimits';
 import { ScheduledTaskAlert, ScheduledTasks } from '@/Components/ScheduledTasks';
+import { SectionLink } from '@/Components/SectionLink';
 import { DeploymentStatusBadge, LiveStatusBadge } from '@/Components/StatusBadge';
 import { StopStartButton } from '@/Components/StopStartButton';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
@@ -463,8 +465,15 @@ export default function AppsShow({
                     {section === 'backups' && backups && <AppBackups app={app} section={backups} held={busy} />}
 
                     {section === 'docker' && (
-                        <DockerConfig app={app} registries={registries} template={template ?? undefined} />
+                        <DockerConfig
+                            app={app}
+                            registries={registries}
+                            template={template ?? undefined}
+                            onSelect={show}
+                        />
                     )}
+
+                    {section === 'volumes' && <AppVolumes app={app} volumes={volumes} />}
 
                     {section === 'resources' && (
                         <ResourceLimits app={app} status={status} resources={resources} metrics={metrics} />
@@ -645,31 +654,4 @@ function AppLinks({ apps }: { apps: { id: number; name: string }[] }) {
             </Link>
         </Fragment>
     ));
-}
-
-// SectionLink switches to another section in place, as the section nav does;
-// a modified click opens it in a new tab.
-function SectionLink({
-    app,
-    section,
-    onSelect,
-    children,
-}: {
-    app: App;
-    section: AppSection;
-    onSelect: (section: AppSection) => void;
-    children: ReactNode;
-}) {
-    const view = (event: MouseEvent) => {
-        if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
-            event.preventDefault();
-            onSelect(section);
-        }
-    };
-
-    return (
-        <a href={`/apps/${app.id}?tab=${section}`} onClick={view} className="hover:underline">
-            {children}
-        </a>
-    );
 }

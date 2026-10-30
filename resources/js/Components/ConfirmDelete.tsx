@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode, useState } from 'react';
+import { type ReactElement, type ReactNode, useEffect, useId, useState } from 'react';
 
 import {
     AlertDialog,
@@ -11,6 +11,8 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from '@/Components/ui/alert-dialog';
+import { Field, FieldLabel } from '@/Components/ui/field';
+import { Input } from '@/Components/ui/input';
 
 interface ConfirmDeleteProps {
     // The button that opens the dialog. Without one, open and onOpenChange
@@ -23,6 +25,9 @@ interface ConfirmDeleteProps {
     confirmLabel?: string;
     // Default for an action that only interrupts, such as a restart.
     variant?: 'destructive' | 'default';
+    // Text to type before the action is allowed, for data that can't come
+    // back.
+    confirmText?: string;
     onConfirm: () => void;
 }
 
@@ -33,12 +38,21 @@ export function ConfirmDelete({
     children,
     confirmLabel = 'Delete',
     variant = 'destructive',
+    confirmText,
     onConfirm,
     ...controlled
 }: ConfirmDeleteProps) {
     const [own, setOwn] = useState(false);
     const open = controlled.open ?? own;
     const setOpen = controlled.onOpenChange ?? setOwn;
+    const [typed, setTyped] = useState('');
+    const inputId = useId();
+
+    useEffect(() => {
+        if (!open) {
+            setTyped('');
+        }
+    }, [open]);
 
     return (
         <AlertDialog open={open} onOpenChange={setOpen}>
@@ -48,10 +62,25 @@ export function ConfirmDelete({
                     <AlertDialogTitle>{title}</AlertDialogTitle>
                     <AlertDialogDescription>{children}</AlertDialogDescription>
                 </AlertDialogHeader>
+                {confirmText !== undefined && (
+                    <Field>
+                        <FieldLabel htmlFor={inputId}>
+                            Type <span className="font-mono">{confirmText}</span> to confirm
+                        </FieldLabel>
+                        <Input
+                            id={inputId}
+                            className="font-mono"
+                            autoComplete="off"
+                            value={typed}
+                            onChange={(e) => setTyped(e.target.value)}
+                        />
+                    </Field>
+                )}
                 <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
                     <AlertDialogAction
                         variant={variant}
+                        disabled={confirmText !== undefined && typed !== confirmText}
                         onClick={() => {
                             setOpen(false);
                             onConfirm();

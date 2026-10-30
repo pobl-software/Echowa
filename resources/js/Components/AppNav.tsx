@@ -9,6 +9,7 @@ import {
     DatabaseIcon,
     GaugeIcon,
     GlobeIcon,
+    HardDriveIcon,
     HistoryIcon,
     LayoutDashboardIcon,
     type LucideIcon,
@@ -34,6 +35,9 @@ export const appSections = [
     // Dumps of a template database to S3 storage (ADR 0034). Not Redis.
     { group: 'Configuration', id: 'backups', label: 'Backups', icon: ArchiveIcon, kind: 'backups' },
     { group: 'Configuration', id: 'docker', label: 'Docker config', icon: ContainerIcon },
+    // The paths whose files survive a deploy (ADR 0039). A template's are
+    // fixed, and listed in its Docker config.
+    { group: 'Configuration', id: 'volumes', label: 'Volumes', icon: HardDriveIcon, kind: 'custom' },
     { group: 'Configuration', id: 'resources', label: 'Resource limits', icon: GaugeIcon },
     // Template apps don't speak HTTP, so they have no domain.
     { group: 'Configuration', id: 'domains', label: 'Domains', icon: GlobeIcon, kind: 'custom' },
