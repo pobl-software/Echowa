@@ -38,7 +38,7 @@ func (r *PoolingController) set(ctx http.Context, on bool) http.Response {
 		return notFound(ctx)
 	}
 	if on {
-		taken, err := services.PoolerNameTaken(ctx, &app)
+		taken, err := services.PoolerNameTaken(ctx.Context(), &app)
 		if err != nil {
 			return inertia.ServerError(ctx, err)
 		}
@@ -49,7 +49,7 @@ func (r *PoolingController) set(ctx http.Context, on bool) http.Response {
 		}
 	}
 
-	if err := services.SetPooling(ctx, &app, on); err != nil {
+	if err := services.SetPooling(ctx.Context(), &app, on); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if on {

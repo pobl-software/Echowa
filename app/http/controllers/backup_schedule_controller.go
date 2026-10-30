@@ -41,7 +41,7 @@ func (r *BackupScheduleController) Update(ctx http.Context) http.Response {
 }
 
 func (r *BackupScheduleController) save(ctx http.Context, app *models.App, schedule *models.BackupSchedule, done string) http.Response {
-	validator, err := ctx.Request().Validate(rules.BackupSchedule(), rules.BackupScheduleFilters(), rules.BackupScheduleMessages())
+	validator, err := rules.Validate(ctx, rules.BackupSchedule(), rules.BackupScheduleFilters(), rules.BackupScheduleMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -53,7 +53,7 @@ func (r *BackupScheduleController) save(ctx http.Context, app *models.App, sched
 	if err := validator.Bind(&in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	if err := services.SaveBackupSchedule(ctx, schedule, in); err != nil {
+	if err := services.SaveBackupSchedule(ctx.Context(), schedule, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", done)
@@ -68,7 +68,7 @@ func (r *BackupScheduleController) Enabled(ctx http.Context) http.Response {
 	if resp := findBackupSchedule(ctx, &app, &schedule); resp != nil {
 		return resp
 	}
-	validator, err := ctx.Request().Validate(map[string]any{"enabled": "required|boolean"})
+	validator, err := rules.Validate(ctx, map[string]any{"enabled": "required|boolean"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -77,7 +77,7 @@ func (r *BackupScheduleController) Enabled(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 	enabled := ctx.Request().InputBool("enabled")
-	if _, err := facades.Orm().WithContext(ctx).Query().Model(&schedule).Update("enabled", enabled); err != nil {
+	if _, err := facades.Orm().WithContext(ctx.Context()).Query().Model(&schedule).Update("enabled", enabled); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if enabled {
@@ -97,7 +97,7 @@ func (r *BackupScheduleController) Destroy(ctx http.Context) http.Response {
 	if resp := findBackupSchedule(ctx, &app, &schedule); resp != nil {
 		return resp
 	}
-	if _, err := facades.Orm().WithContext(ctx).Query().Delete(&schedule); err != nil {
+	if _, err := facades.Orm().WithContext(ctx.Context()).Query().Delete(&schedule); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Deleted the schedule. Its backups are kept.")
@@ -114,12 +114,12 @@ func (r *BackupScheduleController) Dismiss(ctx http.Context) http.Response {
 		return resp
 	}
 	var rec models.Backup
-	err := facades.Orm().WithContext(ctx).Query().
+	err := facades.Orm().WithContext(ctx.Context()).Query().
 		Where("id", ctx.Request().InputInt("backup")).Where("backup_schedule_id", schedule.ID).FirstOrFail(&rec)
 	if err != nil {
 		return notFound(ctx)
 	}
-	if err := services.DismissBackupFailure(ctx, &schedule, &rec); err != nil {
+	if err := services.DismissBackupFailure(ctx.Context(), &schedule, &rec); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 
@@ -132,7 +132,7 @@ func findBackupSchedule(ctx http.Context, app *models.App, schedule *models.Back
 	if resp := findBackupApp(ctx, app); resp != nil {
 		return resp
 	}
-	err := facades.Orm().WithContext(ctx).Query().
+	err := facades.Orm().WithContext(ctx.Context()).Query().
 		Where("id", ctx.Request().RouteInt("schedule")).Where("app_id", app.ID).FirstOrFail(schedule)
 	if err != nil {
 		return notFound(ctx)

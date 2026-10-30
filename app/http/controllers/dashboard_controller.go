@@ -19,7 +19,7 @@ func NewDashboardController() *DashboardController {
 // Index lists every app with its live Swarm status and latest deployment,
 // under the server's latest figures.
 func (r *DashboardController) Index(ctx http.Context) http.Response {
-	apps, err := services.AppSummaries(ctx)
+	apps, err := services.AppSummaries(ctx.Context())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

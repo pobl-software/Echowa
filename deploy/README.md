@@ -77,6 +77,11 @@ dig +short blog.example.com
 If you use Cloudflare, set records to "DNS only" (grey cloud) at least until
 the first certificate is issued.
 
+The UI's own domain, with HTTPS access, must stay "DNS only" for good.
+Cloudflare's proxy only passes certain ports on, and 8192 isn't one, so a
+proxied record makes the UI time out. Setup warns when it sees one. If you
+want Cloudflare in front of the UI, choose Cloudflare Tunnel instead.
+
 ### 3. Install
 
 On the server:
@@ -90,7 +95,7 @@ First it asks how you'll reach the UI:
 | Choice | URL | What it takes | Trade-off |
 |---|---|---|---|
 | 1. HTTP (default) | `http://<server>:8192` | Port 8192 open in your firewall | Works at once, but your password and session cross the network unencrypted. For trying Echowa out. |
-| 2. HTTPS | `https://<domain>:8192` | A domain pointing at the server, and port 8192 open in your provider's firewall | Traefik serves it with a Let's Encrypt certificate, on a port of its own: allow 8192 from your own addresses only and the login page is off the internet, while apps keep 80 and 443. |
+| 2. HTTPS | `https://<domain>:8192` | A domain pointing at the server (with Cloudflare, "DNS only": its proxy doesn't pass port 8192 on), and port 8192 open in your provider's firewall | Traefik serves it with a Let's Encrypt certificate, on a port of its own: allow 8192 from your own addresses only and the login page is off the internet, while apps keep 80 and 443. |
 | 3. Cloudflare Tunnel | `https://<hostname>` | A Cloudflare account, and the tunnel's token (step 5) | No open port; Cloudflare Access can check who you are before the login page loads. The safest. |
 
 Answer in advance, for an unattended install, with flags:

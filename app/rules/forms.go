@@ -52,7 +52,19 @@ func AppDocker(hasVolumes bool) map[string]any {
 		"port":            "required|integer|min:1|max:65535",
 		"replicas":        replicas,
 		"healthcheck_cmd": "nullable|string|max:1000",
+		"command":         "nullable|string|max:1000|command",
 	}
+}
+
+// AppService returns the rules for a new service, a custom app made from
+// another app's Services section: its name, its Docker config, and whether
+// it starts with that app's environment.
+func AppService() map[string]any {
+	rules := AppDocker(false)
+	rules["name"] = "required|string|slug|" + unique("apps", "name", 0) + "|not_pooler_name"
+	rules["copy_env"] = "boolean"
+
+	return rules
 }
 
 // AppDomain returns the rules for app id's domain. id is 0 when creating.
@@ -146,6 +158,43 @@ func AppResourcesMessages(maxCPU, maxMemory, maxSwap int) validation.Option {
 		"swap_mib.min":           "Use 0 for no swap.",
 		"swap_mib.max":           swapMax,
 		"swap_mib.integer":       "Use a whole number of MiB.",
+	})
+}
+
+// AppVolume returns the rules for adding a volume to a custom app (ADR
+// 0039): its short name, which makes the Docker volume's, and the path it
+// mounts at.
+func AppVolume() map[string]any {
+	rules := AppVolumeTarget()
+	rules["name"] = "required|string|volume_name"
+
+	return rules
+}
+
+// AppVolumeTarget returns the rules for moving a volume to another path.
+// Its name never changes, since it's the Docker volume's.
+func AppVolumeTarget() map[string]any {
+	return map[string]any{
+		"target": "required|string|mount_path",
+	}
+}
+
+// AppVolumeFilters normalises the volume form before validation.
+func AppVolumeFilters() validation.Option {
+	return frameworkvalidation.Filters(map[string]any{
+		"name":   "trim",
+		"target": "trim",
+	})
+}
+
+// AppVolumeMessages words the form's errors, which the rules' own messages
+// would show beside a field called "target".
+func AppVolumeMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"name.required":     "Give the volume a name.",
+		"name.volume_name":  "Use lowercase letters, digits and underscores, starting with a letter, at most 32 characters.",
+		"target.required":   "Enter the path in the container.",
+		"target.mount_path": "Use an absolute path such as /app/storage, with no .., no trailing slash and no spaces. Not /, /proc, /sys or /dev.",
 	})
 }
 

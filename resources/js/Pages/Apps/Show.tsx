@@ -1,12 +1,13 @@
 import { Head, Link, router, usePoll } from '@inertiajs/react';
 import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react';
-import { Fragment, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useState } from 'react';
 
 import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
 import { AppMetrics } from '@/Components/AppMetrics';
 import { AppNavAside, AppNavTabs, type AppSection, appSections, sectionsFor } from '@/Components/AppNav';
+import { AppVolumes } from '@/Components/AppVolumes';
 import { ConfigPanel } from '@/Components/ConfigPanel';
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
 import { ConnectSection, useConnectSecrets } from '@/Components/ConnectSection';
@@ -16,13 +17,17 @@ import { DeploymentsTable } from '@/Components/DeploymentsTable';
 import { DockerConfig } from '@/Components/DockerConfig';
 import { EnvEditor } from '@/Components/EnvEditor';
 import { ExternalAccessSection } from '@/Components/ExternalAccessSection';
+import { AppTerminal } from '@/Components/LazyAppTerminal';
 import { LinkedDatabases } from '@/Components/LinkedDatabases';
+import { LinkedServices } from '@/Components/LinkedServices';
 import { Page } from '@/Components/Page';
 import { Panel, Stats } from '@/Components/Panel';
 import { PoolingSection } from '@/Components/PoolingSection';
 import { OOMAlert, ResourceLimits } from '@/Components/ResourceLimits';
 import { ScheduledTaskAlert, ScheduledTasks } from '@/Components/ScheduledTasks';
+import { SectionLink } from '@/Components/SectionLink';
 import { DeploymentStatusBadge, LiveStatusBadge } from '@/Components/StatusBadge';
+import { StopStartButton } from '@/Components/StopStartButton';
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button, buttonVariants } from '@/Components/ui/button';
 import { formatDateTime, timeAgo } from '@/lib/time';
@@ -38,6 +43,7 @@ import {
     type DeploymentSummary,
     type DomainStatus,
     type LinkedDatabase,
+    type LinkedService,
     type LiveStatus,
     type LogDeploy,
     type PoolerInfo,
@@ -45,6 +51,7 @@ import {
     type ResourcesInfo,
     runningStatuses,
     type ScheduledTask,
+    type ServiceChoices,
     type SlowQueryResult,
     type TaskFailure,
     type TemplateOption,
@@ -88,6 +95,10 @@ interface Props {
     // it's linked to, and what can be added. Empty and null for a template app.
     linkedDatabases: LinkedDatabase[];
     databaseChoices: DatabaseChoices | null;
+    // The Services section's, for a custom app (ADR 0037): the services
+    // it's linked to, and what can be added. Empty and null for a template app.
+    linkedServices: LinkedService[];
+    serviceChoices: ServiceChoices | null;
     // The Scheduled tasks section's, for a custom app (ADR 0032). Empty for
     // a template app.
     scheduledTasks: ScheduledTask[];
@@ -135,6 +146,8 @@ export default function AppsShow({
     logDeploys,
     linkedDatabases,
     databaseChoices,
+    linkedServices,
+    serviceChoices,
     scheduledTasks,
     taskFailures,
     backups,
@@ -143,6 +156,9 @@ export default function AppsShow({
     // The nav needs to know whether the template is one Echowa backs up.
     const navApp = { ...app, backups: template?.backups ?? false };
     const [section, setSection] = useState<AppSection>(() => sectionFromUrl(navApp));
+    // Once opened, the terminal stays mounted, hidden, so its shell lasts
+    // while another section shows.
+    const [terminalOpened, setTerminalOpened] = useState(section === 'terminal');
 
     // Deploy says what it would wait for until the backup or restore ends.
     // The Backups section polls for itself.
@@ -157,23 +173,29 @@ export default function AppsShow({
     // The Connection section's Connect and pooling share one fetch.
     const connectSecrets = useConnectSecrets(app.id, app.pooling);
 
-    // While a deployment runs, refresh its status and the service's.
+    // While a deployment runs, or the app's tasks are still ending, refresh
+    // its status and the service's.
     const deploying = deployments.some((d) => runningStatuses.includes(d.status));
+    const stopping = status.state === 'stopping';
+    const stopped = stopping || status.state === 'stopped';
     const { start, stop } = usePoll(
         2000,
         { only: ['app', 'status', 'lastDeployment', 'deployments'] },
         { autoStart: false },
     );
     useEffect(() => {
-        if (deploying) {
+        if (deploying || stopping) {
             start();
         } else {
             stop();
         }
-    }, [deploying, start, stop]);
+    }, [deploying, stopping, start, stop]);
 
     const show = (value: AppSection) => {
         setSection(value);
+        if (value === 'terminal') {
+            setTerminalOpened(true);
+        }
         const url = new URL(window.location.href);
         url.searchParams.set('tab', value);
         // Keep Inertia's history state; only the address changes.
@@ -217,11 +239,29 @@ export default function AppsShow({
                                 <span className="hidden sm:inline">Open</span>
                             </a>
                         )}
-                        <DeployDialog app={app} busy={busy} />
+                        <StopStartButton app={app} status={status} disabled={deploying || busy !== ''} />
+                        <DeployDialog app={app} busy={busy} stopped={stopped} />
                     </>
                 }
             >
                 <div className="space-y-6">
+                    {terminalOpened && (
+                        <div hidden={section !== 'terminal'}>
+                            <Panel
+                                title="Terminal"
+                                description={
+                                    <>
+                                        A shell in the newest task of <code className="font-mono">{serviceName}</code>,
+                                        as the image&apos;s user, with the app&apos;s environment. It stays open while
+                                        you switch sections, and closes when you leave the app.
+                                    </>
+                                }
+                            >
+                                <AppTerminal appId={app.id} active={section === 'terminal'} />
+                            </Panel>
+                        </div>
+                    )}
+
                     {section === 'overview' && (
                         <>
                             <OOMAlert status={status} />
@@ -247,7 +287,11 @@ export default function AppsShow({
                                     {
                                         label: 'Replicas',
                                         value: status.desired ? `${status.running} / ${status.desired}` : app.replicas,
-                                        hint: status.desired ? 'running / desired' : 'desired',
+                                        hint: status.desired
+                                            ? 'running / desired'
+                                            : stopped
+                                              ? 'desired when started'
+                                              : 'desired',
                                     },
                                     {
                                         label: 'Running image',
@@ -342,16 +386,25 @@ export default function AppsShow({
                                     {databaseChoices && (
                                         <Detail label="Databases">
                                             {linkedDatabases.length > 0 ? (
-                                                linkedDatabases.map((db, i) => (
-                                                    <Fragment key={db.id}>
-                                                        {i > 0 && ', '}
-                                                        <Link href={`/apps/${db.id}`} className="hover:underline">
-                                                            {db.name}
-                                                        </Link>
-                                                    </Fragment>
-                                                ))
+                                                <AppLinks apps={linkedDatabases} />
                                             ) : (
                                                 <SectionLink app={app} section="databases" onSelect={show}>
+                                                    None linked
+                                                </SectionLink>
+                                            )}
+                                        </Detail>
+                                    )}
+                                    {serviceChoices && serviceChoices.part_of.length > 0 && (
+                                        <Detail label="Service of">
+                                            <AppLinks apps={serviceChoices.part_of} />
+                                        </Detail>
+                                    )}
+                                    {serviceChoices && serviceChoices.part_of.length === 0 && (
+                                        <Detail label="Services">
+                                            {linkedServices.length > 0 ? (
+                                                <AppLinks apps={linkedServices} />
+                                            ) : (
+                                                <SectionLink app={app} section="services" onSelect={show}>
                                                     None linked
                                                 </SectionLink>
                                             )}
@@ -392,6 +445,15 @@ export default function AppsShow({
                         <LinkedDatabases app={app} databases={linkedDatabases} choices={databaseChoices} />
                     )}
 
+                    {section === 'services' && serviceChoices && (
+                        <LinkedServices
+                            app={app}
+                            services={linkedServices}
+                            choices={serviceChoices}
+                            registries={registries}
+                        />
+                    )}
+
                     {section === 'connection' && template && (
                         <ConfigPanel>
                             {connect && <ConnectSection connect={connect} secrets={connectSecrets} />}
@@ -403,8 +465,15 @@ export default function AppsShow({
                     {section === 'backups' && backups && <AppBackups app={app} section={backups} held={busy} />}
 
                     {section === 'docker' && (
-                        <DockerConfig app={app} registries={registries} template={template ?? undefined} />
+                        <DockerConfig
+                            app={app}
+                            registries={registries}
+                            template={template ?? undefined}
+                            onSelect={show}
+                        />
                     )}
+
+                    {section === 'volumes' && <AppVolumes app={app} volumes={volumes} />}
 
                     {section === 'resources' && (
                         <ResourceLimits app={app} status={status} resources={resources} metrics={metrics} />
@@ -575,29 +644,14 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
     );
 }
 
-// SectionLink switches to another section in place, as the section nav does;
-// a modified click opens it in a new tab.
-function SectionLink({
-    app,
-    section,
-    onSelect,
-    children,
-}: {
-    app: App;
-    section: AppSection;
-    onSelect: (section: AppSection) => void;
-    children: ReactNode;
-}) {
-    const view = (event: MouseEvent) => {
-        if (!event.metaKey && !event.ctrlKey && !event.shiftKey) {
-            event.preventDefault();
-            onSelect(section);
-        }
-    };
-
-    return (
-        <a href={`/apps/${app.id}?tab=${section}`} onClick={view} className="hover:underline">
-            {children}
-        </a>
-    );
+// AppLinks names linked apps, each opening its page.
+function AppLinks({ apps }: { apps: { id: number; name: string }[] }) {
+    return apps.map((linked, i) => (
+        <Fragment key={linked.id}>
+            {i > 0 && ', '}
+            <Link href={`/apps/${linked.id}`} className="hover:underline">
+                {linked.name}
+            </Link>
+        </Fragment>
+    ));
 }

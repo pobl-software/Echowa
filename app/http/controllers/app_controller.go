@@ -41,7 +41,7 @@ type RegistryOption struct {
 func registryOptions(ctx http.Context) ([]RegistryOption, error) {
 	// Non-nil, so an empty list reaches React as [] rather than null.
 	options := []RegistryOption{}
-	err := facades.Orm().WithContext(ctx).Query().Model(&models.Registry{}).
+	err := facades.Orm().WithContext(ctx.Context()).Query().Model(&models.Registry{}).
 		Select("id", "name", "host").Order("name").Get(&options)
 
 	return options, err
@@ -141,7 +141,7 @@ func (r *AppController) Create(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	locations, err := services.StorageChoices(ctx)
+	locations, err := services.StorageChoices(ctx.Context())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -163,7 +163,7 @@ func (r *AppController) Store(ctx http.Context) http.Response {
 		tmpl = &found
 	}
 
-	validator, err := ctx.Request().Validate(rules.App(tmpl != nil && len(tmpl.Volumes) > 0), rules.AppFilters(), rules.AppMessages())
+	validator, err := rules.Validate(ctx, rules.App(tmpl != nil && len(tmpl.Volumes) > 0), rules.AppFilters(), rules.AppMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -182,7 +182,7 @@ func (r *AppController) Store(ctx http.Context) http.Response {
 	if resp := r.checkRegistry(ctx, in); resp != nil {
 		return resp
 	}
-	leftover, err := services.LeftoverVolume(ctx, tmpl, in.Name)
+	leftover, err := services.LeftoverVolume(ctx.Context(), templates.VolumeNames(tmpl, in.Name))
 	if err != nil {
 		return failed(ctx, map[string]string{"name": "Couldn't check Docker for this app's volume: " + err.Error()})
 	}
@@ -191,7 +191,7 @@ func (r *AppController) Store(ctx http.Context) http.Response {
 			"The volume %s is left from an earlier app called %s and may hold its data. Pick another name, or remove it on the server with docker volume rm %s.",
 			leftover, in.Name, leftover)})
 	}
-	app, err := services.CreateApp(ctx, in, tmpl)
+	app, err := services.CreateApp(ctx.Context(), in, tmpl)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -200,7 +200,7 @@ func (r *AppController) Store(ctx http.Context) http.Response {
 		return inertia.Redirect(ctx, fmt.Sprintf("/apps/%d?tab=environment", app.ID))
 	}
 
-	deployment, err := deploy.Request(ctx, app, models.TriggerManual, app.DefaultTag)
+	deployment, err := deploy.Request(ctx.Context(), app, models.TriggerManual, app.DefaultTag)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -248,7 +248,7 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 	if resp := findOr404(ctx, "app", &app, "Registry", "Volumes"); resp != nil {
 		return resp
 	}
-	env, err := services.EnvVars(ctx, app.ID)
+	env, err := services.EnvVars(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -269,7 +269,7 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	deployments, err := services.RecentDeployments(ctx, app.ID, 30)
+	deployments, err := services.RecentDeployments(ctx.Context(), app.ID, 30)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -282,7 +282,7 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 	return inertia.Render(ctx, "Apps/Show", gonertia.Props{
 		"app":            app,
 		"serviceName":    app.ServiceName(),
-		"status":         services.AppLiveStatus(ctx, &app),
+		"status":         services.AppLiveStatus(ctx.Context(), &app),
 		"lastDeployment": lastDeployment,
 		"deployments":    deployments,
 		// What holds the app's lock, so Deploy can say what it would wait for.
@@ -354,6 +354,29 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 			}
 			return services.LinkedDatabases(c, app.ID)
 		},
+		// The Services section's, for a custom app (ADR 0037).
+		"linkedServices": func(c context.Context) (any, error) {
+			if app.Template != nil {
+				return []services.LinkedService{}, nil
+			}
+			return services.LinkedServices(c, app.ID)
+		},
+		"serviceChoices": func(c context.Context) (any, error) {
+			if app.Template != nil {
+				return nil, nil
+			}
+			partOf, err := services.ServiceOf(c, app.ID)
+			if err != nil {
+				return nil, err
+			}
+			existing := []services.ServiceChoice{}
+			if len(partOf) == 0 {
+				if existing, err = services.UnlinkedServices(c, app.ID); err != nil {
+					return nil, err
+				}
+			}
+			return ServiceChoices{Existing: existing, PartOf: partOf}, nil
+		},
 		// The Scheduled tasks section's, for a custom app (ADR 0032).
 		"scheduledTasks": func(c context.Context) (any, error) {
 			if app.Template != nil {
@@ -388,7 +411,7 @@ func (r *AppController) Update(ctx http.Context) http.Response {
 		return resp
 	}
 
-	hasVolumes, err := services.HasVolumes(ctx, app.ID)
+	hasVolumes, err := services.HasVolumes(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -399,7 +422,7 @@ func (r *AppController) Update(ctx http.Context) http.Response {
 	if resp := r.checkRegistry(ctx, in); resp != nil {
 		return resp
 	}
-	if err := services.UpdateDocker(ctx, &app, in); err != nil {
+	if err := services.UpdateDocker(ctx.Context(), &app, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Saved. Changes apply on the next deploy.")
@@ -414,7 +437,7 @@ func (r *AppController) UpdateResources(ctx http.Context) http.Response {
 	if resp := findOr404(ctx, "app", &app); resp != nil {
 		return resp
 	}
-	host, err := services.DockerHost(ctx)
+	host, err := services.DockerHost(ctx.Context())
 	if err != nil {
 		inertia.Flash(ctx, "error", "Docker didn't say how big this server is, so the limits can't be checked: "+err.Error())
 		return inertia.Back(ctx)
@@ -427,7 +450,7 @@ func (r *AppController) UpdateResources(ctx http.Context) http.Response {
 	if !known {
 		swap = whole.MemoryMiB
 	}
-	validator, err := ctx.Request().Validate(
+	validator, err := rules.Validate(ctx,
 		rules.AppResources(whole.CPUMillicores, whole.MemoryMiB, swap),
 		rules.AppResourcesMessages(whole.CPUMillicores, whole.MemoryMiB, swap),
 	)
@@ -442,7 +465,7 @@ func (r *AppController) UpdateResources(ctx http.Context) http.Response {
 	if err := validator.Bind(&in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	if err := services.UpdateResources(ctx, &app, in); err != nil {
+	if err := services.UpdateResources(ctx.Context(), &app, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if app.CurrentDeploymentID != nil {
@@ -468,7 +491,7 @@ func (r *AppController) UpdateDomain(ctx http.Context) http.Response {
 	if resp := checkDomain(ctx, appTemplate(&app), in); resp != nil {
 		return resp
 	}
-	if err := services.UpdateDomain(ctx, &app, in); err != nil {
+	if err := services.UpdateDomain(ctx.Context(), &app, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Saved. Changes apply on the next deploy.")
@@ -484,7 +507,7 @@ func (r *AppController) DestroyDomain(ctx http.Context) http.Response {
 		return resp
 	}
 
-	if err := services.UpdateDomain(ctx, &app, services.AppInput{TLS: app.TLS}); err != nil {
+	if err := services.UpdateDomain(ctx.Context(), &app, services.AppInput{TLS: app.TLS}); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Removed. Traefik stops routing it on the next deploy.")
@@ -501,7 +524,7 @@ func (r *AppController) CheckDomain(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(rules.AppDomainCheck(app.ID), rules.AppFilters())
+	validator, err := rules.Validate(ctx, rules.AppDomainCheck(app.ID), rules.AppFilters())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -513,7 +536,7 @@ func (r *AppController) CheckDomain(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 
-	return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, services.CheckDNS(ctx, *in.Domain))
+	return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, services.CheckDNS(ctx.Context(), *in.Domain))
 }
 
 // validateApp checks one of the app's edit tabs against its rules. On
@@ -528,7 +551,7 @@ type ResourcesProps struct {
 }
 
 func resourcesProps(ctx http.Context) *ResourcesProps {
-	host, err := services.DockerHost(ctx)
+	host, err := services.DockerHost(ctx.Context())
 	if err != nil {
 		return nil
 	}
@@ -543,7 +566,7 @@ func resourcesProps(ctx http.Context) *ResourcesProps {
 
 func validateApp(ctx http.Context, appRules map[string]any) (services.AppInput, http.Response) {
 	var in services.AppInput
-	validator, err := ctx.Request().Validate(appRules, rules.AppFilters(), rules.AppMessages())
+	validator, err := rules.Validate(ctx, appRules, rules.AppFilters(), rules.AppMessages())
 	if err != nil {
 		return in, inertia.ServerError(ctx, err)
 	}
@@ -570,7 +593,7 @@ func (r *AppController) Deploy(ctx http.Context) http.Response {
 	if ref == "" {
 		ref = app.DefaultTag
 	}
-	validator, err := facades.Validation().Make(ctx, map[string]any{"ref": ref}, rules.Deploy())
+	validator, err := facades.Validation().Make(ctx.Context(), map[string]any{"ref": ref}, rules.Deploy())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -579,7 +602,7 @@ func (r *AppController) Deploy(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 
-	deployment, err := deploy.Request(ctx, &app, models.TriggerManual, ref)
+	deployment, err := deploy.Request(ctx.Context(), &app, models.TriggerManual, ref)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -608,17 +631,17 @@ func (r *AppController) Destroy(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 
-	if err := services.RemovePooler(ctx, &app); err != nil {
+	if err := services.RemovePooler(ctx.Context(), &app); err != nil {
 		facades.Log().Error(fmt.Errorf("delete app %s: %w", app.Name, err))
 		inertia.Flash(ctx, "error", "Couldn't remove the connection pooler "+app.PoolerServiceName()+", so the app was kept: "+err.Error())
 		return inertia.Back(ctx)
 	}
-	if err := services.Docker().RemoveService(ctx, app.ServiceName()); err != nil {
+	if err := services.Docker().RemoveService(ctx.Context(), app.ServiceName()); err != nil {
 		facades.Log().Error(fmt.Errorf("delete app %s: %w", app.Name, err))
 		inertia.Flash(ctx, "error", "Couldn't remove the Swarm service "+app.ServiceName()+", so the app was kept: "+err.Error())
 		return inertia.Back(ctx)
 	}
-	if err := services.DeleteApp(ctx, &app); err != nil {
+	if err := services.DeleteApp(ctx.Context(), &app); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if len(app.Volumes) == 0 {
@@ -644,7 +667,7 @@ func (r *AppController) EnvUpdate(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(rules.EnvEdits())
+	validator, err := rules.Validate(ctx, rules.EnvEdits())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -659,7 +682,7 @@ func (r *AppController) EnvUpdate(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 
-	current, err := services.EnvVars(ctx, app.ID)
+	current, err := services.EnvVars(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -672,7 +695,7 @@ func (r *AppController) EnvUpdate(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 
-	if err := services.SetEnvVars(ctx, app.ID, env); err != nil {
+	if err := services.SetEnvVars(ctx.Context(), app.ID, env); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Environment saved. It applies on the next deploy.")
@@ -688,7 +711,7 @@ func (r *AppController) EnvImport(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(map[string]any{"text": "required|string|max:200000"})
+	validator, err := rules.Validate(ctx, map[string]any{"text": "required|string|max:200000"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -705,14 +728,14 @@ func (r *AppController) EnvImport(ctx http.Context) http.Response {
 		return failed(ctx, map[string]string{"text": "No KEY=value lines found."})
 	}
 
-	env, err := services.EnvVars(ctx, app.ID)
+	env, err := services.EnvVars(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	for _, pair := range pairs {
 		env[pair.Key] = pair.Value
 	}
-	if err := services.SetEnvVars(ctx, app.ID, env); err != nil {
+	if err := services.SetEnvVars(ctx.Context(), app.ID, env); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", fmt.Sprintf("Imported %d variable(s). They apply on the next deploy.", len(pairs)))
@@ -729,7 +752,7 @@ func (r *AppController) EnvReveal(ctx http.Context) http.Response {
 	}
 
 	key := ctx.Request().Input("key")
-	env, err := services.EnvVars(ctx, app.ID)
+	env, err := services.EnvVars(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -754,7 +777,7 @@ func (r *AppController) ConnectReveal(ctx http.Context) http.Response {
 	if tmpl == nil || tmpl.Connect == nil {
 		return ctx.Response().Json(http.StatusNotFound, http.Json{"message": "This app has no connection URL."})
 	}
-	env, err := services.EnvVars(ctx, app.ID)
+	env, err := services.EnvVars(ctx.Context(), app.ID)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -778,7 +801,7 @@ func (r *AppController) checkRegistry(ctx http.Context, in services.AppInput) ht
 		return nil
 	}
 	var registry models.Registry
-	if err := facades.Orm().WithContext(ctx).Query().Where("id", *in.RegistryID).FirstOrFail(&registry); err != nil {
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", *in.RegistryID).FirstOrFail(&registry); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if !docker.SameRegistry(registry.Host, in.Repository) {

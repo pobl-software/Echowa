@@ -6,6 +6,7 @@ import (
 	gonertia "github.com/romsar/gonertia/v3"
 
 	"goravel/app/inertia"
+	"goravel/app/rules"
 	"goravel/app/services"
 )
 
@@ -29,7 +30,7 @@ func (r *AuthenticatedSessionController) Create(ctx http.Context) http.Response 
 
 // Store signs the user in. Rate limited by the "login" limiter.
 func (r *AuthenticatedSessionController) Store(ctx http.Context) http.Response {
-	validator, err := ctx.Request().Validate(map[string]any{
+	validator, err := rules.Validate(ctx, map[string]any{
 		"email":    "required|string|email",
 		"password": "required|string",
 	}, validation.Filters(map[string]any{"email": "trim|lower"}))

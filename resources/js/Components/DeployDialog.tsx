@@ -19,7 +19,7 @@ import type { App, AppWork } from '@/types/models';
 // Deploys the default tag, or a tag or digest typed in. While a backup,
 // restore or export holds the app (ADR 0034), it says the deploy will wait
 // for it.
-export function DeployDialog({ app, busy = '' }: { app: App; busy?: AppWork }) {
+export function DeployDialog({ app, busy = '', stopped = false }: { app: App; busy?: AppWork; stopped?: boolean }) {
     const waitsFor = !busy || busy === 'deploy' ? null : busy === 'export' ? 'An export' : `A ${busy}`;
     const [open, setOpen] = useState(false);
     const form = useForm({ ref: app.default_tag });
@@ -65,6 +65,11 @@ export function DeployDialog({ app, busy = '' }: { app: App; busy?: AppWork }) {
                             <span className="font-mono">sha256:…</span>
                         </FieldDescription>
                     </div>
+                    {stopped && (
+                        <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                            {app.name} is stopped. Deploying starts it again.
+                        </p>
+                    )}
                     {waitsFor && (
                         <p className="flex gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
                             <HourglassIcon className="mt-0.5 size-4 shrink-0 text-warning" />

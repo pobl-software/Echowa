@@ -20,7 +20,9 @@ import (
 	"io"
 	"net"
 	nethttp "net/http"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -348,6 +350,61 @@ func TestEngineVolumeKeepsDataAcrossDeploys(t *testing.T) {
 	assert.ErrorIs(t, engine.RemoveVolume(ctx, unmanaged), ErrNotManaged)
 }
 
+func TestEngineRemovesAVolumeAnUpdateDropped(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	cfg := DefaultConfig()
+	cfg.UpdateMonitor = 2 * time.Second
+	cfg.DeployTimeout = time.Minute
+	cfg.PollInterval = 500 * time.Millisecond
+	engine, err := New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = engine.Close() })
+	require.NoError(t, engine.Check(ctx), "needs a local Swarm manager: run `docker swarm init` (deploy/README.md)")
+	ensureNetwork(t, engine, cfg.Network)
+
+	name := fmt.Sprintf("echowa-it-drop-%d", time.Now().UnixNano()%1_000_000)
+	volume := name + "-data"
+	t.Cleanup(func() {
+		_ = engine.RemoveService(context.Background(), name)
+		_, _ = engine.api.VolumeRemove(context.Background(), volume, client.VolumeRemoveOptions{Force: true})
+	})
+
+	image, err := engine.PullImage(ctx, busybox, nil)
+	require.NoError(t, err)
+	spec := ServiceSpec{
+		Name: name, App: "it-drop", Image: image, Replicas: 1,
+		Args:    []string{"sh", "-c", "exec sleep 3600"},
+		Volumes: []Volume{{Name: volume, Target: "/data"}},
+	}
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err := engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	require.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+	assert.ErrorIs(t, engine.RemoveVolume(ctx, volume), ErrVolumeInUse, "a running task mounts it")
+
+	// Swarm keeps the replaced task's stopped container, which Docker
+	// counts as a user of the volume.
+	spec.Volumes = nil
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err = engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	require.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+	require.Eventually(t, func() bool {
+		err := engine.RemoveVolume(ctx, volume)
+		if err != nil && !errors.Is(err, ErrVolumeInUse) {
+			t.Logf("remove volume: %v", err)
+		}
+		return err == nil
+	}, 30*time.Second, time.Second, "the volume is removable once the old task has stopped")
+	exists, err := engine.VolumeExists(ctx, volume)
+	require.NoError(t, err)
+	assert.False(t, exists)
+}
+
 func TestEngineHostPortSurvivesRedeploys(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -397,6 +454,70 @@ func TestEngineHostPortSurvivesRedeploys(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
 	assert.Eventually(t, func() bool { return !answers() }, 20*time.Second, 250*time.Millisecond, "the port closes without a host port")
+}
+
+func TestEngineStopsAndStartsAService(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	cfg := DefaultConfig()
+	cfg.UpdateMonitor = 2 * time.Second
+	cfg.DeployTimeout = time.Minute
+	cfg.PollInterval = 500 * time.Millisecond
+	engine, err := New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = engine.Close() })
+	require.NoError(t, engine.Check(ctx), "needs a local Swarm manager: run `docker swarm init` (deploy/README.md)")
+	ensureNetwork(t, engine, cfg.Network)
+
+	name := fmt.Sprintf("echowa-it-stop-%d", time.Now().UnixNano()%1_000_000)
+	t.Cleanup(func() { _ = engine.RemoveService(context.Background(), name) })
+	image, err := engine.PullImage(ctx, whoami+":v1.12.0", nil)
+	require.NoError(t, err)
+	spec := ServiceSpec{Name: name, App: "it-stop", Image: image, Replicas: 1, Route: &Route{Domain: name + ".localhost", Port: 80}}
+	require.NoError(t, engine.DeployService(ctx, spec))
+	_, err = engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	waitForRunning(t, engine, name, 1)
+	before, err := engine.inspect(ctx, name)
+	require.NoError(t, err)
+
+	require.NoError(t, engine.StopService(ctx, name))
+	stopping, err := engine.ServiceStatus(ctx, name)
+	require.NoError(t, err)
+	assert.Zero(t, stopping.Desired, "Swarm wants no tasks at once")
+	waitForRunning(t, engine, name, 0)
+
+	after, err := engine.inspect(ctx, name)
+	require.NoError(t, err)
+	assert.Equal(t, before.Spec.TaskTemplate.ForceUpdate, after.Spec.TaskTemplate.ForceUpdate, "the tasks keep their generation")
+	matches, err := engine.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, matches, "a stopped service still matches the spec it ran")
+
+	require.NoError(t, engine.StopService(ctx, name), "stopping a stopped service is fine")
+
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err := engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	assert.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+	started, err := engine.inspect(ctx, name)
+	require.NoError(t, err)
+	assert.Greater(t, started.Spec.TaskTemplate.ForceUpdate, before.Spec.TaskTemplate.ForceUpdate)
+
+	unmanaged := name + "-unmanaged"
+	_, err = engine.api.ServiceCreate(ctx, client.ServiceCreateOptions{Spec: swarm.ServiceSpec{
+		Annotations:  swarm.Annotations{Name: unmanaged},
+		TaskTemplate: swarm.TaskSpec{ContainerSpec: &swarm.ContainerSpec{Image: image}},
+		Mode:         swarm.ServiceMode{Replicated: &swarm.ReplicatedService{Replicas: new(uint64)}},
+	}})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = engine.api.ServiceRemove(context.Background(), unmanaged, client.ServiceRemoveOptions{})
+	})
+	assert.ErrorIs(t, engine.StopService(ctx, unmanaged), ErrNotManaged)
+	assert.ErrorIs(t, engine.StopService(ctx, name+"-missing"), ErrServiceNotFound)
 }
 
 func TestEngineCheckReportsUnreachableDaemon(t *testing.T) {
@@ -599,6 +720,164 @@ func TestEngineExecToWithoutAShell(t *testing.T) {
 	require.NoError(t, err, "a missing command is the run's failure, not Echowa's")
 	assert.Equal(t, 127, code)
 	assert.Contains(t, out.String(), `exec: "sh": executable file not found`, "Docker's reason reaches the output")
+
+	term, err := engine.ExecTTY(ctx, name, []string{"bash"}, TerminalSize{Rows: 24, Cols: 80})
+	require.NoError(t, err, "a missing shell shows in the terminal")
+	screen := watch(term)
+	screen.waitForEnd(t)
+	assert.Contains(t, screen.String(), `exec: "sh": executable file not found`, "Docker's reason reaches the terminal")
+	code, err = term.ExitCode(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 127, code)
+	assert.NoError(t, term.Close())
+}
+
+func TestEngineExecTTY(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cfg := DefaultConfig()
+	cfg.UpdateMonitor = 2 * time.Second
+	cfg.DeployTimeout = time.Minute
+	cfg.PollInterval = 500 * time.Millisecond
+	engine, err := New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = engine.Close() })
+	require.NoError(t, engine.Check(ctx), "needs a local Swarm manager: run `docker swarm init` (deploy/README.md)")
+	ensureNetwork(t, engine, cfg.Network)
+
+	app := fmt.Sprintf("it-tty-%d", time.Now().UnixNano()%1_000_000)
+	name := "echowa-" + app
+	t.Cleanup(func() { _ = engine.RemoveService(context.Background(), name) })
+	_, err = engine.ExecTTY(ctx, name, []string{"sh"}, TerminalSize{Rows: 30, Cols: 100})
+	assert.ErrorIs(t, err, ErrNotRunning)
+
+	image, err := engine.PullImage(ctx, busybox, nil)
+	require.NoError(t, err)
+	spec := ServiceSpec{
+		Name:     name,
+		App:      app,
+		Image:    image,
+		Env:      map[string]string{"SECRET": "s3cret"},
+		Replicas: 1,
+		Args:     []string{"sleep", "3600"},
+	}
+	require.NoError(t, engine.DeployService(ctx, spec))
+	result, err := engine.WaitForUpdate(ctx, name)
+	require.NoError(t, err)
+	require.Equal(t, OutcomeCompleted, result.Outcome, "message: %s", result.Message)
+	waitForRunning(t, engine, name, 1)
+
+	term, err := engine.ExecTTY(ctx, name, []string{"sh"}, TerminalSize{Rows: 30, Cols: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = term.Close() })
+	assert.Len(t, term.Container(), 64)
+	screen := watch(term)
+
+	_, err = io.WriteString(term, `echo "$TERM $SECRET"; stty size`+"\n")
+	require.NoError(t, err)
+	screen.waitFor(t, "xterm-256color s3cret")
+	screen.waitFor(t, "30 100")
+	assert.NotContains(t, screen.String(), "echowa-pid", "the wrapper's PID never reaches the terminal")
+
+	require.NoError(t, term.Resize(ctx, TerminalSize{Rows: 40, Cols: 120}))
+	_, err = io.WriteString(term, "stty size\n")
+	require.NoError(t, err)
+	screen.waitFor(t, "40 120")
+
+	_, err = io.WriteString(term, "exit 3\n")
+	require.NoError(t, err)
+	screen.waitForEnd(t)
+	assert.ErrorIs(t, screen.err, io.EOF, "the command's end is the output's end")
+	code, err := term.ExitCode(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 3, code)
+	assert.NoError(t, term.Close(), "closing after the command has ended")
+
+	// Docker leaves an exec running when its client goes, so Close has to
+	// end the shell and what runs in its foreground.
+	term, err = engine.ExecTTY(ctx, name, []string{"sh"}, TerminalSize{Rows: 30, Cols: 100})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = term.Close() })
+	screen = watch(term)
+	_, err = io.WriteString(term, "sleep 1001\n")
+	require.NoError(t, err)
+	waitForProcesses(t, engine, name, func(ps []string) bool { return slices.Contains(ps, "sleep 1001") })
+	require.NoError(t, term.Close())
+	screen.waitForEnd(t)
+	waitForProcesses(t, engine, name, func(ps []string) bool {
+		return !slices.Contains(ps, "sleep 1001") && !slices.Contains(ps, "sh")
+	})
+}
+
+// screen collects a terminal's output as it arrives.
+type screen struct {
+	mu   sync.Mutex
+	out  strings.Builder
+	done chan struct{}
+	err  error // set before done closes
+}
+
+func watch(term Terminal) *screen {
+	s := &screen{done: make(chan struct{})}
+	go func() {
+		defer close(s.done)
+		buf := make([]byte, 4096)
+		for {
+			n, err := term.Read(buf)
+			s.mu.Lock()
+			s.out.Write(buf[:n])
+			s.mu.Unlock()
+			if err != nil {
+				s.err = err
+				return
+			}
+		}
+	}()
+
+	return s
+}
+
+func (s *screen) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.out.String()
+}
+
+func (s *screen) waitFor(t *testing.T, want string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(s.String(), want); {
+		if time.Now().After(deadline) {
+			t.Fatalf("the terminal never showed %q; it showed %q", want, s.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (s *screen) waitForEnd(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the terminal's output never ended; it showed %q", s.String())
+	}
+}
+
+// waitForProcesses waits until ok accepts the command lines running in the
+// service's container.
+func waitForProcesses(t *testing.T, engine *Engine, name string, ok func([]string) bool) {
+	t.Helper()
+	var ps []string
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		out, err := engine.Exec(context.Background(), name, []string{"ps", "-o", "args"})
+		require.NoError(t, err)
+		ps = strings.Split(strings.TrimSpace(string(out)), "\n")
+		if ok(ps) {
+			return
+		}
+	}
+	t.Fatalf("the container's processes never changed as expected: %q", ps)
 }
 
 func TestEngineLimitsTasksAndReportsOOMKills(t *testing.T) {

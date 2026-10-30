@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,27 @@ func TestCheckAccess(t *testing.T) {
 	assert.NoError(t, check(Options{Access: AccessTunnel, TunnelToken: token}))
 	assert.ErrorContains(t, check(Options{Access: AccessTunnel}), "needs its token")
 	assert.ErrorContains(t, check(Options{Access: AccessTunnel, TunnelToken: "sudo cloudflared service install"}), "isn't a Cloudflare Tunnel token")
+}
+
+func TestProxiedByCloudflare(t *testing.T) {
+	answers := map[string][]net.IP{
+		"proxied.example.com":  {net.ParseIP("104.21.3.4"), net.ParseIP("2606:4700:3030::1")},
+		"direct.example.com":   {net.ParseIP("203.0.113.10")},
+		"proxied6.example.com": {net.ParseIP("2606:4700:3030::1")},
+	}
+	lookup := lookupDomain
+	t.Cleanup(func() { lookupDomain = lookup })
+	lookupDomain = func(domain string) ([]net.IP, error) {
+		if ips, ok := answers[domain]; ok {
+			return ips, nil
+		}
+		return nil, errors.New("no such host")
+	}
+
+	assert.True(t, proxiedByCloudflare("proxied.example.com"))
+	assert.True(t, proxiedByCloudflare("proxied6.example.com"))
+	assert.False(t, proxiedByCloudflare("direct.example.com"))
+	assert.False(t, proxiedByCloudflare("missing.example.com"), "a record that doesn't exist yet isn't proxied")
 }
 
 func TestEveryFileSetupWritesIsEmbedded(t *testing.T) {

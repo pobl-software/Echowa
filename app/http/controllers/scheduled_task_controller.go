@@ -43,7 +43,7 @@ func (r *ScheduledTaskController) Update(ctx http.Context) http.Response {
 }
 
 func (r *ScheduledTaskController) save(ctx http.Context, app *models.App, task *models.ScheduledTask, done string) http.Response {
-	validator, err := ctx.Request().Validate(rules.ScheduledTask(), rules.ScheduledTaskFilters(), rules.ScheduledTaskMessages())
+	validator, err := rules.Validate(ctx, rules.ScheduledTask(), rules.ScheduledTaskFilters(), rules.ScheduledTaskMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -55,7 +55,7 @@ func (r *ScheduledTaskController) save(ctx http.Context, app *models.App, task *
 	if err := validator.Bind(&in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
-	if err := services.SaveScheduledTask(ctx, task, in); err != nil {
+	if err := services.SaveScheduledTask(ctx.Context(), task, in); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", fmt.Sprintf("%s %s.", done, task.Name))
@@ -70,7 +70,7 @@ func (r *ScheduledTaskController) Enabled(ctx http.Context) http.Response {
 	if resp := findTask(ctx, &app, &task); resp != nil {
 		return resp
 	}
-	validator, err := ctx.Request().Validate(map[string]any{"enabled": "required|boolean"})
+	validator, err := rules.Validate(ctx, map[string]any{"enabled": "required|boolean"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -79,7 +79,7 @@ func (r *ScheduledTaskController) Enabled(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 	enabled := ctx.Request().InputBool("enabled")
-	if _, err := facades.Orm().WithContext(ctx).Query().Model(&task).Update("enabled", enabled); err != nil {
+	if _, err := facades.Orm().WithContext(ctx.Context()).Query().Model(&task).Update("enabled", enabled); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	if enabled {
@@ -99,7 +99,7 @@ func (r *ScheduledTaskController) Destroy(ctx http.Context) http.Response {
 	if resp := findTask(ctx, &app, &task); resp != nil {
 		return resp
 	}
-	if _, err := facades.Orm().WithContext(ctx).Query().Delete(&task); err != nil {
+	if _, err := facades.Orm().WithContext(ctx.Context()).Query().Delete(&task); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", "Deleted "+task.Name+".")
@@ -136,12 +136,12 @@ func (r *ScheduledTaskController) Dismiss(ctx http.Context) http.Response {
 		return resp
 	}
 	var run models.ScheduledTaskRun
-	err := facades.Orm().WithContext(ctx).Query().
+	err := facades.Orm().WithContext(ctx.Context()).Query().
 		Where("id", ctx.Request().InputInt("run")).Where("scheduled_task_id", task.ID).FirstOrFail(&run)
 	if err != nil {
 		return notFound(ctx)
 	}
-	if err := services.DismissTaskFailure(ctx, &task, &run); err != nil {
+	if err := services.DismissTaskFailure(ctx.Context(), &task, &run); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 
@@ -155,7 +155,7 @@ func (r *ScheduledTaskController) Runs(ctx http.Context) http.Response {
 	if resp := findTask(ctx, &app, &task); resp != nil {
 		return resp
 	}
-	runs, err := services.TaskRuns(ctx, task.ID, services.KeepTaskRuns)
+	runs, err := services.TaskRuns(ctx.Context(), task.ID, services.KeepTaskRuns)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -171,7 +171,7 @@ func (r *ScheduledTaskController) ShowRun(ctx http.Context) http.Response {
 		return resp
 	}
 	var run models.ScheduledTaskRun
-	err := facades.Orm().WithContext(ctx).Query().
+	err := facades.Orm().WithContext(ctx.Context()).Query().
 		Where("id", ctx.Request().RouteInt("run")).Where("scheduled_task_id", task.ID).FirstOrFail(&run)
 	if err != nil {
 		return notFound(ctx)
@@ -209,7 +209,7 @@ func findTask(ctx http.Context, app *models.App, task *models.ScheduledTask) htt
 	if resp := findCustomApp(ctx, app); resp != nil {
 		return resp
 	}
-	err := facades.Orm().WithContext(ctx).Query().
+	err := facades.Orm().WithContext(ctx.Context()).Query().
 		Where("id", ctx.Request().RouteInt("task")).Where("app_id", app.ID).FirstOrFail(task)
 	if err != nil {
 		return notFound(ctx)

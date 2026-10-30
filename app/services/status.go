@@ -18,6 +18,8 @@ const (
 	StateRunning     = "running"      // all desired replicas running
 	StateDegraded    = "degraded"     // some, but not all, running
 	StateDown        = "down"         // none running
+	StateStopping    = "stopping"     // stopped by the admin, tasks still ending
+	StateStopped     = "stopped"      // stopped by the admin, none running
 	StateNotDeployed = "not_deployed" // no Swarm service yet
 	StateUnknown     = "unknown"      // Docker didn't answer
 )
@@ -72,8 +74,13 @@ func serviceStatus(ctx context.Context, name string) LiveStatus {
 		Limits:      limitsFromDocker(status.Limits),
 		OOMKilledAt: status.OOMKilledAt,
 	}
+	// Echowa never sets 0 replicas except to stop an app.
 	switch {
-	case status.Desired > 0 && status.Running >= status.Desired:
+	case status.Desired == 0 && status.Running > 0:
+		live.State = StateStopping
+	case status.Desired == 0:
+		live.State = StateStopped
+	case status.Running >= status.Desired:
 		live.State = StateRunning
 	case status.Running > 0:
 		live.State = StateDegraded
@@ -117,9 +124,10 @@ type AppSummary struct {
 	Template       *string            `json:"template"`
 	Status         LiveStatus         `json:"status"`
 	LastDeployment *DeploymentSummary `json:"last_deployment"`
-	// Databases are the IDs of the apps this one is linked to (ADR 0028),
-	// which the dashboard shows under it rather than as their own cards.
-	Databases []uint `json:"databases"`
+	// Links are the IDs of the apps this one is linked to, its databases
+	// (ADR 0028) and services (ADR 0037), which the dashboard shows under
+	// it rather than as their own cards.
+	Links []uint `json:"links"`
 }
 
 // AppSummaries lists every app with its live status, latest deployment
@@ -149,7 +157,7 @@ func AppSummaries(ctx context.Context) ([]AppSummary, error) {
 			Template:       app.Template,
 			Status:         AppLiveStatus(ctx, &app),
 			LastDeployment: latest[app.ID],
-			Databases:      append([]uint{}, links[app.ID]...),
+			Links:          append([]uint{}, links[app.ID]...),
 		})
 	}
 

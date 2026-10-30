@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react';
 import {
     ArchiveIcon,
+    BoxesIcon,
     BracesIcon,
     CalendarClockIcon,
     ChartLineIcon,
@@ -8,11 +9,13 @@ import {
     DatabaseIcon,
     GaugeIcon,
     GlobeIcon,
+    HardDriveIcon,
     HistoryIcon,
     LayoutDashboardIcon,
     type LucideIcon,
     PlugIcon,
     ScrollTextIcon,
+    SquareTerminalIcon,
     TriangleAlertIcon,
 } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react';
@@ -25,11 +28,16 @@ export const appSections = [
     { group: 'Configuration', id: 'environment', label: 'Environment', icon: BracesIcon },
     // The databases a custom app is linked to (ADR 0028).
     { group: 'Configuration', id: 'databases', label: 'Databases', icon: DatabaseIcon, kind: 'custom' },
+    // The custom apps that support it, such as a queue worker (ADR 0037).
+    { group: 'Configuration', id: 'services', label: 'Services', icon: BoxesIcon, kind: 'custom' },
     // How other apps, and clients outside the server, reach a template database.
     { group: 'Configuration', id: 'connection', label: 'Connection', icon: PlugIcon, kind: 'template' },
     // Dumps of a template database to S3 storage (ADR 0034). Not Redis.
     { group: 'Configuration', id: 'backups', label: 'Backups', icon: ArchiveIcon, kind: 'backups' },
     { group: 'Configuration', id: 'docker', label: 'Docker config', icon: ContainerIcon },
+    // The paths whose files survive a deploy (ADR 0039). A template's are
+    // fixed, and listed in its Docker config.
+    { group: 'Configuration', id: 'volumes', label: 'Volumes', icon: HardDriveIcon, kind: 'custom' },
     { group: 'Configuration', id: 'resources', label: 'Resource limits', icon: GaugeIcon },
     // Template apps don't speak HTTP, so they have no domain.
     { group: 'Configuration', id: 'domains', label: 'Domains', icon: GlobeIcon, kind: 'custom' },
@@ -39,6 +47,8 @@ export const appSections = [
     { group: 'Observe', id: 'logs', label: 'Logs', icon: ScrollTextIcon },
     // A template app's includes what the database reports (ADR 0027).
     { group: 'Observe', id: 'metrics', label: 'Metrics', icon: ChartLineIcon },
+    // A shell in a custom app's container (ADR 0038).
+    { group: 'Manage', id: 'terminal', label: 'Terminal', icon: SquareTerminalIcon, kind: 'custom' },
     { group: 'Manage', id: 'danger', label: 'Danger zone', icon: TriangleAlertIcon },
 ] as const satisfies readonly {
     group: string;

@@ -114,3 +114,41 @@ func TestFakeMatchesTheSpecItRuns(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, same)
 }
+
+func TestFakeStopKeepsTheSpecAndDeployStartsAgain(t *testing.T) {
+	ctx := context.Background()
+	fake := &Fake{}
+	spec := ServiceSpec{Name: "echowa-app", App: "app", Image: "app@sha256:a", Replicas: 2}
+
+	assert.ErrorIs(t, fake.StopService(ctx, "echowa-app"), ErrServiceNotFound)
+	require.NoError(t, fake.DeployService(ctx, spec))
+	before, err := fake.ServiceTasks(ctx, "echowa-app")
+	require.NoError(t, err)
+
+	require.NoError(t, fake.StopService(ctx, "echowa-app"))
+	require.NoError(t, fake.StopService(ctx, "echowa-app"), "stopping a stopped service is fine")
+	assert.Equal(t, []string{"echowa-app"}, fake.Stopped())
+	status, err := fake.ServiceStatus(ctx, "echowa-app")
+	require.NoError(t, err)
+	assert.Zero(t, status.Desired)
+	assert.Zero(t, status.Running)
+	tasks, err := fake.ServiceTasks(ctx, "echowa-app")
+	require.NoError(t, err)
+	assert.Len(t, tasks, len(before))
+	for _, task := range tasks {
+		assert.False(t, task.Running)
+		assert.Equal(t, before[0].Generation, task.Generation, "the generation is the one it ran")
+	}
+	matches, err := fake.ServiceMatches(ctx, spec)
+	require.NoError(t, err)
+	assert.True(t, matches)
+
+	require.NoError(t, fake.DeployService(ctx, spec))
+	status, err = fake.ServiceStatus(ctx, "echowa-app")
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, status.Desired)
+	tasks, err = fake.ServiceTasks(ctx, "echowa-app")
+	require.NoError(t, err)
+	assert.Greater(t, tasks[len(tasks)-1].Generation, before[0].Generation)
+	assert.True(t, tasks[len(tasks)-1].Running)
+}

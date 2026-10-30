@@ -98,6 +98,20 @@ func TestChecks(t *testing.T) {
 			valid: []string{"", "server-1", "backups/server-1", "/server-1/", "a.b_c(d)"},
 			bad:   []string{"a//b", "../etc", "a/./b", "has space", "é", "a\\b", strings.Repeat("a", 201)},
 		},
+		{
+			name:  "IsVolumeName",
+			check: IsVolumeName,
+			valid: []string{"data", "storage", "a", "db_data", "uploads2", strings.Repeat("a", 32)},
+			bad:   []string{"", "Data", "db-data", "2data", "_data", "da ta", "data/", "é", strings.Repeat("a", 33)},
+		},
+		{
+			name:  "IsMountPath",
+			check: IsMountPath,
+			valid: []string{"/data", "/app/storage", "/usr/share/nginx/html", "/var/lib/mysql", "/a.b/c-d_e", "/procfs", "/devices", "/données", "/" + strings.Repeat("a", 254)},
+			bad: []string{"", "/", "data", "app/storage", "./data", "/app/", "/app//storage", "/app/../etc", "/app/./x", "//app",
+				"/proc", "/proc/1", "/sys", "/sys/fs", "/dev", "/dev/shm", "/my data", "/tab\there", "/new\nline", "/nul\x00", "/\u00a0x",
+				"/" + strings.Repeat("a", 255)},
+		},
 	}
 
 	for _, tt := range tests {

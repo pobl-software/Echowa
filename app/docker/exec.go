@@ -63,28 +63,43 @@ func (e *Engine) ExecStream(ctx context.Context, service string, cmd []string, s
 // exec runs cmd in the service's newest running task container, with stdin
 // as its input when it isn't nil, and returns its exit code.
 func (e *Engine) exec(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
-	svc, err := e.inspect(ctx, service)
-	if errors.Is(err, ErrServiceNotFound) {
-		return 0, fmt.Errorf("%s: %w", service, ErrNotRunning)
-	}
+	id, err := e.taskContainer(ctx, service)
 	if err != nil {
 		return 0, err
 	}
+
+	return e.execIn(ctx, id, cmd, stdin, stdout, stderr)
+}
+
+// taskContainer is the ID of the managed service's newest running task
+// container.
+func (e *Engine) taskContainer(ctx context.Context, service string) (string, error) {
+	svc, err := e.inspect(ctx, service)
+	if errors.Is(err, ErrServiceNotFound) {
+		return "", fmt.Errorf("%s: %w", service, ErrNotRunning)
+	}
+	if err != nil {
+		return "", err
+	}
 	if !managed(svc) {
-		return 0, fmt.Errorf("%s: %w", service, ErrNotManaged)
+		return "", fmt.Errorf("%s: %w", service, ErrNotManaged)
 	}
 	// Task containers carry Swarm's labels, not the service's.
 	list, err := e.api.ContainerList(ctx, client.ContainerListOptions{
 		Filters: make(client.Filters).Add("label", "com.docker.swarm.service.id="+svc.ID).Add("status", "running"),
 	})
 	if err != nil {
-		return 0, fmt.Errorf("list containers of %s: %w", service, err)
+		return "", fmt.Errorf("list containers of %s: %w", service, err)
 	}
 	if len(list.Items) == 0 {
-		return 0, fmt.Errorf("%s: %w", service, ErrNotRunning)
+		return "", fmt.Errorf("%s: %w", service, ErrNotRunning)
 	}
-	id := newestContainer(list.Items)
 
+	return newestContainer(list.Items), nil
+}
+
+// execIn runs cmd in the container id, as exec does.
+func (e *Engine) execIn(ctx context.Context, id string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	created, err := e.api.ExecCreate(ctx, id, client.ExecCreateOptions{
 		AttachStdin: stdin != nil, AttachStdout: true, AttachStderr: true, Cmd: cmd,
 	})

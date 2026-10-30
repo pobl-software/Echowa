@@ -36,7 +36,7 @@ func (r *AppDatabasesController) Store(ctx http.Context) http.Response {
 		return notFound(ctx)
 	}
 
-	validator, err := ctx.Request().Validate(rules.AppDatabases(), rules.AppDatabasesFilters(), rules.AppDatabasesMessages())
+	validator, err := rules.Validate(ctx, rules.AppDatabases(), rules.AppDatabasesFilters(), rules.AppDatabasesMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -67,7 +67,7 @@ func (r *AppDatabasesController) Store(ctx http.Context) http.Response {
 		if !ok {
 			return failed(ctx, map[string]string{fmt.Sprintf("databases.%d.template", i): "There's no template called " + d.Template + "."})
 		}
-		leftover, err := services.LeftoverVolume(ctx, &tmpl, d.Name)
+		leftover, err := services.LeftoverVolume(ctx.Context(), templates.VolumeNames(&tmpl, d.Name))
 		if err != nil {
 			return failed(ctx, map[string]string{fmt.Sprintf("databases.%d.name", i): "Couldn't check Docker for its volume: " + err.Error()})
 		}
@@ -84,7 +84,7 @@ func (r *AppDatabasesController) Store(ctx http.Context) http.Response {
 		for i, id := range in.Link {
 			ids[i] = id
 		}
-		if err := facades.Orm().WithContext(ctx).Query().WhereIn("id", ids).Where("template IS NOT NULL").Order("name").Get(&linked); err != nil {
+		if err := facades.Orm().WithContext(ctx.Context()).Query().WhereIn("id", ids).Where("template IS NOT NULL").Order("name").Get(&linked); err != nil {
 			return inertia.ServerError(ctx, err)
 		}
 		if len(linked) != len(in.Link) {
@@ -94,21 +94,21 @@ func (r *AppDatabasesController) Store(ctx http.Context) http.Response {
 
 	var created []string
 	for i, d := range in.Databases {
-		db, err := services.CreateApp(ctx, services.TemplateInput(news[i], d.Name), &news[i])
+		db, err := services.CreateApp(ctx.Context(), services.TemplateInput(news[i], d.Name), &news[i])
 		if err != nil {
 			return inertia.ServerError(ctx, err)
 		}
-		if err := services.LinkApps(ctx, app.ID, db.ID); err != nil {
+		if err := services.LinkApps(ctx.Context(), app.ID, db.ID); err != nil {
 			return inertia.ServerError(ctx, err)
 		}
-		if _, err := deploy.Request(ctx, db, models.TriggerManual, db.DefaultTag); err != nil {
+		if _, err := deploy.Request(ctx.Context(), db, models.TriggerManual, db.DefaultTag); err != nil {
 			return inertia.ServerError(ctx, err)
 		}
 		created = append(created, db.Name)
 	}
 	var names []string
 	for _, db := range linked {
-		if err := services.LinkApps(ctx, app.ID, db.ID); err != nil {
+		if err := services.LinkApps(ctx.Context(), app.ID, db.ID); err != nil {
 			return inertia.ServerError(ctx, err)
 		}
 		names = append(names, db.Name)
@@ -136,7 +136,7 @@ func (r *AppDatabasesController) Destroy(ctx http.Context) http.Response {
 		return resp
 	}
 
-	if err := services.UnlinkApp(ctx, app.ID, db.ID); err != nil {
+	if err := services.UnlinkApp(ctx.Context(), app.ID, db.ID); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 	inertia.Flash(ctx, "success", fmt.Sprintf("Unlinked %s. It keeps running.", db.Name))

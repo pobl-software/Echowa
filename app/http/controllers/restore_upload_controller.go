@@ -36,7 +36,7 @@ func (r *RestoreUploadController) Store(ctx http.Context) http.Response {
 	if resp := findBackupApp(ctx, &app); resp != nil {
 		return resp
 	}
-	validator, err := ctx.Request().Validate(rules.RestoreUpload())
+	validator, err := rules.Validate(ctx, rules.RestoreUpload())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

@@ -21,11 +21,14 @@ func All() []validation.Rule {
 		&stringRule{"image_tag", IsTag, "The :attribute must be an image tag such as latest or v1.2.3."},
 		&stringRule{"deploy_ref", IsDeployRef, "The :attribute must be an image tag or a sha256: digest."},
 		&stringRule{"registry_host", IsRegistryHost, "The :attribute must be a registry host such as ghcr.io, with an optional :port."},
+		&stringRule{"command", IsCommand, "The :attribute has a quote that isn't closed."},
 		&stringRule{"cron", IsCron, "The :attribute must be five cron fields, such as */5 * * * *, that run at some point."},
 		&stringRule{"iana_timezone", IsTimezone, "The :attribute must be a time zone such as Europe/London or UTC."},
 		&stringRule{"storage_endpoint", IsStorageEndpoint, "The :attribute must be an https:// URL with no path, such as https://<account>.r2.cloudflarestorage.com. Plain http:// works only for localhost."},
 		&stringRule{"s3_bucket", IsBucket, "The :attribute must be 3 to 63 lowercase letters, digits, dots and hyphens, starting and ending with a letter or digit."},
 		&stringRule{"key_prefix", IsKeyPrefix, "The :attribute may only contain letters, digits, slashes and !_.*'()-, up to 200 characters."},
+		&stringRule{"volume_name", IsVolumeName, "The :attribute may only contain lowercase letters, digits and underscores, must start with a letter, and be at most 32 characters."},
+		&stringRule{"mount_path", IsMountPath, "The :attribute must be an absolute path such as /app/storage, with no .., trailing slash or spaces, and not /, /proc, /sys or /dev."},
 		&stringRule{"not_pooler_name", isNotPoolerName, "Another app's connection pooler already uses this name. Pick another."},
 	}
 }

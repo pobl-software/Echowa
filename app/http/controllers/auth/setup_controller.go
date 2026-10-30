@@ -9,6 +9,7 @@ import (
 	gonertia "github.com/romsar/gonertia/v3"
 
 	"goravel/app/inertia"
+	"goravel/app/rules"
 	"goravel/app/services"
 )
 
@@ -47,7 +48,7 @@ func (r *SetupController) Create(ctx http.Context) http.Response {
 // Store creates the admin and signs them in. Rate limited by the "login"
 // limiter.
 func (r *SetupController) Store(ctx http.Context) http.Response {
-	validator, err := ctx.Request().Validate(map[string]any{
+	validator, err := rules.Validate(ctx, map[string]any{
 		"name":     "required|string|max:255",
 		"email":    "required|string|email",
 		"password": "required|string",

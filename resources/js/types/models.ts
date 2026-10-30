@@ -3,7 +3,7 @@
 
 export type DeploymentStatus = 'queued' | 'pulling' | 'deploying' | 'succeeded' | 'failed' | 'rolled_back';
 export type DeploymentTrigger = 'manual' | 'webhook' | 'rollback';
-export type LiveState = 'running' | 'degraded' | 'down' | 'not_deployed' | 'unknown';
+export type LiveState = 'running' | 'degraded' | 'down' | 'stopping' | 'stopped' | 'not_deployed' | 'unknown';
 
 // services.LiveStatus
 export interface LiveStatus {
@@ -71,8 +71,9 @@ export interface AppSummary {
     template: string | null;
     status: LiveStatus;
     last_deployment: DeploymentSummary | null;
-    // IDs of the apps this one is linked to (ADR 0028).
-    databases: number[];
+    // IDs of the apps this one is linked to: its databases (ADR 0028) and
+    // services (ADR 0037).
+    links: number[];
 }
 
 // models.Registry. The token is never sent.
@@ -196,7 +197,7 @@ export interface ExportFormat {
 }
 
 // services.AppWork: what holds an app's lock, or empty (ADR 0034).
-export type AppWork = '' | 'deploy' | 'backup' | 'restore' | 'export';
+export type AppWork = '' | 'deploy' | 'backup' | 'restore' | 'export' | 'stop';
 
 // models.RestoreStatus (ADR 0034).
 export type RestoreStatus = 'running' | 'succeeded' | 'failed' | 'interrupted';
@@ -360,6 +361,40 @@ export interface DatabaseChoices {
     existing: DatabaseChoice[];
 }
 
+// services.LinkedService: a custom app another custom app is linked to, such
+// as a queue worker (ADR 0037).
+export interface LinkedService {
+    id: number;
+    name: string;
+    // repository:default_tag
+    image: string;
+    host: string;
+    port: number;
+    domain: string | null;
+    status: LiveStatus;
+}
+
+// services.ServiceChoice: a custom app that can be linked as a service.
+export interface ServiceChoice {
+    id: number;
+    name: string;
+    repository: string;
+}
+
+// services.AppRef
+export interface AppRef {
+    id: number;
+    name: string;
+}
+
+// controllers.ServiceChoices: what the Services tab can add. part_of lists
+// the apps this one is a service of; while it isn't empty, it has no
+// services of its own.
+export interface ServiceChoices {
+    existing: ServiceChoice[];
+    part_of: AppRef[];
+}
+
 // services.SlowQueryResult: an app's slow queries, or why they couldn't be
 // read.
 export interface SlowQueryResult {
@@ -490,12 +525,16 @@ export interface LogDeploy {
     deployment: { id: number; ref: string; started_at: string } | null;
 }
 
-// models.AppVolume: a Docker named volume mounted at target.
+// models.AppVolume: a Docker named volume mounted at target. It's Mounted
+// until removed_at is set, then Removing: the next deploy leaves it out and,
+// once it succeeds, deletes the volume and its data (ADR 0039). Times are
+// server timestamps; see parseServerTime.
 export interface AppVolume {
     id: number;
     app_id: number;
     name: string;
     target: string;
+    removed_at: string | null;
 }
 
 // services.PruneRun. Times are RFC 3339, with a zone.

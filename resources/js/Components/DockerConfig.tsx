@@ -1,12 +1,25 @@
 import { Link, useForm } from '@inertiajs/react';
-import { HardDriveIcon, HeartPulseIcon, LayersIcon, MinusIcon, NetworkIcon, PackageIcon, PlusIcon } from 'lucide-react';
+import {
+    HardDriveIcon,
+    HeartPulseIcon,
+    LayersIcon,
+    MinusIcon,
+    NetworkIcon,
+    PackageIcon,
+    PlusIcon,
+    SquareTerminalIcon,
+} from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 
+import type { AppSection } from '@/Components/AppNav';
+
 import { ConfigPanel, ConfigSection, SaveBar } from '@/Components/ConfigPanel';
+import { SectionLink } from '@/Components/SectionLink';
 import { TextField } from '@/Components/TextField';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/Components/ui/input-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
+import { formatCommand } from '@/lib/command';
 import { cn } from '@/lib/utils';
 import type { App, AppVolume, RegistryOption, TemplateOption } from '@/types/models';
 
@@ -20,10 +33,13 @@ export function DockerConfig({
     app,
     registries,
     template,
+    onSelect,
 }: {
     app: App;
     registries: RegistryOption[];
     template?: TemplateOption;
+    // Switches to another section, such as a custom app's Volumes.
+    onSelect: (section: AppSection) => void;
 }) {
     const form = useForm({
         repository: app.repository,
@@ -32,6 +48,7 @@ export function DockerConfig({
         port: String(app.port),
         replicas: String(app.replicas),
         healthcheck_cmd: app.healthcheck_cmd ?? '',
+        command: formatCommand(app.args),
     });
     const volumes = app.volumes ?? [];
     const hasVolumes = volumes.length > 0;
@@ -99,7 +116,7 @@ export function DockerConfig({
                             error={form.errors.default_tag}
                         />
                     </div>
-                    {hasVolumes && (
+                    {template && hasVolumes && (
                         <FieldDescription className="-mt-2">
                             Its volume holds data this version wrote, which another major version may not read:
                             PostgreSQL starts with an empty database. Change the tag&apos;s major version only on
@@ -236,6 +253,35 @@ export function DockerConfig({
                     </Field>
                 </ConfigSection>
 
+                {/* A template's arguments come from the template. */}
+                {!template && (
+                    <ConfigSection
+                        icon={SquareTerminalIcon}
+                        title="Command"
+                        description="Runs in place of the image's CMD, such as php artisan horizon for a queue worker."
+                    >
+                        <Field data-invalid={!!form.errors.command || undefined}>
+                            <FieldLabel htmlFor="command">Command</FieldLabel>
+                            <InputGroup>
+                                <InputGroupAddon className="font-mono">$</InputGroupAddon>
+                                <InputGroupInput
+                                    id="command"
+                                    className="font-mono"
+                                    placeholder="php artisan horizon"
+                                    value={form.data.command}
+                                    onChange={(e) => form.setData('command', e.target.value)}
+                                    aria-invalid={!!form.errors.command || undefined}
+                                />
+                            </InputGroup>
+                            {form.errors.command && <FieldError>{form.errors.command}</FieldError>}
+                            <FieldDescription>
+                                Split at spaces, with quotes kept together, and run without a shell. Leave empty to use
+                                the image&apos;s own CMD.
+                            </FieldDescription>
+                        </Field>
+                    </ConfigSection>
+                )}
+
                 <ConfigSection
                     icon={HeartPulseIcon}
                     title="Healthcheck"
@@ -261,13 +307,24 @@ export function DockerConfig({
                     </Field>
                 </ConfigSection>
 
-                {hasVolumes && (
+                {hasVolumes && template && (
                     <ConfigSection
                         icon={HardDriveIcon}
                         title="Volumes"
                         description="Data here survives deploys. Set when the app was created."
                     >
-                        <AppVolumes volumes={volumes} />
+                        <VolumeList volumes={volumes} />
+                    </ConfigSection>
+                )}
+                {hasVolumes && !template && (
+                    <ConfigSection icon={HardDriveIcon} title="Volumes" description="Data here survives deploys.">
+                        <p className="text-sm text-muted-foreground">
+                            Add, move and remove them in{' '}
+                            <SectionLink app={app} section="volumes" onSelect={onSelect}>
+                                <span className="text-foreground">Volumes</span>
+                            </SectionLink>
+                            .
+                        </p>
                     </ConfigSection>
                 )}
             </ConfigPanel>
@@ -284,9 +341,9 @@ function Route({ label, children }: { label: string; children: ReactNode }) {
     );
 }
 
-// AppVolumes lists an app's volumes: where each is mounted, and its Docker
-// name. They come from its template.
-function AppVolumes({ volumes }: { volumes: AppVolume[] }) {
+// VolumeList lists a template app's volumes: where each is mounted, and its
+// Docker name.
+function VolumeList({ volumes }: { volumes: AppVolume[] }) {
     return (
         <ul className="divide-y rounded-lg border text-sm">
             {volumes.map((volume) => (

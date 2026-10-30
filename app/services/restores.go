@@ -276,7 +276,7 @@ func checkVersion(ctx context.Context, app *models.App, b *templates.Backup, src
 	m := src.Manifest
 	out, err := Docker().Exec(ctx, app.ServiceName(), b.Version)
 	if errors.Is(err, docker.ErrNotRunning) {
-		return "", "", refuse("%s has no running task to restore into. Deploy it first.", app.Name)
+		return "", "", refuse("%s has no running task to restore into. Start or deploy it first.", app.Name)
 	}
 	if err != nil {
 		return "", "", refuse("Couldn't read %s's server version: %s", app.Name, err)

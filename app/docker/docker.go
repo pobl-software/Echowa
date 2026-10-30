@@ -33,6 +33,15 @@ type Client interface {
 	// changed, so a redeploy always restarts the app.
 	DeployService(ctx context.Context, spec ServiceSpec) error
 
+	// StopService scales the service to 0 replicas and changes nothing
+	// else: not its ForceUpdate, so its tasks keep their generation, and
+	// not its labels, so ServiceMatches still compares with the spec it
+	// ran. Swarm stops the tasks within their grace period and removes
+	// them, with their containers and logs. Stopping a stopped service is
+	// not an error. The error wraps ErrServiceNotFound if there's no such
+	// service.
+	StopService(ctx context.Context, name string) error
+
 	// ServiceMatches reports whether the service exists and its spec is the
 	// one DeployService makes from spec, so deploying spec again would only
 	// restart its tasks.
@@ -68,7 +77,8 @@ type Client interface {
 
 	// RemoveVolume removes a volume Echowa's services created. Removing a
 	// missing volume is not an error. The error wraps ErrVolumeInUse while a
-	// container, even a stopped task, still uses it.
+	// running container still uses it. The stopped containers of Swarm tasks
+	// an update replaced don't count: it removes them.
 	RemoveVolume(ctx context.Context, name string) error
 
 	// VolumeExists reports whether a volume with this name exists, whoever
@@ -110,6 +120,17 @@ type Client interface {
 	// command saw its input end early. It returns once the command has
 	// ended and nothing reads stdin any more.
 	ExecStream(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
+
+	// ExecTTY starts cmd with a terminal of size in the service's newest
+	// running task container, for the admin to type into. cmd is a
+	// constant compiled into Echowa. It runs as the image's user, in its
+	// working directory, with the container's env and
+	// TERM=xterm-256color, started by the image's sh. ctx bounds the
+	// start only: the terminal lasts until the command ends or Close. The
+	// error wraps ErrNotRunning or ErrNotManaged as Exec's does. An image
+	// without sh isn't an error: the terminal shows Docker's reason and
+	// the command exits 127.
+	ExecTTY(ctx context.Context, service string, cmd []string, size TerminalSize) (Terminal, error)
 
 	// Host is what the daemon reports about the machine it runs on.
 	Host(ctx context.Context) (Host, error)

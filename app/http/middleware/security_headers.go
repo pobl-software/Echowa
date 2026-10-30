@@ -53,6 +53,9 @@ var inlineScript = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 // scripts as html/template renders them: it drops JS comments, so the file's
 // own bytes hash differently. Inline style attributes stay allowed: React
 // and the log viewer position elements with them.
+// connect-src 'self' also lets the terminal's WebSocket through: CSP Level 3
+// counts ws: and wss: to the same host as 'self' (ADR 0038 says where that
+// was checked).
 var contentSecurityPolicy = sync.OnceValue(func() string {
 	scripts := []string{"'self'"}
 	rendered, err := renderRootTemplate()

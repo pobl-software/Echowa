@@ -168,6 +168,20 @@ func VolumeName(appName, name string) string {
 	return models.ServicePrefix + appName + "-" + name
 }
 
+// VolumeNames are the Docker volumes an app called appName gets from t,
+// none for a custom app, whose t is nil.
+func VolumeNames(t *Template, appName string) []string {
+	if t == nil {
+		return nil
+	}
+	names := make([]string, 0, len(t.Volumes))
+	for _, v := range t.Volumes {
+		names = append(names, VolumeName(appName, v.Name))
+	}
+
+	return names
+}
+
 func password() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

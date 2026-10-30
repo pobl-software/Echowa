@@ -77,11 +77,13 @@ const live: Record<LiveStatus['state'], { label: string; tone: Tone }> = {
     running: { label: 'Running', tone: 'success' },
     degraded: { label: 'Degraded', tone: 'warning' },
     down: { label: 'Down', tone: 'danger' },
+    stopping: { label: 'Stopping', tone: 'warning' },
+    stopped: { label: 'Stopped', tone: 'neutral' },
     not_deployed: { label: 'Not deployed', tone: 'neutral' },
     unknown: { label: 'Unknown', tone: 'neutral' },
 };
 
-// The app's Swarm service: "Running 2/2", "Degraded 1/2", "Not deployed"...
+// The app's Swarm service: "Running 2/2", "Degraded 1/2", "Stopped", "Not deployed"...
 // Short of replicas for over 2 minutes, it's "Unhealthy". quiet shows a
 // healthy, settled service as a dot alone.
 export function LiveStatusBadge({ status, quiet }: { status: LiveStatus; quiet?: boolean }) {
@@ -114,7 +116,7 @@ export function LiveStatusBadge({ status, quiet }: { status: LiveStatus; quiet?:
     }
 
     return (
-        <StatusPill tone={tone} pulse={updating} title={title || undefined}>
+        <StatusPill tone={tone} pulse={updating || status.state === 'stopping'} title={title || undefined}>
             {label}
             {counts && (
                 <span className="tabular-nums opacity-80">

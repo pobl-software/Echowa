@@ -9,8 +9,9 @@ const labels: Record<StreamState, string> = {
     failed: 'Disconnected',
 };
 
-// StreamIndicator shows whether a live stream is flowing.
-export function StreamIndicator({ state, end }: { state: StreamState; end?: StreamEnd | null }) {
+// StreamIndicator shows whether a live stream is flowing. label replaces
+// the state's own word.
+export function StreamIndicator({ state, end, label }: { state: StreamState; end?: StreamEnd | null; label?: string }) {
     return (
         <span className="inline-flex items-center gap-1.5 text-sm" title={end?.message}>
             <span className="relative flex size-2">
@@ -27,7 +28,7 @@ export function StreamIndicator({ state, end }: { state: StreamState; end?: Stre
                     )}
                 />
             </span>
-            {labels[state]}
+            {label ?? labels[state]}
         </span>
     );
 }
