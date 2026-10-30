@@ -124,9 +124,10 @@ type AppSummary struct {
 	Template       *string            `json:"template"`
 	Status         LiveStatus         `json:"status"`
 	LastDeployment *DeploymentSummary `json:"last_deployment"`
-	// Databases are the IDs of the apps this one is linked to (ADR 0028),
-	// which the dashboard shows under it rather than as their own cards.
-	Databases []uint `json:"databases"`
+	// Links are the IDs of the apps this one is linked to, its databases
+	// (ADR 0028) and services (ADR 0037), which the dashboard shows under
+	// it rather than as their own cards.
+	Links []uint `json:"links"`
 }
 
 // AppSummaries lists every app with its live status, latest deployment
@@ -156,7 +157,7 @@ func AppSummaries(ctx context.Context) ([]AppSummary, error) {
 			Template:       app.Template,
 			Status:         AppLiveStatus(ctx, &app),
 			LastDeployment: latest[app.ID],
-			Databases:      append([]uint{}, links[app.ID]...),
+			Links:          append([]uint{}, links[app.ID]...),
 		})
 	}
 

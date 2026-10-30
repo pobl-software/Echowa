@@ -354,6 +354,29 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 			}
 			return services.LinkedDatabases(c, app.ID)
 		},
+		// The Services section's, for a custom app (ADR 0037).
+		"linkedServices": func(c context.Context) (any, error) {
+			if app.Template != nil {
+				return []services.LinkedService{}, nil
+			}
+			return services.LinkedServices(c, app.ID)
+		},
+		"serviceChoices": func(c context.Context) (any, error) {
+			if app.Template != nil {
+				return nil, nil
+			}
+			partOf, err := services.ServiceOf(c, app.ID)
+			if err != nil {
+				return nil, err
+			}
+			existing := []services.ServiceChoice{}
+			if len(partOf) == 0 {
+				if existing, err = services.UnlinkedServices(c, app.ID); err != nil {
+					return nil, err
+				}
+			}
+			return ServiceChoices{Existing: existing, PartOf: partOf}, nil
+		},
 		// The Scheduled tasks section's, for a custom app (ADR 0032).
 		"scheduledTasks": func(c context.Context) (any, error) {
 			if app.Template != nil {

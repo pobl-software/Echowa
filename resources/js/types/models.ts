@@ -71,8 +71,9 @@ export interface AppSummary {
     template: string | null;
     status: LiveStatus;
     last_deployment: DeploymentSummary | null;
-    // IDs of the apps this one is linked to (ADR 0028).
-    databases: number[];
+    // IDs of the apps this one is linked to: its databases (ADR 0028) and
+    // services (ADR 0037).
+    links: number[];
 }
 
 // models.Registry. The token is never sent.
@@ -358,6 +359,40 @@ export interface DatabaseChoice {
 export interface DatabaseChoices {
     templates: TemplateOption[];
     existing: DatabaseChoice[];
+}
+
+// services.LinkedService: a custom app another custom app is linked to, such
+// as a queue worker (ADR 0037).
+export interface LinkedService {
+    id: number;
+    name: string;
+    // repository:default_tag
+    image: string;
+    host: string;
+    port: number;
+    domain: string | null;
+    status: LiveStatus;
+}
+
+// services.ServiceChoice: a custom app that can be linked as a service.
+export interface ServiceChoice {
+    id: number;
+    name: string;
+    repository: string;
+}
+
+// services.AppRef
+export interface AppRef {
+    id: number;
+    name: string;
+}
+
+// controllers.ServiceChoices: what the Services tab can add. part_of lists
+// the apps this one is a service of; while it isn't empty, it has no
+// services of its own.
+export interface ServiceChoices {
+    existing: ServiceChoice[];
+    part_of: AppRef[];
 }
 
 // services.SlowQueryResult: an app's slow queries, or why they couldn't be

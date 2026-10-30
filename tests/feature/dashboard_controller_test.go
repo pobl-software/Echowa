@@ -125,10 +125,10 @@ func (s *DashboardControllerTestSuite) TestEachAppListsTheDatabasesLinkedToIt() 
 	for _, app := range page.Props["apps"].([]any) {
 		apps[app.(map[string]any)["name"].(string)] = app.(map[string]any)
 	}
-	s.Equal([]any{float64(db.ID)}, apps["shop"]["databases"])
-	s.Equal([]any{}, apps["blog"]["databases"], "an empty list, not null")
+	s.Equal([]any{float64(db.ID)}, apps["shop"]["links"])
+	s.Equal([]any{}, apps["blog"]["links"], "an empty list, not null")
 	s.Nil(apps["blog"]["template"])
 	s.Equal("postgres", apps["db"]["template"])
-	s.Equal([]any{}, apps["db"]["databases"])
+	s.Equal([]any{}, apps["db"]["links"])
 	s.Len(apps, 3, "the database is still listed, for the stats and its row")
 }

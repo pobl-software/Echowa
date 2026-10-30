@@ -17,6 +17,7 @@ import { DockerConfig } from '@/Components/DockerConfig';
 import { EnvEditor } from '@/Components/EnvEditor';
 import { ExternalAccessSection } from '@/Components/ExternalAccessSection';
 import { LinkedDatabases } from '@/Components/LinkedDatabases';
+import { LinkedServices } from '@/Components/LinkedServices';
 import { Page } from '@/Components/Page';
 import { Panel, Stats } from '@/Components/Panel';
 import { PoolingSection } from '@/Components/PoolingSection';
@@ -39,6 +40,7 @@ import {
     type DeploymentSummary,
     type DomainStatus,
     type LinkedDatabase,
+    type LinkedService,
     type LiveStatus,
     type LogDeploy,
     type PoolerInfo,
@@ -46,6 +48,7 @@ import {
     type ResourcesInfo,
     runningStatuses,
     type ScheduledTask,
+    type ServiceChoices,
     type SlowQueryResult,
     type TaskFailure,
     type TemplateOption,
@@ -89,6 +92,10 @@ interface Props {
     // it's linked to, and what can be added. Empty and null for a template app.
     linkedDatabases: LinkedDatabase[];
     databaseChoices: DatabaseChoices | null;
+    // The Services section's, for a custom app (ADR 0037): the services
+    // it's linked to, and what can be added. Empty and null for a template app.
+    linkedServices: LinkedService[];
+    serviceChoices: ServiceChoices | null;
     // The Scheduled tasks section's, for a custom app (ADR 0032). Empty for
     // a template app.
     scheduledTasks: ScheduledTask[];
@@ -136,6 +143,8 @@ export default function AppsShow({
     logDeploys,
     linkedDatabases,
     databaseChoices,
+    linkedServices,
+    serviceChoices,
     scheduledTasks,
     taskFailures,
     backups,
@@ -351,16 +360,25 @@ export default function AppsShow({
                                     {databaseChoices && (
                                         <Detail label="Databases">
                                             {linkedDatabases.length > 0 ? (
-                                                linkedDatabases.map((db, i) => (
-                                                    <Fragment key={db.id}>
-                                                        {i > 0 && ', '}
-                                                        <Link href={`/apps/${db.id}`} className="hover:underline">
-                                                            {db.name}
-                                                        </Link>
-                                                    </Fragment>
-                                                ))
+                                                <AppLinks apps={linkedDatabases} />
                                             ) : (
                                                 <SectionLink app={app} section="databases" onSelect={show}>
+                                                    None linked
+                                                </SectionLink>
+                                            )}
+                                        </Detail>
+                                    )}
+                                    {serviceChoices && serviceChoices.part_of.length > 0 && (
+                                        <Detail label="Service of">
+                                            <AppLinks apps={serviceChoices.part_of} />
+                                        </Detail>
+                                    )}
+                                    {serviceChoices && serviceChoices.part_of.length === 0 && (
+                                        <Detail label="Services">
+                                            {linkedServices.length > 0 ? (
+                                                <AppLinks apps={linkedServices} />
+                                            ) : (
+                                                <SectionLink app={app} section="services" onSelect={show}>
                                                     None linked
                                                 </SectionLink>
                                             )}
@@ -399,6 +417,15 @@ export default function AppsShow({
 
                     {section === 'databases' && databaseChoices && (
                         <LinkedDatabases app={app} databases={linkedDatabases} choices={databaseChoices} />
+                    )}
+
+                    {section === 'services' && serviceChoices && (
+                        <LinkedServices
+                            app={app}
+                            services={linkedServices}
+                            choices={serviceChoices}
+                            registries={registries}
+                        />
                     )}
 
                     {section === 'connection' && template && (
@@ -582,6 +609,18 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
             <dd className="min-w-0 break-words">{children}</dd>
         </div>
     );
+}
+
+// AppLinks names linked apps, each opening its page.
+function AppLinks({ apps }: { apps: { id: number; name: string }[] }) {
+    return apps.map((linked, i) => (
+        <Fragment key={linked.id}>
+            {i > 0 && ', '}
+            <Link href={`/apps/${linked.id}`} className="hover:underline">
+                {linked.name}
+            </Link>
+        </Fragment>
+    ));
 }
 
 // SectionLink switches to another section in place, as the section nav does;

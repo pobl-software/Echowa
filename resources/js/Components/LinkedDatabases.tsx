@@ -307,9 +307,9 @@ function AddDatabasesDialog({ app, choices }: { app: App; choices: DatabaseChoic
     );
 }
 
-// Choice is one tickable database in the dialog, with anything it needs
-// once ticked (a new one's name) underneath.
-function Choice({
+// Choice is one tickable app in an Add dialog, with anything it needs once
+// ticked (a new database's name) underneath. The Services tab's uses it too.
+export function Choice({
     icon: Icon,
     title,
     detail,

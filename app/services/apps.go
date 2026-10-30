@@ -10,6 +10,7 @@ import (
 
 	"goravel/app/facades"
 	"goravel/app/models"
+	"goravel/app/rules"
 	"goravel/app/templates"
 )
 
@@ -24,6 +25,9 @@ type AppInput struct {
 	Replicas       int     `form:"replicas" json:"replicas"`
 	HealthcheckCmd *string `form:"healthcheck_cmd" json:"healthcheck_cmd"`
 	TLS            bool    `form:"tls" json:"tls"`
+	// Command replaces the image's CMD (rules.SplitCommand). Empty keeps
+	// it. A template app's arguments come from its template instead.
+	Command *string `form:"command" json:"command"`
 }
 
 // CreateApp saves a new app with a freshly generated webhook secret. With a
@@ -73,7 +77,7 @@ func CreateApp(ctx context.Context, in AppInput, tmpl *templates.Template) (*mod
 }
 
 // UpdateDocker changes the app's Docker config: image, registry, port,
-// replicas and healthcheck. The name names the Swarm service and can't
+// replicas, healthcheck and, for a custom app, command. The name names the Swarm service and can't
 // change.
 func UpdateDocker(ctx context.Context, app *models.App, in AppInput) error {
 	in.applyDocker(app)
@@ -143,6 +147,10 @@ func (in AppInput) applyDocker(app *models.App) {
 	app.Port = in.Port
 	app.Replicas = in.Replicas
 	app.HealthcheckCmd = blankToNil(in.HealthcheckCmd)
+	if app.Template == nil {
+		// Validated by rules.AppDocker, so it splits.
+		app.Args, _ = rules.SplitCommand(deref(in.Command))
+	}
 }
 
 func (in AppInput) applyDomain(app *models.App) {

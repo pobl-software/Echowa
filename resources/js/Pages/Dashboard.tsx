@@ -30,10 +30,15 @@ export default function Dashboard({ apps, metrics }: { apps: AppSummary[]; metri
     const deploying = apps.filter(
         (app) => app.last_deployment && runningStatuses.includes(app.last_deployment.status),
     ).length;
-    // A linked database sits under the app that uses it, not on a card of its own (ADR 0028).
+    // A linked database or service sits under the app that uses it, not on a card of its own (ADRs
+    // 0028, 0037). Services are one level deep, so a service's own databases join its app's tray.
     const byId = new Map(apps.map((app) => [app.id, app]));
-    const linked = new Set(apps.flatMap((app) => app.databases));
+    const linked = new Set(apps.flatMap((app) => app.links));
     const cards = apps.filter((app) => !linked.has(app.id));
+    const tray = (app: AppSummary) => {
+        const ids = app.links.flatMap((id) => [id, ...(byId.get(id)?.links ?? [])]);
+        return [...new Set(ids)].flatMap((id) => (id === app.id ? [] : (byId.get(id) ?? [])));
+    };
 
     return (
         <>
@@ -83,11 +88,11 @@ export default function Dashboard({ apps, metrics }: { apps: AppSummary[]; metri
                                 { label: 'Deploying', value: deploying },
                             ]}
                         />
-                        {/* Cards keep their own height: a tray of databases makes one taller than its row. */}
+                        {/* Cards keep their own height: a tray of linked apps makes one taller than its row. */}
                         <ul className="grid items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
                             {cards.map((app) => (
                                 <li key={app.id}>
-                                    <AppCard app={app} databases={app.databases.flatMap((id) => byId.get(id) ?? [])} />
+                                    <AppCard app={app} linked={tray(app)} />
                                 </li>
                             ))}
                         </ul>
@@ -99,18 +104,18 @@ export default function Dashboard({ apps, metrics }: { apps: AppSummary[]; metri
 }
 
 // The whole card opens the app; the domain link inside it opens the site.
-// Its linked databases sit on a tray under it, a row each.
-function AppCard({ app, databases }: { app: AppSummary; databases: AppSummary[] }) {
-    const card = <AppCardBody app={app} tray={databases.length > 0} />;
-    if (databases.length === 0) {
+// Its linked databases and services sit on a tray under it, a row each.
+function AppCard({ app, linked }: { app: AppSummary; linked: AppSummary[] }) {
+    const card = <AppCardBody app={app} tray={linked.length > 0} />;
+    if (linked.length === 0) {
         return card;
     }
 
     return (
         <div className="flex h-full flex-col rounded-xl border bg-muted/60 dark:bg-muted/30">
             {card}
-            <ul aria-label={`${app.name}'s databases`} className="p-1">
-                {databases.map((db) => {
+            <ul aria-label={`${app.name}'s databases and services`} className="p-1">
+                {linked.map((db) => {
                     const Icon = templateIcon(db.template);
                     return (
                         <li key={db.id}>

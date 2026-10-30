@@ -1,5 +1,14 @@
 import { Link, useForm } from '@inertiajs/react';
-import { HardDriveIcon, HeartPulseIcon, LayersIcon, MinusIcon, NetworkIcon, PackageIcon, PlusIcon } from 'lucide-react';
+import {
+    HardDriveIcon,
+    HeartPulseIcon,
+    LayersIcon,
+    MinusIcon,
+    NetworkIcon,
+    PackageIcon,
+    PlusIcon,
+    SquareTerminalIcon,
+} from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 
 import { ConfigPanel, ConfigSection, SaveBar } from '@/Components/ConfigPanel';
@@ -7,6 +16,7 @@ import { TextField } from '@/Components/TextField';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/Components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/Components/ui/input-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
+import { formatCommand } from '@/lib/command';
 import { cn } from '@/lib/utils';
 import type { App, AppVolume, RegistryOption, TemplateOption } from '@/types/models';
 
@@ -32,6 +42,7 @@ export function DockerConfig({
         port: String(app.port),
         replicas: String(app.replicas),
         healthcheck_cmd: app.healthcheck_cmd ?? '',
+        command: formatCommand(app.args),
     });
     const volumes = app.volumes ?? [];
     const hasVolumes = volumes.length > 0;
@@ -235,6 +246,35 @@ export function DockerConfig({
                         )}
                     </Field>
                 </ConfigSection>
+
+                {/* A template's arguments come from the template. */}
+                {!template && (
+                    <ConfigSection
+                        icon={SquareTerminalIcon}
+                        title="Command"
+                        description="Runs in place of the image's CMD, such as php artisan horizon for a queue worker."
+                    >
+                        <Field data-invalid={!!form.errors.command || undefined}>
+                            <FieldLabel htmlFor="command">Command</FieldLabel>
+                            <InputGroup>
+                                <InputGroupAddon className="font-mono">$</InputGroupAddon>
+                                <InputGroupInput
+                                    id="command"
+                                    className="font-mono"
+                                    placeholder="php artisan horizon"
+                                    value={form.data.command}
+                                    onChange={(e) => form.setData('command', e.target.value)}
+                                    aria-invalid={!!form.errors.command || undefined}
+                                />
+                            </InputGroup>
+                            {form.errors.command && <FieldError>{form.errors.command}</FieldError>}
+                            <FieldDescription>
+                                Split at spaces, with quotes kept together, and run without a shell. Leave empty to use
+                                the image&apos;s own CMD.
+                            </FieldDescription>
+                        </Field>
+                    </ConfigSection>
+                )}
 
                 <ConfigSection
                     icon={HeartPulseIcon}

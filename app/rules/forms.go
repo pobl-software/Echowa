@@ -52,7 +52,19 @@ func AppDocker(hasVolumes bool) map[string]any {
 		"port":            "required|integer|min:1|max:65535",
 		"replicas":        replicas,
 		"healthcheck_cmd": "nullable|string|max:1000",
+		"command":         "nullable|string|max:1000|command",
 	}
+}
+
+// AppService returns the rules for a new service, a custom app made from
+// another app's Services section: its name, its Docker config, and whether
+// it starts with that app's environment.
+func AppService() map[string]any {
+	rules := AppDocker(false)
+	rules["name"] = "required|string|slug|" + unique("apps", "name", 0) + "|not_pooler_name"
+	rules["copy_env"] = "boolean"
+
+	return rules
 }
 
 // AppDomain returns the rules for app id's domain. id is 0 when creating.
