@@ -36,6 +36,10 @@ func TestEachTriggerFitsTheAppsItIsAbout(t *testing.T) {
 		{TransactionIDAge, []*models.App{postgres}, []*models.App{custom, mysql, redis}},
 		{EvictedKeys, []*models.App{redis}, []*models.App{custom, postgres}},
 		{DiskUsed, nil, []*models.App{custom, postgres}},
+		{CertificateExpiry, []*models.App{custom}, []*models.App{postgres, redis}},
+		{PoolerDown, []*models.App{postgres}, []*models.App{custom, mysql, redis}},
+		{BackupAge, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
+		{UpdateAvailable, nil, []*models.App{custom, postgres}},
 	} {
 		trigger, ok := Find(tc.trigger)
 		require.True(t, ok, tc.trigger)

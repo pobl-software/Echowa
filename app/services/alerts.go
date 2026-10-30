@@ -385,6 +385,10 @@ func notifyKills(ctx context.Context, apps []models.App, statuses map[uint]LiveS
 			if rule.Scope == models.AlertApp && (rule.AppID == nil || *rule.AppID != app.ID) {
 				continue
 			}
+			// A new or re-enabled rule doesn't report an old kill.
+			if rule.UpdatedAt != nil && !at.After(rule.UpdatedAt.StdTime()) {
+				continue
+			}
 			unsent, err := recordEvent(ctx, &rule, models.AppSubject(app.ID), at)
 			if err != nil {
 				return err
@@ -402,13 +406,8 @@ func notifyKills(ctx context.Context, apps []models.App, statuses map[uint]LiveS
 }
 
 // recordEvent remembers at as the rule's newest event for subject, and
-// says whether the rule has yet to send it. One from before the rule's
-// last change is never sent, so a new or re-enabled rule doesn't report
-// an old kill.
+// says whether the rule has yet to send it.
 func recordEvent(ctx context.Context, rule *models.AlertRule, subject string, at time.Time) (bool, error) {
-	if rule.UpdatedAt != nil && !at.After(rule.UpdatedAt.StdTime()) {
-		return false, nil
-	}
 	var state models.AlertState
 	if err := facades.Orm().WithContext(ctx).Query().Where("alert_rule_id", rule.ID).Where("subject", subject).First(&state); err != nil {
 		return false, err
@@ -424,6 +423,45 @@ func recordEvent(ctx context.Context, rule *models.AlertRule, subject string, at
 	_, err := facades.Orm().WithContext(ctx).Query().Model(&state).Update("event_at", eventAt)
 
 	return true, err
+}
+
+// notifyUpdate tells the server's rules on UpdateAvailable about a
+// release newer than this one, once each: each rule keeps the newest
+// release it sent in alert_states, as with kills for memory. A rule made
+// after the release still hears of it, since it's still there to install.
+func notifyUpdate(latest LatestRelease) {
+	if !release.Newer(latest.Version, release.Version) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	rules, err := rulesFor(ctx, alerts.UpdateAvailable, nil)
+	if err != nil {
+		facades.Log().Error(fmt.Errorf("notify %s: %w", alerts.UpdateAvailable, err))
+		return
+	}
+	at := latest.PublishedAt.Truncate(time.Second)
+	var due []models.AlertRule
+	for _, rule := range rules {
+		unsent, err := recordEvent(ctx, &rule, ServerSubject, at)
+		if err != nil {
+			facades.Log().Error(fmt.Errorf("notify %s: %w", alerts.UpdateAvailable, err))
+			return
+		}
+		if unsent {
+			due = append(due, rule)
+		}
+	}
+	if len(due) == 0 {
+		return
+	}
+	deliver(ctx, due, alerts.Event{
+		Trigger: alerts.UpdateAvailable,
+		Title:   "Echowa " + latest.Version + " is out",
+		Summary: "This server runs " + release.Version + ". Update it from Settings, Updates.",
+		Fields:  []notify.Field{{Label: "Released", Value: latest.PublishedAt.UTC().Format("2 Jan 2006")}},
+		Path:    "/settings",
+	})
 }
 
 func killEvent(app *models.App, status LiveStatus, at time.Time) alerts.Event {

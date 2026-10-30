@@ -35,12 +35,17 @@ type AlertTriggerOption struct {
 	Severity  string `json:"severity"`
 	Suggested bool   `json:"suggested"`
 	// Kind is an event's or a condition's. The rest are a condition's:
-	// its unit, what a percentage is of, whether it breaches below, what
-	// a new alert starts at, and that alert in words.
+	// its unit, what a percentage is of, whether it breaches below, the
+	// words before its threshold, whether its figure moves with the clock
+	// and it's checked hourly, what a new alert starts at, and that alert
+	// in words.
 	Kind        alerts.Kind `json:"kind"`
 	Unit        alerts.Unit `json:"unit"`
 	Of          string      `json:"of"`
 	Below       bool        `json:"below"`
+	Compare     string      `json:"compare"`
+	Clock       bool        `json:"clock"`
+	Hourly      bool        `json:"hourly"`
 	Threshold   float64     `json:"threshold"`
 	ForMinutes  int         `json:"for_minutes"`
 	Description string      `json:"description"`
@@ -88,9 +93,9 @@ type FiringAlert struct {
 	Subject     string `json:"subject"`
 	Description string `json:"description"`
 	Severity    string `json:"severity"`
-	// Value is the last figure, "93% of its limit", or empty for a yes/no
-	// condition.
-	Value string           `json:"value"`
+	// Now is the last figure in words, "Now 93% of its limit.", or empty
+	// for a yes/no condition.
+	Now   string           `json:"now"`
 	Since *carbon.DateTime `json:"since"`
 	Path  string           `json:"path"`
 }
@@ -184,18 +189,13 @@ func AppAlertsSection(ctx context.Context, app *models.App) (AppAlerts, error) {
 		covered[rule.Trigger] = true
 	}
 
-	hasTasks := false
-	if app.Template == nil {
-		count, err := facades.Orm().WithContext(ctx).Query().Model(&models.ScheduledTask{}).Where("app_id", app.ID).Count()
-		if err != nil {
-			return section, err
-		}
-		hasTasks = count > 0
+	applies, err := suggestedFor(ctx, app)
+	if err != nil {
+		return section, err
 	}
 	section.Suggestions = []AlertTriggerOption{}
 	for _, t := range section.Triggers {
-		// A task alert is noise for an app with no tasks.
-		if t.Suggested && !covered[t.ID] && (t.ID != alerts.TaskFailed || hasTasks) {
+		if ok, depends := applies[t.ID]; t.Suggested && !covered[t.ID] && (!depends || ok) {
 			section.Suggestions = append(section.Suggestions, t)
 		}
 	}
@@ -206,6 +206,31 @@ func AppAlertsSection(ctx context.Context, app *models.App) (AppAlerts, error) {
 	section.Recent, err = recentNotifications(ctx, app.ID)
 
 	return section, err
+}
+
+// suggestedFor says, for the triggers that are noise on an app without
+// what they watch, whether app has it: scheduled tasks, a TLS domain, a
+// backup schedule or a connection pooler.
+func suggestedFor(ctx context.Context, app *models.App) (map[string]bool, error) {
+	count := func(model any) (bool, error) {
+		n, err := facades.Orm().WithContext(ctx).Query().Model(model).Where("app_id", app.ID).Count()
+		return n > 0, err
+	}
+	tasks, err := count(&models.ScheduledTask{})
+	if err != nil {
+		return nil, err
+	}
+	schedules, err := count(&models.BackupSchedule{})
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]bool{
+		alerts.TaskFailed:        tasks,
+		alerts.CertificateExpiry: app.Domain != nil && app.TLS,
+		alerts.BackupAge:         schedules,
+		alerts.PoolerDown:        app.Pooling,
+	}, nil
 }
 
 // SettingsAlertsSection reads Settings' alerts.
@@ -298,7 +323,9 @@ func triggerOption(t alerts.Trigger) AlertTriggerOption {
 		Severity: string(t.Severity), Suggested: t.Suggested, Kind: t.Kind, Description: t.Label,
 	}
 	if t.Kind == alerts.KindCondition {
-		option.Unit, option.Of, option.Below, option.Threshold, option.ForMinutes = t.Unit, t.Of, t.Below, t.Threshold, t.ForMinutes
+		option.Unit, option.Of, option.Below, option.Compare = t.Unit, t.Of, t.Below, t.Compare
+		option.Clock, option.Hourly = t.Clock, t.Hourly
+		option.Threshold, option.ForMinutes = t.Threshold, t.ForMinutes
 		option.Description = t.Describe(suggestedRule(t))
 	}
 
@@ -576,8 +603,8 @@ func firing(ctx context.Context, rules []models.AlertRule, states []models.Alert
 			RuleID: rule.ID, Subject: subjectName(app, mount), Description: t.Describe(rule), Severity: rule.Severity,
 			Since: s.Since, Path: conditionPath(t, app),
 		}
-		if t.Unit != alerts.UnitNone && s.Value != nil {
-			alert.Value = figureText(t, *s.Value)
+		if s.Value != nil {
+			alert.Now = t.NowText(*s.Value)
 		}
 		list = append(list, alert)
 	}

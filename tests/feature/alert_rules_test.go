@@ -295,9 +295,10 @@ func (s *AlertRulesTestSuite) TestAnAppsSectionListsItsAlertsTheEveryAppOnesAndW
 	s.Len(section["providers"].([]any), 2)
 }
 
-func (s *AlertRulesTestSuite) TestATaskAlertIsSuggestedOnlyForAnAppWithTasks() {
-	suggestions := func() []string {
-		section, err := services.AppAlertsSection(context.Background(), s.app)
+func (s *AlertRulesTestSuite) TestSomeAlertsAreSuggestedOnlyWhereTheyApply() {
+	suggestions := func(app *models.App) []string {
+		s.Require().NoError(facades.Orm().Query().Find(app, app.ID))
+		section, err := services.AppAlertsSection(context.Background(), app)
 		s.Require().NoError(err)
 		var ids []string
 		for _, t := range section.Suggestions {
@@ -305,12 +306,29 @@ func (s *AlertRulesTestSuite) TestATaskAlertIsSuggestedOnlyForAnAppWithTasks() {
 		}
 		return ids
 	}
-	s.NotContains(suggestions(), alerts.TaskFailed)
+	usual := []string{alerts.DeployFailed, alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory}
+	s.Equal(append(slices.Clone(usual), alerts.CertificateExpiry), suggestions(s.app), "blog has a TLS domain")
+	_, err := facades.Orm().Query().Model(s.app).Update("tls", false)
+	s.Require().NoError(err)
+	s.Equal(usual, suggestions(s.app), "nor tasks")
 
 	task := models.ScheduledTask{AppID: s.app.ID, Name: "Scheduler", Schedule: "* * * * *", Timezone: "UTC", Command: "true", TimeoutMinutes: 1, Enabled: true}
 	s.Require().NoError(facades.Orm().Query().Create(&task))
+	s.Equal(append(slices.Clone(usual), alerts.TaskFailed), suggestions(s.app))
 
-	s.Equal([]string{alerts.DeployFailed, alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory, alerts.TaskFailed}, suggestions())
+	db := s.templateApp("shop-db", "postgres")
+	s.NotContains(suggestions(db), alerts.PoolerDown)
+	s.NotContains(suggestions(db), alerts.BackupAge)
+	loc := models.StorageLocation{Name: "R2", Endpoint: "https://abc123.r2.cloudflarestorage.com", Region: "auto", Bucket: "b",
+		AccessKeyID: "AKIAEXAMPLE", SecretKey: models.Secret("secret")}
+	s.Require().NoError(facades.Orm().Query().Create(&loc))
+	s.Require().NoError(facades.Orm().Query().Create(&models.BackupSchedule{
+		AppID: db.ID, StorageLocationID: loc.ID, Schedule: "0 3 * * *", Timezone: "UTC", Keep: 7, Enabled: true,
+	}))
+	_, err = facades.Orm().Query().Model(db).Update("pooling", true)
+	s.Require().NoError(err)
+	s.Contains(suggestions(db), alerts.PoolerDown)
+	s.Contains(suggestions(db), alerts.BackupAge)
 }
 
 func (s *AlertRulesTestSuite) TestSuggestionsAreAddedAtTheirSeverity() {
@@ -341,10 +359,11 @@ func (s *AlertRulesTestSuite) TestSettingsSuggestsTheServersAndEveryAppsAlerts()
 		suggested = append(suggested, t.(map[string]any)["id"].(string))
 	}
 	s.Equal([]string{
-		alerts.EchowaStarted, alerts.ServerCPU, alerts.ServerMemory, alerts.DiskUsed, alerts.DockerUnreachable,
-		alerts.DeployFailed, alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory,
-		alerts.DBConnections, alerts.LongestTransaction, alerts.TransactionIDAge, alerts.BackupFailed, alerts.TaskFailed,
-	}, suggested)
+		alerts.EchowaStarted, alerts.UpdateAvailable, alerts.ServerCPU, alerts.ServerMemory, alerts.DiskUsed, alerts.DockerUnreachable,
+		alerts.DeployFailed, alerts.Unhealthy, alerts.KilledForMemory, alerts.AppCPU, alerts.AppMemory, alerts.CertificateExpiry,
+		alerts.DBConnections, alerts.LongestTransaction, alerts.TransactionIDAge, alerts.PoolerDown,
+		alerts.BackupFailed, alerts.BackupAge, alerts.TaskFailed,
+	}, suggested, "an every-app alert covers apps made later, so Settings suggests them all")
 
 	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
 		"triggers": []string{alerts.EchowaStarted, alerts.DiskUsed, alerts.DeployFailed, alerts.Unhealthy}, "providers": []uint{s.ops.ID},

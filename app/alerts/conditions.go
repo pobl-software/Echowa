@@ -22,6 +22,8 @@ const (
 	UnitMinutes   Unit = "minutes"
 	UnitCount     Unit = "count"
 	UnitPerSecond Unit = "per_second"
+	UnitHours     Unit = "hours"
+	UnitDays      Unit = "days"
 )
 
 // Phase is where a condition is for one subject (ADR 0040).
@@ -53,8 +55,9 @@ type Observation struct {
 	// Value is nil when it wasn't measured, which is neither breach nor
 	// clear.
 	Value *float64
-	// Stopped is an app that wants no replicas (ADR 0036). It resolves
-	// without a message and stays OK until it starts.
+	// Stopped is a subject the condition doesn't apply to now: an app
+	// that wants no replicas (ADR 0036), or one without what's watched,
+	// such as a TLS domain. It resolves without a message and stays OK.
 	Stopped bool
 }
 
@@ -160,11 +163,7 @@ func (t Trigger) Describe(rule models.AlertRule) string {
 		if rule.Threshold != nil {
 			threshold = *rule.Threshold
 		}
-		direction := "above"
-		if t.Below {
-			direction = "below"
-		}
-		words = append(words, direction, t.withUnit(exact(threshold)))
+		words = append(words, t.comparison(), t.withUnit(exact(threshold)))
 		if t.Of != "" {
 			words = append(words, t.Of)
 		}
@@ -176,10 +175,36 @@ func (t Trigger) Describe(rule models.AlertRule) string {
 	return strings.Join(words, " ")
 }
 
+func (t Trigger) comparison() string {
+	switch {
+	case t.Compare != "":
+		return t.Compare
+	case t.Below:
+		return "below"
+	default:
+		return "above"
+	}
+}
+
 // Format is a measured v in the trigger's unit, rounded: "93%", "12 GiB",
 // "17 minutes", "1,500,000,000" or "3.2 per second".
 func (t Trigger) Format(v float64) string {
 	return t.withUnit(number(v))
+}
+
+// NowText is what a measured v means, as a message and the firing list
+// say it: "Now 93% of its limit." Empty for a yes/no condition.
+func (t Trigger) NowText(v float64) string {
+	switch {
+	case t.Unit == UnitNone:
+		return ""
+	case t.Now != nil:
+		return t.Now(v)
+	case t.Of != "":
+		return "Now " + t.Format(v) + " " + t.Of + "."
+	default:
+		return "Now " + t.Format(v) + "."
+	}
 }
 
 func (t Trigger) withUnit(n string) string {
@@ -189,15 +214,24 @@ func (t Trigger) withUnit(n string) string {
 	case UnitGiB:
 		return n + " GiB"
 	case UnitMinutes:
-		if n == "1" {
-			return "1 minute"
-		}
-		return n + " minutes"
+		return plural(n, "minute")
+	case UnitHours:
+		return plural(n, "hour")
+	case UnitDays:
+		return plural(n, "day")
 	case UnitPerSecond:
 		return n + " per second"
 	default:
 		return n
 	}
+}
+
+func plural(n, unit string) string {
+	if n == "1" {
+		return "1 " + unit
+	}
+
+	return n + " " + unit + "s"
 }
 
 // number is v with one decimal under 10 and none from there, grouped in

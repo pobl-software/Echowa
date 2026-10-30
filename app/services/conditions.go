@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/goravel/framework/support/carbon"
@@ -18,7 +20,7 @@ import (
 
 // The triggers each check evaluates (ADR 0040).
 var (
-	healthTriggers = []string{alerts.Unhealthy}
+	healthTriggers = []string{alerts.Unhealthy, alerts.PoolerDown}
 	metricTriggers = []string{alerts.AppCPU, alerts.AppMemory, alerts.ServerCPU, alerts.ServerMemory, alerts.ServerSwap,
 		alerts.ServerIOWait, alerts.DiskUsed, alerts.DockerUnreachable}
 	databaseTriggers = []string{alerts.DBConnections, alerts.DBSize, alerts.LongestTransaction, alerts.TransactionIDAge,
@@ -195,8 +197,10 @@ func conditionEvent(t alerts.Trigger, rule models.AlertRule, o observation, was 
 		e.Severity = notify.Resolved
 		e.Title = "Resolved: " + e.Title
 		e.Summary = "Clear after firing for " + firing + "."
-		if t.Unit != alerts.UnitNone && o.Value != nil {
-			e.Summary = fmt.Sprintf("Now %s, after firing for %s.", figureText(t, *o.Value), firing)
+		// A figure with words of its own, such as "None for 0.2 hours",
+		// reads wrong once it's clear.
+		if t.Unit != alerts.UnitNone && t.Now == nil && o.Value != nil {
+			e.Summary = strings.TrimSuffix(t.NowText(*o.Value), ".") + ", after firing for " + firing + "."
 		}
 	}
 
@@ -221,51 +225,165 @@ func firingSummary(t alerts.Trigger, value *float64) string {
 		return t.Summary
 	}
 
-	return "Now " + figureText(t, *value) + "."
-}
-
-// figureText is a measured figure as a message says it: "93% of its
-// limit".
-func figureText(t alerts.Trigger, v float64) string {
-	if t.Of == "" {
-		return t.Format(v)
-	}
-
-	return t.Format(v) + " " + t.Of
+	return t.NowText(*value)
 }
 
 // conditionPath is the page that shows a condition's figure.
 func conditionPath(t alerts.Trigger, app *models.App) string {
-	switch {
-	case app == nil:
+	if app == nil {
 		return "/server"
-	case t.ID == alerts.Unhealthy:
-		return fmt.Sprintf("/apps/%d", app.ID)
-	default:
-		return fmt.Sprintf("/apps/%d?tab=metrics", app.ID)
 	}
+	tab := "metrics"
+	switch t.ID {
+	case alerts.Unhealthy:
+		return fmt.Sprintf("/apps/%d", app.ID)
+	case alerts.CertificateExpiry:
+		tab = "domains"
+	case alerts.BackupAge:
+		tab = "backups"
+	case alerts.PoolerDown:
+		tab = "connection"
+	}
+
+	return fmt.Sprintf("/apps/%d?tab=%s", app.ID, tab)
 }
 
 // evaluateHealth checks the apps' health conditions against the status
 // poll that just ran. Running below the replicas wanted breaches; a
 // stopped app or one never deployed resolves silently, and one Docker
-// didn't answer for keeps its state.
+// didn't answer for keeps its state. A PostgreSQL app's pooler is read
+// here too, only while an alert watches it.
 func evaluateHealth(ctx context.Context, apps []models.App, statuses map[uint]LiveStatus, now time.Time) error {
+	watchPoolers, err := hasConditionRules(ctx, alerts.PoolerDown)
+	if err != nil {
+		return err
+	}
 	observed := make([]observation, 0, len(apps))
 	for i := range apps {
-		status := statuses[apps[i].ID]
-		o := observation{trigger: alerts.Unhealthy, app: &apps[i]}
-		switch {
-		case status.State == StateUnknown:
-		case stopped(status):
-			o.Stopped = true
-		default:
-			o.Value = yes(status.Running < status.Desired)
+		app := &apps[i]
+		status := statuses[app.ID]
+		observed = append(observed, observation{trigger: alerts.Unhealthy, app: app, Observation: replicasShort(status)})
+		if watchPoolers && alerts.AppKind(app) == "postgres" {
+			o := observation{trigger: alerts.PoolerDown, app: app, Observation: alerts.Observation{Stopped: true}}
+			if app.Pooling && !stopped(status) {
+				o.Observation = poolerDown(AppPoolerStatus(ctx, app))
+			}
+			observed = append(observed, o)
 		}
-		observed = append(observed, o)
 	}
 
 	return evaluateConditions(ctx, healthTriggers, observed, now)
+}
+
+// replicasShort is whether a service runs fewer replicas than it wants.
+func replicasShort(status LiveStatus) alerts.Observation {
+	switch {
+	case status.State == StateUnknown:
+		return alerts.Observation{}
+	case stopped(status):
+		return alerts.Observation{Stopped: true}
+	default:
+		return alerts.Observation{Value: yes(status.Running < status.Desired)}
+	}
+}
+
+// poolerDown is whether a pooler that should run doesn't: its last sync
+// failed, or its service is short. Unknown while a sync runs.
+func poolerDown(pooler PoolerStatus) alerts.Observation {
+	switch {
+	case pooler.Syncing || pooler.Service == nil || pooler.Service.State == StateUnknown:
+		return alerts.Observation{}
+	case pooler.Error != "", pooler.Service.State == StateNotDeployed:
+		return alerts.Observation{Value: yes(true)}
+	default:
+		return replicasShort(*pooler.Service)
+	}
+}
+
+// hasConditionRules says whether an enabled rule is on trigger, so a
+// check that costs something can skip when none is.
+func hasConditionRules(ctx context.Context, trigger string) (bool, error) {
+	return facades.Orm().WithContext(ctx).Query().Model(&models.AlertRule{}).Where("trigger", trigger).Where("enabled", true).Exists()
+}
+
+// CertificateCheckTimeout bounds each domain's certificate read in the
+// hourly check: longer than the Domains tab's 2 s, since nobody waits.
+const CertificateCheckTimeout = 10 * time.Second
+
+// ServedCertificate reads the certificate Traefik serves for a domain.
+// Tests replace it.
+var ServedCertificate = CheckCertificate
+
+// CheckCertificateAlerts reads the certificate each custom app with a TLS
+// domain is served, and checks the days it has left against the
+// certificate alerts. An app without a TLS domain resolves silently, and
+// one whose certificate can't be read, or isn't issued yet, keeps its
+// state. The scheduler calls it hourly.
+func CheckCertificateAlerts(ctx context.Context, now time.Time) error {
+	if watched, err := hasConditionRules(ctx, alerts.CertificateExpiry); err != nil || !watched {
+		return err
+	}
+	var apps []models.App
+	if err := facades.Orm().WithContext(ctx).Query().WhereNull("template").Get(&apps); err != nil {
+		return err
+	}
+	observed := make([]observation, len(apps))
+	var wg sync.WaitGroup
+	for i := range apps {
+		app := &apps[i]
+		observed[i] = appObservation(alerts.CertificateExpiry, app, nil)
+		if app.Domain == nil || !app.TLS {
+			observed[i].Observation = alerts.Observation{Stopped: true}
+		}
+		if observed[i].Stopped {
+			continue
+		}
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, CertificateCheckTimeout)
+			defer cancel()
+			if cert := ServedCertificate(ctx, *app.Domain, now); cert.NotAfter != nil {
+				observed[i].Value = ptr(cert.NotAfter.Sub(now).Hours() / 24)
+			}
+		})
+	}
+	wg.Wait()
+
+	return evaluateConditions(ctx, []string{alerts.CertificateExpiry}, observed, now)
+}
+
+// CheckBackupAlerts checks how long each app with backups has gone
+// without a successful one: since its newest, or since the app was made
+// when it has none. The scheduler calls it every minute.
+func CheckBackupAlerts(ctx context.Context, now time.Time) error {
+	if watched, err := hasConditionRules(ctx, alerts.BackupAge); err != nil || !watched {
+		return err
+	}
+	trigger, _ := alerts.Find(alerts.BackupAge)
+	var apps []models.App
+	if err := facades.Orm().WithContext(ctx).Query().WhereIn("template", anySlice(trigger.Apps)).Get(&apps); err != nil {
+		return err
+	}
+	observed := make([]observation, 0, len(apps))
+	for i := range apps {
+		app := &apps[i]
+		var newest models.Backup
+		err := facades.Orm().WithContext(ctx).Query().Select("id", "finished_at").Where("app_id", app.ID).
+			Where("status", models.BackupSucceeded).Order("id desc").First(&newest)
+		if err != nil {
+			return err
+		}
+		since := app.CreatedAt
+		if newest.FinishedAt != nil {
+			since = newest.FinishedAt
+		}
+		var hours *float64
+		if since != nil {
+			hours = ptr(now.Sub(since.StdTime()).Hours())
+		}
+		observed = append(observed, appObservation(alerts.BackupAge, app, hours))
+	}
+
+	return evaluateConditions(ctx, []string{alerts.BackupAge}, observed, now)
 }
 
 // stopped is an app that wants no replicas: stopped by the admin (ADR

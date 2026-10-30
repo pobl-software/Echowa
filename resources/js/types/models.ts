@@ -122,7 +122,7 @@ export interface NotificationProvider {
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 export type NotificationStatus = 'pending' | 'sent' | 'failed' | 'suppressed';
 // alerts.Unit: what a condition's threshold is in. Empty is yes/no.
-export type AlertUnit = '' | 'percent' | 'gib' | 'minutes' | 'count' | 'per_second';
+export type AlertUnit = '' | 'percent' | 'gib' | 'minutes' | 'hours' | 'days' | 'count' | 'per_second';
 // A condition's state at its worst, or off while the alert is off.
 export type AlertState = 'ok' | 'pending' | 'firing' | 'off';
 
@@ -142,11 +142,16 @@ export interface AlertTrigger {
     suggested: boolean;
     kind: 'event' | 'condition';
     // A condition's: its unit, what a percentage is of ("of its limit"),
-    // whether it breaches below, what a new alert starts at, and that
-    // alert in words.
+    // whether it breaches below, the words before its threshold in place
+    // of above or below ("less than"), whether its figure moves with the
+    // clock (a backup's age, so no For) and it's checked hourly, what a
+    // new alert starts at, and that alert in words.
     unit: AlertUnit;
     of: string;
     below: boolean;
+    compare: string;
+    clock: boolean;
+    hourly: boolean;
     threshold: number;
     for_minutes: number;
     description: string;
@@ -191,8 +196,9 @@ export interface FiringAlert {
     subject: string;
     description: string;
     severity: AlertSeverity;
-    // The last figure, "93% of its limit", or empty for yes/no.
-    value: string;
+    // The last figure in words, "Now 93% of its limit.", or empty for
+    // yes/no.
+    now: string;
     since: string | null;
     path: string;
 }

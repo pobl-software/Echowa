@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	nethttp "net/http"
 	"testing"
 	"time"
@@ -91,6 +92,14 @@ func (s *ConditionsTestSuite) sent() []string {
 	s.notify = s.FakeNotify()
 
 	return lines
+}
+
+// link is the page the newest message sent points to.
+func (s *ConditionsTestSuite) link() string {
+	sent := s.notify.Sent()
+	s.Require().NotEmpty(sent)
+
+	return sent[len(sent)-1].Message.URL
 }
 
 func (s *ConditionsTestSuite) state(rule models.AlertRule, subject string) models.AlertState {
@@ -308,4 +317,133 @@ func (s *ConditionsTestSuite) TestTheAlertsSectionShowsWhatsFiring() {
 	s.Empty(settings["firing"], "an app's own alert fires on its page")
 	s.Equal("pending", settings["rules"].([]any)[0].(map[string]any)["state"])
 	s.EqualValues(everyApp.ID, settings["rules"].([]any)[0].(map[string]any)["id"])
+}
+
+func (s *ConditionsTestSuite) TestACertificateNearExpiryFiresAndRenewalResolves() {
+	threshold := 14.0
+	s.condition(alerts.CertificateExpiry, nil, &threshold, 0, 0)
+	plain := createTestApp(s.T(), "shop", nil)
+	_, err := facades.Orm().Query().Model(plain).Update("tls", false)
+	s.Require().NoError(err)
+	now := s.start
+	expires := now.Add(10 * 24 * time.Hour)
+	var asked []string
+	served := services.ServedCertificate
+	s.T().Cleanup(func() { services.ServedCertificate = served })
+	services.ServedCertificate = func(_ context.Context, domain string, _ time.Time) services.CertificateCheck {
+		asked = append(asked, domain)
+		return services.CertificateCheck{State: services.CertificateActive, NotAfter: &expires}
+	}
+	check := func(at time.Time) {
+		s.Require().NoError(services.CheckCertificateAlerts(context.Background(), at))
+		services.WaitForNotifications()
+	}
+
+	check(now)
+	s.Equal([]string{"blog.example.com"}, asked, "shop's domain is plain HTTP")
+	s.Contains(s.link(), fmt.Sprintf("/apps/%d?tab=domains", s.app.ID))
+	s.Equal([]string{"blog: Certificate valid for less than 14 days (warning): It expires in 10 days."}, s.sent())
+
+	expires = now.Add(-24 * time.Hour)
+	check(now.Add(time.Hour))
+	s.Empty(s.sent(), "still firing")
+	var state models.AlertState
+	s.Require().NoError(facades.Orm().Query().Where("subject", models.AppSubject(s.app.ID)).First(&state))
+	s.Equal(-1.0, math.Round(*state.Value))
+
+	expires = now.Add(90 * 24 * time.Hour)
+	check(now.Add(2 * time.Hour))
+	s.Equal([]string{"Resolved: blog: Certificate valid for less than 14 days (resolved): Clear after firing for 2 hours."}, s.sent())
+}
+
+func (s *ConditionsTestSuite) TestNoCertificateIsReadWithoutAnAlert() {
+	called := false
+	served := services.ServedCertificate
+	s.T().Cleanup(func() { services.ServedCertificate = served })
+	services.ServedCertificate = func(context.Context, string, time.Time) services.CertificateCheck {
+		called = true
+		return services.CertificateCheck{}
+	}
+	s.Require().NoError(services.CheckCertificateAlerts(context.Background(), s.start))
+	s.False(called)
+}
+
+func (s *ConditionsTestSuite) TestAnAppWithoutABackupForTooLongFires() {
+	tmpl, _ := templates.Find("postgres")
+	db, err := services.CreateApp(context.Background(), services.AppInput{
+		Name: "shop-db", Repository: tmpl.Repository, DefaultTag: tmpl.DefaultTag, Port: tmpl.Port, Replicas: 1,
+	}, &tmpl)
+	s.Require().NoError(err)
+	threshold := 26.0
+	s.condition(alerts.BackupAge, db, &threshold, 0, 0)
+	created := db.CreatedAt.StdTime()
+	check := func(at time.Time) {
+		s.Require().NoError(services.CheckBackupAlerts(context.Background(), at))
+		services.WaitForNotifications()
+	}
+
+	check(created.Add(25 * time.Hour))
+	s.Empty(s.sent(), "a new app gets 26 hours for its first")
+	check(created.Add(27 * time.Hour))
+	s.Contains(s.link(), fmt.Sprintf("/apps/%d?tab=backups", db.ID))
+	s.Equal([]string{"shop-db: No successful backup for more than 26 hours (warning): None for 27 hours."}, s.sent())
+
+	loc := models.StorageLocation{Name: "R2", Endpoint: "https://abc123.r2.cloudflarestorage.com", Region: "auto", Bucket: "echowa-backups",
+		AccessKeyID: "AKIAEXAMPLE", SecretKey: models.Secret("secret")}
+	s.Require().NoError(facades.Orm().Query().Create(&loc))
+	backup := func(status models.BackupStatus, at time.Duration) {
+		finished := carbon.NewDateTime(carbon.FromStdTime(created.Add(at)))
+		s.Require().NoError(facades.Orm().Query().Create(&models.Backup{
+			AppID: db.ID, StorageLocationID: loc.ID, Trigger: models.BackupByHand, Status: status, Key: "k", StartedAt: finished, FinishedAt: finished,
+		}))
+	}
+	backup(models.BackupSucceeded, 27*time.Hour+30*time.Minute)
+	check(created.Add(28 * time.Hour))
+	s.Equal([]string{"Resolved: shop-db: No successful backup for more than 26 hours (resolved): Clear after firing for 1 hour."}, s.sent())
+
+	backup(models.BackupFailed, 50*time.Hour)
+	check(created.Add(55 * time.Hour))
+	s.Equal([]string{"shop-db: No successful backup for more than 26 hours (warning): None for 28 hours."}, s.sent(),
+		"counted from the newest success, not the failure after it")
+}
+
+func (s *ConditionsTestSuite) TestAPoolerThatIsDownFires() {
+	tmpl, _ := templates.Find("postgres")
+	db, err := services.CreateApp(context.Background(), services.AppInput{
+		Name: "shop-db", Repository: tmpl.Repository, DefaultTag: tmpl.DefaultTag, Port: tmpl.Port, Replicas: 1,
+	}, &tmpl)
+	s.Require().NoError(err)
+	_, err = facades.Orm().Query().Model(db).Update("pooling", true)
+	s.Require().NoError(err)
+	poolerRunning := uint64(0)
+	var asked []string
+	s.docker.Status = func(name string) (docker.ServiceStatus, error) {
+		asked = append(asked, name)
+		if name == db.PoolerServiceName() {
+			return docker.ServiceStatus{Name: name, Running: poolerRunning, Desired: 1}, nil
+		}
+		return docker.ServiceStatus{Name: name, Running: 1, Desired: 1}, nil
+	}
+
+	s.poll(0)
+	s.NotContains(asked, db.PoolerServiceName(), "nothing watches it yet")
+
+	s.condition(alerts.PoolerDown, nil, nil, 2, 0)
+	s.poll(1)
+	s.poll(3)
+	s.Contains(s.link(), fmt.Sprintf("/apps/%d?tab=connection", db.ID))
+	s.Equal([]string{"shop-db: Connection pooler down for 2 minutes (critical): Apps that connect through the pooler can't reach the database."}, s.sent())
+
+	poolerRunning = 1
+	s.poll(4)
+	s.poll(6)
+	s.Equal([]string{"Resolved: shop-db: Connection pooler down for 2 minutes (resolved): Clear after firing for 3 minutes."}, s.sent())
+
+	// Pooling off: nothing to be down.
+	poolerRunning = 0
+	_, err = facades.Orm().Query().Model(db).Update("pooling", false)
+	s.Require().NoError(err)
+	s.poll(7)
+	s.poll(10)
+	s.Empty(s.sent())
 }

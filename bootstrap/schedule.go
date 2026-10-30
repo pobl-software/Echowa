@@ -115,6 +115,24 @@ func Schedule() []schedule.Event {
 			}
 		}).EveryMinute().SkipIfStillRunning().Name("echowa:send-held-back"),
 
+		// How long each app with backups has gone without one (ADR 0040).
+		facades.Schedule().Call(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := services.CheckBackupAlerts(ctx, time.Now()); err != nil {
+				facades.Log().Error(fmt.Errorf("backup alerts: %w", err))
+			}
+		}).EveryMinute().SkipIfStillRunning().Name("echowa:check-backup-alerts"),
+
+		// The days each TLS domain's certificate has left (ADR 0040).
+		facades.Schedule().Call(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := services.CheckCertificateAlerts(ctx, time.Now()); err != nil {
+				facades.Log().Error(fmt.Errorf("certificate alerts: %w", err))
+			}
+		}).HourlyAt([]string{"20"}).SkipIfStillRunning().Name("echowa:check-certificate-alerts"),
+
 		facades.Schedule().Call(func() {
 			_, err := services.RunPrune(context.Background(), services.PruneScheduled)
 			if errors.Is(err, services.ErrPruneRunning) {

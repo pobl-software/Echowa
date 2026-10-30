@@ -195,6 +195,20 @@ func TestDescribeAndFormat(t *testing.T) {
 	assert.Equal(t, "Transaction ID age above 1,500,000,000", describe(TransactionIDAge, models.AlertRule{Threshold: threshold(1.5e9)}))
 	assert.Equal(t, "Longest open transaction above 1 minute", describe(LongestTransaction, models.AlertRule{Threshold: threshold(1)}))
 
+	assert.Equal(t, "Certificate valid for less than 14 days", describe(CertificateExpiry, models.AlertRule{Threshold: threshold(14)}))
+	assert.Equal(t, "Certificate valid for less than 1 day", describe(CertificateExpiry, models.AlertRule{Threshold: threshold(1)}))
+	assert.Equal(t, "No successful backup for more than 26 hours", describe(BackupAge, models.AlertRule{Threshold: threshold(26)}))
+
+	cert, _ := Find(CertificateExpiry)
+	assert.Equal(t, "It expires in 3.5 days.", cert.NowText(3.46))
+	assert.Equal(t, "It expired 2 days ago.", cert.NowText(-2))
+	age, _ := Find(BackupAge)
+	assert.Equal(t, "None for 1 hour.", age.NowText(1))
+	memory, _ := Find(AppMemory)
+	assert.Equal(t, "Now 93% of its limit.", memory.NowText(92.6))
+	unhealthy, _ := Find(Unhealthy)
+	assert.Empty(t, unhealthy.NowText(1), "a yes/no condition says what it means in its summary")
+
 	gib, _ := Find(DBSize)
 	assert.Equal(t, "2.5 GiB", gib.Format(2.46))
 	assert.Equal(t, "12 GiB", gib.Format(12.4))

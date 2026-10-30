@@ -48,6 +48,7 @@ const (
 	TaskFailed       = "task.failed"
 	EchowaStarted    = "echowa.started"
 	ImagesPruned     = "prune.removed"
+	UpdateAvailable  = "echowa.update"
 
 	Unhealthy          = "app.unhealthy"
 	AppCPU             = "app.cpu"
@@ -64,6 +65,9 @@ const (
 	ServerIOWait       = "server.iowait"
 	DiskUsed           = "server.disk"
 	DockerUnreachable  = "server.docker"
+	CertificateExpiry  = "app.certificate"
+	PoolerDown         = "db.pooler"
+	BackupAge          = "backup.age"
 )
 
 type Trigger struct {
@@ -73,8 +77,7 @@ type Trigger struct {
 	// Apps lists the app kinds it applies to (Custom or a template's
 	// slug). Nil means every kind.
 	Apps []string
-	// Group is the heading it's listed under: Deploys, Health, Backups,
-	// Tasks or Server.
+	// Group is the heading it's listed under, such as Deploys or Server.
 	Group string
 	Label string
 	// Severity is what a new alert on it starts at.
@@ -91,6 +94,18 @@ type Trigger struct {
 	Below      bool
 	Threshold  float64
 	ForMinutes int
+	// Compare is the words before the threshold, "less than", in place
+	// of above or below.
+	Compare string
+	// Now says what a figure means in a message, "It expires in 3 days.",
+	// when "Now 93% of its limit." wouldn't.
+	Now func(v float64) string
+	// Clock says its figure moves with the clock, such as a backup's age,
+	// so waiting For it would only add to the threshold. The form leaves
+	// For out.
+	Clock bool
+	// Hourly says it's checked each hour, not each minute.
+	Hourly bool
 	// Summary says what a yes/no condition means when it fires.
 	Summary string
 }
@@ -105,6 +120,15 @@ var catalogue = []Trigger{
 		Unit: UnitPercent, Of: "of its limit", Threshold: 90, ForMinutes: 10},
 	{ID: AppMemory, Kind: KindCondition, Scope: ScopeApp, Group: "Resources", Label: "Memory use", Severity: notify.Warning, Suggested: true,
 		Unit: UnitPercent, Of: "of its limit", Threshold: 90, ForMinutes: 5},
+	// Traefik renews a Let's Encrypt certificate with 30 days left, so 14
+	// means it has been failing for two weeks.
+	{ID: CertificateExpiry, Kind: KindCondition, Scope: ScopeApp, Apps: []string{Custom}, Group: "Domain", Label: "Certificate valid for", Severity: notify.Warning, Suggested: true,
+		Unit: UnitDays, Below: true, Compare: "less than", Threshold: 14, Clock: true, Hourly: true, Now: func(v float64) string {
+			if v < 0 {
+				return "It expired " + Trigger{Unit: UnitDays}.Format(-v) + " ago."
+			}
+			return "It expires in " + Trigger{Unit: UnitDays}.Format(v) + "."
+		}},
 	{ID: DBConnections, Kind: KindCondition, Scope: ScopeApp, Apps: withInspect(), Group: "Database", Label: "Connections", Severity: notify.Warning, Suggested: true,
 		Unit: UnitPercent, Of: "of the maximum", Threshold: 80, ForMinutes: 5},
 	{ID: DBSize, Kind: KindCondition, Scope: ScopeApp, Apps: withInspect(), Group: "Database", Label: "Database size", Severity: notify.Warning,
@@ -117,12 +141,20 @@ var catalogue = []Trigger{
 		Unit: UnitPerSecond, Threshold: 0, ForMinutes: 5},
 	{ID: CacheHitRate, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres", "mysql"}, Group: "Database", Label: "Cache hit rate", Severity: notify.Warning,
 		Unit: UnitPercent, Below: true, Threshold: 90, ForMinutes: 15},
+	{ID: PoolerDown, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres"}, Group: "Database", Label: "Connection pooler down", Severity: notify.Critical, Suggested: true,
+		ForMinutes: 2, Summary: "Apps that connect through the pooler can't reach the database."},
 	{ID: BackupFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup failed or skipped", Severity: notify.Critical, Suggested: true},
+	// A day's schedule and two hours for a slow or retried one.
+	{ID: BackupAge, Kind: KindCondition, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "No successful backup", Severity: notify.Warning, Suggested: true,
+		Unit: UnitHours, Compare: "for more than", Threshold: 26, Clock: true, Now: func(v float64) string {
+			return "None for " + Trigger{Unit: UnitHours}.Format(v) + "."
+		}},
 	{ID: BackupSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Backup succeeded", Severity: notify.Info},
 	{ID: RestoreFailed, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore failed", Severity: notify.Critical},
 	{ID: RestoreSucceeded, Kind: KindEvent, Scope: ScopeApp, Apps: withBackups(), Group: "Backups", Label: "Restore finished", Severity: notify.Info},
 	{ID: TaskFailed, Kind: KindEvent, Scope: ScopeApp, Apps: []string{Custom}, Group: "Tasks", Label: "Scheduled task failed or timed out", Severity: notify.Warning, Suggested: true},
 	{ID: EchowaStarted, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Echowa started", Severity: notify.Info, Suggested: true},
+	{ID: UpdateAvailable, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Update available", Severity: notify.Info, Suggested: true},
 	{ID: ImagesPruned, Kind: KindEvent, Scope: ScopeServer, Group: "Server", Label: "Image prune removed images", Severity: notify.Info},
 	{ID: ServerCPU, Kind: KindCondition, Scope: ScopeServer, Group: "Server", Label: "Server CPU use", Severity: notify.Warning, Suggested: true,
 		Unit: UnitPercent, Threshold: 90, ForMinutes: 10},

@@ -87,6 +87,8 @@ const unitSuffix: Record<AlertUnit, string> = {
     percent: '%',
     gib: 'GiB',
     minutes: 'minutes',
+    hours: 'hours',
+    days: 'days',
     count: '',
     per_second: 'per second',
 };
@@ -109,12 +111,11 @@ function describe(t: AlertTrigger, threshold: string, forMinutes: string) {
         let value = '…';
         if (threshold.trim() !== '' && Number.isFinite(n)) {
             const text = Number.isInteger(n) ? n.toLocaleString('en-US') : String(n);
-            value = t.unit === 'percent' ? `${text}%` : [text, unitSuffix[t.unit]].filter(Boolean).join(' ');
-            if (t.unit === 'minutes' && n === 1) {
-                value = '1 minute';
-            }
+            // "1 minute", "1 day": the suffix without its s.
+            const suffix = n === 1 ? unitSuffix[t.unit].replace(/s$/, '') : unitSuffix[t.unit];
+            value = t.unit === 'percent' ? `${text}%` : [text, suffix].filter(Boolean).join(' ');
         }
-        words.push(t.below ? 'below' : 'above', value);
+        words.push(comparison(t), value);
         if (t.of) {
             words.push(t.of);
         }
@@ -125,6 +126,11 @@ function describe(t: AlertTrigger, threshold: string, forMinutes: string) {
     }
 
     return words.join(' ');
+}
+
+// The words before a condition's threshold: "above", or "less than".
+function comparison(t: AlertTrigger) {
+    return t.compare || (t.below ? 'below' : 'above');
 }
 
 // What an alert on Settings covers.
@@ -428,7 +434,7 @@ export function AlertRuleDialog({
                         <DialogTitle>{rule ? `Edit ${rule.label}` : 'Add an alert'}</DialogTitle>
                         <DialogDescription>
                             {condition
-                                ? 'Echowa checks it every minute, and sends when it fires.'
+                                ? `Echowa checks it every ${condition.hourly ? 'hour' : 'minute'}, and sends when it fires.`
                                 : settings
                                   ? 'An alert about the server, or one that covers every app.'
                                   : 'Echowa sends it as soon as it happens.'}
@@ -554,7 +560,9 @@ function ConditionFields({ trigger, form }: { trigger: AlertTrigger; form: RuleF
         <>
             {trigger.unit !== '' && (
                 <Field data-invalid={!!form.errors.threshold || undefined}>
-                    <FieldLabel htmlFor="alert-threshold">{trigger.below ? 'Below' : 'Above'}</FieldLabel>
+                    <FieldLabel htmlFor="alert-threshold">
+                        {comparison(trigger).replace(/^./, (c) => c.toUpperCase())}
+                    </FieldLabel>
                     <InputGroup className="max-w-72">
                         <InputGroupInput
                             id="alert-threshold"
@@ -575,17 +583,19 @@ function ConditionFields({ trigger, form }: { trigger: AlertTrigger; form: RuleF
             )}
 
             <div className="grid gap-5 sm:grid-cols-2">
-                <Field data-invalid={!!form.errors.for_minutes || undefined}>
-                    <FieldLabel htmlFor="alert-for">For</FieldLabel>
-                    <MinutesInput
-                        id="alert-for"
-                        value={form.data.for_minutes}
-                        onChange={(value) => form.setData('for_minutes', value)}
-                        invalid={!!form.errors.for_minutes}
-                    />
-                    <FieldDescription>How long before it fires. 0 fires at the first check.</FieldDescription>
-                    {form.errors.for_minutes && <FieldError>{form.errors.for_minutes}</FieldError>}
-                </Field>
+                {!trigger.clock && (
+                    <Field data-invalid={!!form.errors.for_minutes || undefined}>
+                        <FieldLabel htmlFor="alert-for">For</FieldLabel>
+                        <MinutesInput
+                            id="alert-for"
+                            value={form.data.for_minutes}
+                            onChange={(value) => form.setData('for_minutes', value)}
+                            invalid={!!form.errors.for_minutes}
+                        />
+                        <FieldDescription>How long before it fires. 0 fires at the first check.</FieldDescription>
+                        {form.errors.for_minutes && <FieldError>{form.errors.for_minutes}</FieldError>}
+                    </Field>
+                )}
                 <Field data-invalid={!!form.errors.repeat_minutes || undefined}>
                     <FieldLabel htmlFor="alert-repeat">Repeat every</FieldLabel>
                     <MinutesInput
@@ -617,7 +627,12 @@ function ConditionFields({ trigger, form }: { trigger: AlertTrigger; form: RuleF
 
             <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
                 <span className="text-muted-foreground">Fires when </span>
-                <span className="font-medium">{describe(trigger, form.data.threshold, form.data.for_minutes)}</span>
+                <span className="font-medium">
+                    {/* "memory use above 90%", but "CPU use" stays as it is. */}
+                    {describe(trigger, form.data.threshold, form.data.for_minutes).replace(/^[A-Z](?=[a-z])/, (c) =>
+                        c.toLowerCase(),
+                    )}
+                </span>
             </p>
         </>
     );
@@ -671,7 +686,7 @@ export function FiringAlerts({ firing, subjects }: { firing: FiringAlert[]; subj
                                 {f.description}
                             </Link>
                             <div className="text-xs text-muted-foreground">
-                                {f.value && `Now ${f.value}. `}
+                                {f.now && `${f.now} `}
                                 Fired <span title={formatDateTime(f.since)}>{timeAgo(f.since)}</span>.
                             </div>
                         </div>

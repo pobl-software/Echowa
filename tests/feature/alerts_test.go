@@ -384,6 +384,34 @@ func (s *AlertsTestSuite) TestEchowaStartedSaysWhenAnUpdateBroughtIt() {
 	s.Equal("Echowa updated from v1.1.0 and is running.", s.notify.Sent()[1].Message.Summary)
 }
 
+func (s *AlertsTestSuite) TestANewerReleaseIsSentOnceEach() {
+	version, fetch := release.Version, services.FetchLatestRelease
+	s.T().Cleanup(func() {
+		release.Version, services.FetchLatestRelease = version, fetch
+		services.ResetUpdateCheck()
+	})
+	release.Version = "v1.2.0"
+	latest := services.LatestRelease{Version: "v1.3.0", PublishedAt: time.Now().Add(-7 * 24 * time.Hour)}
+	services.FetchLatestRelease = func(context.Context) (services.LatestRelease, error) { return latest, nil }
+	// Made after the release came out, and still told: it's there to install.
+	s.rule(alerts.UpdateAvailable, nil, notify.Info, s.ops)
+	check := func() {
+		services.CheckForUpdate(context.Background())
+		services.WaitForNotifications()
+	}
+
+	check()
+	check()
+	latest = services.LatestRelease{Version: "v1.4.0", PublishedAt: time.Now()}
+	check()
+	release.Version = "v1.4.0"
+	latest = services.LatestRelease{Version: "v1.4.0", PublishedAt: time.Now().Add(time.Hour)}
+	check()
+
+	s.Equal([]string{"Slack #ops: Echowa v1.3.0 is out (info)", "Slack #ops: Echowa v1.4.0 is out (info)"}, s.sent())
+	s.Equal("This server runs v1.2.0. Update it from Settings, Updates.", s.notify.Sent()[0].Message.Summary)
+}
+
 func (s *AlertsTestSuite) TestAnEventFromARuleThisReleaseDoesntKnowIsSkipped() {
 	rule := models.AlertRule{Scope: models.AlertAllApps, Trigger: "deploy.slow", Severity: "warning", Enabled: true}
 	s.Require().NoError(facades.Orm().Query().Create(&rule))

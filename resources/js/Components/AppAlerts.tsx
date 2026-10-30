@@ -108,7 +108,7 @@ export function ConditionAlert({ app, alert }: { app: { id: number }; alert: Fir
             <AlertTitle>{alert.description}</AlertTitle>
             <AlertDescription className="flex flex-col items-start gap-1 [&_p:not(:last-child)]:mb-0">
                 <p>
-                    {alert.value && `Now ${alert.value}. `}
+                    {alert.now && `${alert.now} `}
                     Fired <span title={formatDateTime(alert.since)}>{timeAgo(alert.since)}</span>.
                 </p>
                 <Link href={`/apps/${app.id}?tab=alerts`}>See its alerts</Link>
