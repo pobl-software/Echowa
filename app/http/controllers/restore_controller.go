@@ -79,7 +79,7 @@ func (r *RestoreController) Store(ctx http.Context) http.Response {
 	if resp := findBackupApp(ctx, &app); resp != nil {
 		return resp
 	}
-	validator, err := ctx.Request().Validate(rules.Restore(), rules.RestoreMessages())
+	validator, err := rules.Validate(ctx, rules.Restore(), rules.RestoreMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -196,7 +196,7 @@ func (r *RestoreController) PreviewNewApp(ctx http.Context) http.Response {
 // and tag, queues its first deploy, and restores the backup into it once
 // it's running.
 func (r *RestoreController) NewApp(ctx http.Context) http.Response {
-	validator, err := ctx.Request().Validate(rules.NewAppRestore(), rules.NewAppRestoreFilters())
+	validator, err := rules.Validate(ctx, rules.NewAppRestore(), rules.NewAppRestoreFilters())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

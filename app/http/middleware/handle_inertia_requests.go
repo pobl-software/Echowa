@@ -9,7 +9,6 @@ import (
 
 	"goravel/app/facades"
 	"goravel/app/inertia"
-	"goravel/app/models"
 	"goravel/app/services"
 )
 
@@ -57,8 +56,8 @@ func (m *HandleInertiaRequests) authUser(ctx http.Context) *AuthUser {
 		return nil
 	}
 
-	var user models.User
-	if err := facades.Auth(ctx).User(&user); err != nil || user.ID == 0 {
+	user, err := services.CurrentUser(ctx)
+	if err != nil || user == nil {
 		return nil
 	}
 

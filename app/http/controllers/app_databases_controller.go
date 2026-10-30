@@ -36,7 +36,7 @@ func (r *AppDatabasesController) Store(ctx http.Context) http.Response {
 		return notFound(ctx)
 	}
 
-	validator, err := ctx.Request().Validate(rules.AppDatabases(), rules.AppDatabasesFilters(), rules.AppDatabasesMessages())
+	validator, err := rules.Validate(ctx, rules.AppDatabases(), rules.AppDatabasesFilters(), rules.AppDatabasesMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

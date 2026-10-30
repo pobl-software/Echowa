@@ -163,7 +163,7 @@ func (r *AppController) Store(ctx http.Context) http.Response {
 		tmpl = &found
 	}
 
-	validator, err := ctx.Request().Validate(rules.App(tmpl != nil && len(tmpl.Volumes) > 0), rules.AppFilters(), rules.AppMessages())
+	validator, err := rules.Validate(ctx, rules.App(tmpl != nil && len(tmpl.Volumes) > 0), rules.AppFilters(), rules.AppMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -450,7 +450,7 @@ func (r *AppController) UpdateResources(ctx http.Context) http.Response {
 	if !known {
 		swap = whole.MemoryMiB
 	}
-	validator, err := ctx.Request().Validate(
+	validator, err := rules.Validate(ctx,
 		rules.AppResources(whole.CPUMillicores, whole.MemoryMiB, swap),
 		rules.AppResourcesMessages(whole.CPUMillicores, whole.MemoryMiB, swap),
 	)
@@ -524,7 +524,7 @@ func (r *AppController) CheckDomain(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(rules.AppDomainCheck(app.ID), rules.AppFilters())
+	validator, err := rules.Validate(ctx, rules.AppDomainCheck(app.ID), rules.AppFilters())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -566,7 +566,7 @@ func resourcesProps(ctx http.Context) *ResourcesProps {
 
 func validateApp(ctx http.Context, appRules map[string]any) (services.AppInput, http.Response) {
 	var in services.AppInput
-	validator, err := ctx.Request().Validate(appRules, rules.AppFilters(), rules.AppMessages())
+	validator, err := rules.Validate(ctx, appRules, rules.AppFilters(), rules.AppMessages())
 	if err != nil {
 		return in, inertia.ServerError(ctx, err)
 	}
@@ -667,7 +667,7 @@ func (r *AppController) EnvUpdate(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(rules.EnvEdits())
+	validator, err := rules.Validate(ctx, rules.EnvEdits())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -711,7 +711,7 @@ func (r *AppController) EnvImport(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(map[string]any{"text": "required|string|max:200000"})
+	validator, err := rules.Validate(ctx, map[string]any{"text": "required|string|max:200000"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

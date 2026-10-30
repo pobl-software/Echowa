@@ -14,6 +14,7 @@ import {
     type LucideIcon,
     PlugIcon,
     ScrollTextIcon,
+    SquareTerminalIcon,
     TriangleAlertIcon,
 } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react';
@@ -42,6 +43,8 @@ export const appSections = [
     { group: 'Observe', id: 'logs', label: 'Logs', icon: ScrollTextIcon },
     // A template app's includes what the database reports (ADR 0027).
     { group: 'Observe', id: 'metrics', label: 'Metrics', icon: ChartLineIcon },
+    // A shell in a custom app's container (ADR 0038).
+    { group: 'Manage', id: 'terminal', label: 'Terminal', icon: SquareTerminalIcon, kind: 'custom' },
     { group: 'Manage', id: 'danger', label: 'Danger zone', icon: TriangleAlertIcon },
 ] as const satisfies readonly {
     group: string;

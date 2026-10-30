@@ -16,6 +16,7 @@ import { DeploymentsTable } from '@/Components/DeploymentsTable';
 import { DockerConfig } from '@/Components/DockerConfig';
 import { EnvEditor } from '@/Components/EnvEditor';
 import { ExternalAccessSection } from '@/Components/ExternalAccessSection';
+import { AppTerminal } from '@/Components/LazyAppTerminal';
 import { LinkedDatabases } from '@/Components/LinkedDatabases';
 import { LinkedServices } from '@/Components/LinkedServices';
 import { Page } from '@/Components/Page';
@@ -153,6 +154,9 @@ export default function AppsShow({
     // The nav needs to know whether the template is one Echowa backs up.
     const navApp = { ...app, backups: template?.backups ?? false };
     const [section, setSection] = useState<AppSection>(() => sectionFromUrl(navApp));
+    // Once opened, the terminal stays mounted, hidden, so its shell lasts
+    // while another section shows.
+    const [terminalOpened, setTerminalOpened] = useState(section === 'terminal');
 
     // Deploy says what it would wait for until the backup or restore ends.
     // The Backups section polls for itself.
@@ -187,6 +191,9 @@ export default function AppsShow({
 
     const show = (value: AppSection) => {
         setSection(value);
+        if (value === 'terminal') {
+            setTerminalOpened(true);
+        }
         const url = new URL(window.location.href);
         url.searchParams.set('tab', value);
         // Keep Inertia's history state; only the address changes.
@@ -236,6 +243,23 @@ export default function AppsShow({
                 }
             >
                 <div className="space-y-6">
+                    {terminalOpened && (
+                        <div hidden={section !== 'terminal'}>
+                            <Panel
+                                title="Terminal"
+                                description={
+                                    <>
+                                        A shell in the newest task of <code className="font-mono">{serviceName}</code>,
+                                        as the image&apos;s user, with the app&apos;s environment. It stays open while
+                                        you switch sections, and closes when you leave the app.
+                                    </>
+                                }
+                            >
+                                <AppTerminal appId={app.id} active={section === 'terminal'} />
+                            </Panel>
+                        </div>
+                    )}
+
                     {section === 'overview' && (
                         <>
                             <OOMAlert status={status} />

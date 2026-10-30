@@ -43,7 +43,7 @@ func (r *ScheduledTaskController) Update(ctx http.Context) http.Response {
 }
 
 func (r *ScheduledTaskController) save(ctx http.Context, app *models.App, task *models.ScheduledTask, done string) http.Response {
-	validator, err := ctx.Request().Validate(rules.ScheduledTask(), rules.ScheduledTaskFilters(), rules.ScheduledTaskMessages())
+	validator, err := rules.Validate(ctx, rules.ScheduledTask(), rules.ScheduledTaskFilters(), rules.ScheduledTaskMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -70,7 +70,7 @@ func (r *ScheduledTaskController) Enabled(ctx http.Context) http.Response {
 	if resp := findTask(ctx, &app, &task); resp != nil {
 		return resp
 	}
-	validator, err := ctx.Request().Validate(map[string]any{"enabled": "required|boolean"})
+	validator, err := rules.Validate(ctx, map[string]any{"enabled": "required|boolean"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

@@ -47,6 +47,25 @@ func Attempt(ctx http.Context, email, password string) (*models.User, error) {
 	return &user, nil
 }
 
+// CurrentUser is the signed-in user, or nil for a guest. It reads the ID
+// from the session and queries with the request's own context: Goravel's
+// Auth(ctx).User queries with its pooled http.Context.
+func CurrentUser(ctx http.Context) (*models.User, error) {
+	id, err := facades.Auth(ctx).ID()
+	if err != nil {
+		return nil, nil
+	}
+	var user models.User
+	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", id).First(&user); err != nil {
+		return nil, err
+	}
+	if user.ID == 0 {
+		return nil, nil
+	}
+
+	return &user, nil
+}
+
 // Login starts an authenticated session (rotating the session ID and CSRF
 // token) and, if asked, sets a long-lived "remember me" cookie.
 func Login(ctx http.Context, user *models.User, remember bool) error {

@@ -1,7 +1,7 @@
 // Package rules is the one place that defines what valid input looks like
 // for registries, apps, env vars and deploy refs. The Is* functions are the
-// checks themselves. The Goravel rules in rules.go wrap them for
-// ctx.Request().Validate. forms.go has a rule map per form for controllers.
+// checks themselves. The Goravel rules in rules.go wrap them for Validate
+// (validate.go). forms.go has a rule map per form for controllers.
 package rules
 
 import (

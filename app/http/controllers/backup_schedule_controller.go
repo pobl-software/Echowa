@@ -41,7 +41,7 @@ func (r *BackupScheduleController) Update(ctx http.Context) http.Response {
 }
 
 func (r *BackupScheduleController) save(ctx http.Context, app *models.App, schedule *models.BackupSchedule, done string) http.Response {
-	validator, err := ctx.Request().Validate(rules.BackupSchedule(), rules.BackupScheduleFilters(), rules.BackupScheduleMessages())
+	validator, err := rules.Validate(ctx, rules.BackupSchedule(), rules.BackupScheduleFilters(), rules.BackupScheduleMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -68,7 +68,7 @@ func (r *BackupScheduleController) Enabled(ctx http.Context) http.Response {
 	if resp := findBackupSchedule(ctx, &app, &schedule); resp != nil {
 		return resp
 	}
-	validator, err := ctx.Request().Validate(map[string]any{"enabled": "required|boolean"})
+	validator, err := rules.Validate(ctx, map[string]any{"enabled": "required|boolean"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

@@ -46,7 +46,7 @@ func (r *RegistryController) Create(ctx http.Context) http.Response {
 }
 
 func (r *RegistryController) Store(ctx http.Context) http.Response {
-	validator, err := ctx.Request().Validate(rules.Registry(0), rules.RegistryFilters())
+	validator, err := rules.Validate(ctx, rules.Registry(0), rules.RegistryFilters())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -85,7 +85,7 @@ func (r *RegistryController) Update(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(rules.Registry(registry.ID), rules.RegistryFilters())
+	validator, err := rules.Validate(ctx, rules.Registry(registry.ID), rules.RegistryFilters())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

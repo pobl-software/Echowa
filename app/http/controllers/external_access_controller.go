@@ -37,7 +37,7 @@ func (r *ExternalAccessController) Store(ctx http.Context) http.Response {
 		return failed(ctx, map[string]string{"external_port": "Only databases made from a template can be reached from outside the server."})
 	}
 
-	validator, err := ctx.Request().Validate(rules.ExternalAccess(app.ID), rules.ExternalAccessMessages())
+	validator, err := rules.Validate(ctx, rules.ExternalAccess(app.ID), rules.ExternalAccessMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}

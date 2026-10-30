@@ -105,7 +105,7 @@ func (r *StorageLocationController) Check(ctx http.Context) http.Response {
 		}
 	}
 
-	validator, err := ctx.Request().Validate(rules.StorageLocationCheck(loc.ID), rules.StorageLocationFilters())
+	validator, err := rules.Validate(ctx, rules.StorageLocationCheck(loc.ID), rules.StorageLocationFilters())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -125,7 +125,7 @@ func (r *StorageLocationController) Check(ctx http.Context) http.Response {
 
 func (r *StorageLocationController) validate(ctx http.Context, id uint) (services.StorageLocationInput, http.Response) {
 	var in services.StorageLocationInput
-	validator, err := ctx.Request().Validate(rules.StorageLocation(id), rules.StorageLocationFilters())
+	validator, err := rules.Validate(ctx, rules.StorageLocation(id), rules.StorageLocationFilters())
 	if err != nil {
 		return in, inertia.ServerError(ctx, err)
 	}

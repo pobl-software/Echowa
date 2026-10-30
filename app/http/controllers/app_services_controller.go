@@ -43,7 +43,7 @@ func (r *AppServicesController) Store(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(rules.AppService(), rules.AppFilters(), rules.AppMessages())
+	validator, err := rules.Validate(ctx, rules.AppService(), rules.AppFilters(), rules.AppMessages())
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -97,7 +97,7 @@ func (r *AppServicesController) Link(ctx http.Context) http.Response {
 		return resp
 	}
 
-	validator, err := ctx.Request().Validate(map[string]any{"link": "array|max:100", "link.*": "integer|distinct"})
+	validator, err := rules.Validate(ctx, map[string]any{"link": "array|max:100", "link.*": "integer|distinct"})
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
