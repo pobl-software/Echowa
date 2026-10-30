@@ -2,7 +2,9 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -156,7 +158,17 @@ func (n *ntfy) Send(ctx context.Context, m Message) error {
 		header = http.Header{"Authorization": {"Bearer " + n.token}}
 	}
 
-	return postJSON(ctx, strings.TrimSuffix(n.server, "/")+"/", ntfyPayload(n.topic, m), header)
+	target, err := url.Parse(n.server)
+	if err != nil {
+		return errors.New("the URL isn't valid")
+	}
+	// The path, not the string: a query would come after the slash.
+	target.Path = strings.TrimSuffix(target.Path, "/") + "/"
+	if target.RawPath != "" {
+		target.RawPath = strings.TrimSuffix(target.RawPath, "/") + "/"
+	}
+
+	return postJSON(ctx, target.String(), ntfyPayload(n.topic, m), header)
 }
 
 func ntfyPayload(topic string, m Message) map[string]any {

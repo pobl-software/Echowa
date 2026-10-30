@@ -25,8 +25,9 @@ var client = &http.Client{
 }
 
 // postJSON sends body to target and fails on anything but a 2xx. Its
-// errors never contain target: a Slack, Discord or Teams webhook URL is
-// the secret, and an error ends up in logs and on the page.
+// errors never contain target, even when the answer quotes it: a Slack,
+// Discord or Teams webhook URL is the secret, and an error ends up in
+// logs and on the page.
 func postJSON(ctx context.Context, target string, body any, header http.Header) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -52,7 +53,19 @@ func postJSON(ctx context.Context, target string, body any, header http.Header) 
 		return nil
 	}
 
-	return statusError(resp, excerpt)
+	return statusError(resp, redact(excerpt, req.URL))
+}
+
+// redact blanks target in a provider's answer, and its path and query on
+// their own, which hold a webhook's secret: some echo the request back.
+func redact(body []byte, target *url.URL) []byte {
+	for _, secret := range []string{target.String(), target.EscapedPath(), target.Path, target.RawQuery} {
+		if len(secret) > 1 {
+			body = bytes.ReplaceAll(body, []byte(secret), []byte("[redacted]"))
+		}
+	}
+
+	return body
 }
 
 // withoutURL replaces a *url.Error, which prints the whole URL, with what

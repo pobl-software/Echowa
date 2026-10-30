@@ -456,16 +456,17 @@ func SaveAlertRule(ctx context.Context, rule *models.AlertRule, in AlertRuleInpu
 			rule.Threshold = in.Threshold
 		}
 	}
-	query := facades.Orm().WithContext(ctx).Query()
-	if rule.ID == 0 {
-		if err := query.Create(rule); err != nil {
+	return facades.Orm().WithContext(ctx).Transaction(func(tx orm.Query) error {
+		if rule.ID == 0 {
+			if err := tx.Create(rule); err != nil {
+				return err
+			}
+		} else if err := tx.Save(rule); err != nil {
 			return err
 		}
-	} else if err := query.Save(rule); err != nil {
-		return err
-	}
 
-	return query.Model(rule).Association("Providers").Replace(providers)
+		return tx.Model(rule).Association("Providers").Replace(providers)
+	})
 }
 
 // SetAlertRuleEnabled turns rule on or off. Off forgets its states without

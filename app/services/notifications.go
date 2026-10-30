@@ -83,8 +83,8 @@ func (in NotificationProviderInput) Apply(p *models.NotificationProvider) error 
 
 // Problem is what's wrong with the form that its rules can't see, keyed
 // by field: plain SMTP anywhere but loopback, which would send the
-// password and the messages in the clear, and a required secret emptied
-// on update.
+// password and the messages in the clear, an SMTP username with no
+// password, sent or kept, and a required secret emptied on update.
 func (in NotificationProviderInput) Problem(p *models.NotificationProvider) map[string]string {
 	kind := p.Kind
 	if kind == "" {
@@ -92,6 +92,9 @@ func (in NotificationProviderInput) Problem(p *models.NotificationProvider) map[
 	}
 	if kind == models.NotifySMTP && in.Security == "none" && !rules.IsLoopbackHost(in.Host) {
 		return map[string]string{"security": "Choose STARTTLS or TLS. Without encryption, the password and messages would cross the network in the clear, so it's only allowed for localhost."}
+	}
+	if kind == models.NotifySMTP && in.Username != "" && !in.hasPassword(p) {
+		return map[string]string{"password": "Enter the password, or leave the username empty to send without signing in."}
 	}
 	emptied := func(sent *string) bool { return sent != nil && strings.TrimSpace(*sent) == "" }
 	switch {
@@ -104,6 +107,18 @@ func (in NotificationProviderInput) Problem(p *models.NotificationProvider) map[
 	}
 
 	return nil
+}
+
+// hasPassword says whether the provider will have an SMTP password once
+// the form is saved. A stored one that can't be read counts, so Apply
+// reports that instead.
+func (in NotificationProviderInput) hasPassword(p *models.NotificationProvider) bool {
+	if in.Password != nil {
+		return strings.TrimSpace(*in.Password) != ""
+	}
+	stored, err := p.SecretValues()
+
+	return err != nil || stored.Password != ""
 }
 
 // NotificationProviderSummary is a row of Settings' Notifications list.

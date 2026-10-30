@@ -267,6 +267,32 @@ func (s *AlertsTestSuite) TestTheStormGuardHoldsBackPastTheBurstThenSaysHowMany(
 	s.Contains(summary.Summary, "at most 20 notifications in 10 minutes")
 }
 
+func (s *AlertsTestSuite) TestAHeldBackSummaryThatFailedIsSentAgain() {
+	s.rule(alerts.EchowaStarted, nil, notify.Info, s.ops)
+	for range services.NotifyBurst + 5 {
+		services.NotifyStarted()
+	}
+	services.WaitForNotifications()
+	pastWindow := func() {
+		_, err := facades.Orm().Query().Model(&models.Notification{}).Where("id > ?", 0).
+			Update("created_at", carbon.NewDateTime(carbon.FromStdTime(time.Now().Add(-services.NotifyWindow-time.Minute))))
+		s.Require().NoError(err)
+	}
+
+	pastWindow()
+	s.notify.Err = &notify.StatusError{Code: 404}
+	s.Require().NoError(services.SendHeldBack(context.Background()))
+	services.WaitForNotifications()
+	s.Equal(models.NotificationFailed, s.notifications()[len(s.notifications())-1].Status)
+
+	s.notify.Err = nil
+	s.Require().NoError(services.SendHeldBack(context.Background()))
+	services.WaitForNotifications()
+
+	sent := s.notify.Sent()
+	s.Equal("5 notifications held back", sent[len(sent)-1].Message.Title, "the failed summary told nobody")
+}
+
 func (s *AlertsTestSuite) killedAt(app *models.App, at time.Time) {
 	s.docker.OOMKilled = map[string]time.Time{app.ServiceName(): at}
 	s.Require().NoError(services.PollAppStatus(context.Background(), time.Now()))

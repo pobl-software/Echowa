@@ -184,6 +184,34 @@ func (s *NotificationProvidersTestSuite) TestPlainSMTPIsOnlyForLoopback() {
 	s.Equal("none", mail.Config.Security)
 }
 
+func (s *NotificationProvidersTestSuite) TestAnSMTPUsernameNeedsAPassword() {
+	b := signedIn(s.T(), &s.TestCase)
+	b.visit("/settings")
+	form := map[string]any{"name": "Mail", "kind": "smtp", "host": "smtp.example.com", "port": 587, "security": "starttls",
+		"username": "echowa", "from": "alerts@example.com", "to": "a@example.com"}
+
+	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form)
+	s.Contains(s.errors(b)["password"], "Enter the password")
+
+	form["password"] = smtpPassword
+	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form)
+	s.Empty(s.errors(b))
+	mail, _ := s.named("Mail")
+	url := fmt.Sprintf("/settings/notifications/%d", mail.ID)
+
+	form["password"] = nil
+	b.submit(nethttp.MethodPut, url, "/settings", form)
+	s.Empty(s.errors(b), "the stored password is kept")
+
+	form["password"] = ""
+	b.submit(nethttp.MethodPut, url, "/settings", form)
+	s.Contains(s.errors(b), "password", "nor can it be removed")
+
+	form["username"] = ""
+	b.submit(nethttp.MethodPut, url, "/settings", form)
+	s.Empty(s.errors(b), "without a username, it doesn't sign in")
+}
+
 func (s *NotificationProvidersTestSuite) TestUpdateKeepsSecretsSentAsNull() {
 	phone := s.createNtfy()
 	b := signedIn(s.T(), &s.TestCase)

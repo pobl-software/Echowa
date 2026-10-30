@@ -29,6 +29,7 @@ var message = Message{
 // received is a request a provider's test server saw.
 type received struct {
 	path   string
+	query  string
 	header http.Header
 	body   map[string]any
 }
@@ -43,7 +44,7 @@ func server(t *testing.T, status int, body string) (*httptest.Server, *[]receive
 		require.NoError(t, json.Unmarshal(raw, &parsed), string(raw))
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		got = append(got, received{path: r.URL.Path, header: r.Header, body: parsed})
+		got = append(got, received{path: r.URL.Path, query: r.URL.RawQuery, header: r.Header, body: parsed})
 		w.Header().Set("Retry-After", "3")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -141,6 +142,16 @@ func TestNtfy(t *testing.T) {
 	assert.Equal(t, "Swarm rolled the update back <fast>.\n\nImage: ghcr.io/acme/shop:v2\nTook: 41s", r.body["message"])
 }
 
+func TestNtfyBehindAPathAndQuery(t *testing.T) {
+	srv, got := server(t, http.StatusOK, `{}`)
+	require.NoError(t, send(t, provider(models.NotifyNtfy, models.NotificationConfig{Server: srv.URL + "/ntfy?auth=x"},
+		models.NotificationSecrets{Topic: "t"})))
+
+	require.Len(t, *got, 1)
+	assert.Equal(t, "/ntfy/", (*got)[0].path)
+	assert.Equal(t, "auth=x", (*got)[0].query, "the slash goes on the path, not after the query")
+}
+
 func TestNtfyWithoutAToken(t *testing.T) {
 	srv, got := server(t, http.StatusOK, `{}`)
 	require.NoError(t, send(t, provider(models.NotifyNtfy, models.NotificationConfig{Server: srv.URL},
@@ -186,6 +197,7 @@ func TestErrorsNameTheAnswerAndNeverTheURL(t *testing.T) {
 		{"a rate limit", http.StatusTooManyRequests, `{"message": "You are being rate limited."}`, "the provider answered 429 Too Many Requests: You are being rate limited. (try again in 3s)", false, 3 * time.Second},
 		{"a server error", http.StatusBadGateway, "", "the provider answered 502 Bad Gateway", false, 0},
 		{"a redirect, not followed", http.StatusFound, "", "the provider answered 302 Found", false, 0},
+		{"an answer that quotes the path", http.StatusNotFound, `{"message": "No webhook at /api/webhooks/1/hunter2"}`, "the provider answered 404 Not Found: No webhook at [redacted]", true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := server(t, tc.status, tc.body)
@@ -196,6 +208,17 @@ func TestErrorsNameTheAnswerAndNeverTheURL(t *testing.T) {
 			assert.Equal(t, tc.after, RetryAfter(err))
 		})
 	}
+
+	t.Run("an answer that quotes the URL", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, "bad payload for http://"+r.Host+r.URL.Path)
+		}))
+		t.Cleanup(srv.Close)
+		err := send(t, provider(models.NotifySlack, models.NotificationConfig{}, models.NotificationSecrets{WebhookURL: srv.URL + "/services/hunter2"}))
+		require.Error(t, err)
+		assert.Equal(t, "the provider answered 400 Bad Request: bad payload for [redacted]", err.Error())
+	})
 
 	t.Run("nobody listening", func(t *testing.T) {
 		srv, _ := server(t, http.StatusOK, "")

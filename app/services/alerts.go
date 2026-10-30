@@ -254,10 +254,12 @@ func SendHeldBack(ctx context.Context) error {
 		return err
 	}
 	for _, p := range providers {
-		// Held back since the last summary that went out.
+		// Held back since the last summary that went out or is still
+		// being sent. One that failed told nobody, so its count carries
+		// over to the next.
 		var last models.Notification
-		err := facades.Orm().WithContext(ctx).Query().Where("notification_provider_id", p.ID).
-			Where("trigger", heldBackTrigger).Where("status <> ?", models.NotificationSuppressed).Order("id desc").First(&last)
+		err := facades.Orm().WithContext(ctx).Query().Where("notification_provider_id", p.ID).Where("trigger", heldBackTrigger).
+			WhereIn("status", []any{models.NotificationSent, models.NotificationPending}).Order("id desc").First(&last)
 		if err != nil {
 			return err
 		}
