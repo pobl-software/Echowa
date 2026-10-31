@@ -218,7 +218,8 @@ test-docker)
 	require_vm
 	for pkg in docker templates backups; do
 		GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o "tmp/$pkg.test" "./app/$pkg"
-		in_vm "./tmp/$pkg.test" -test.count=1 -test.v
+		# From the package's folder, as go test runs it, so testdata/ resolves.
+		(cd "app/$pkg" && in_vm "../../tmp/$pkg.test" -test.count=1 -test.v)
 	done
 	# Echowa's own restore, from its deploy through the dev S3 server.
 	GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o tmp/feature.test ./tests/feature

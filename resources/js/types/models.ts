@@ -419,8 +419,10 @@ export interface BackupFailure {
 // services.BackupsSection: a template app's Backups section, and its
 // Overview's line and alerts.
 export interface BackupsSection {
-    // The one database a backup covers.
+    // The one database a backup covers, or empty when it covers the whole
+    // server, as Redis's does.
     database: string;
+    whole_server: boolean;
     // The one the app last backed up to comes first.
     locations: StorageChoice[];
     schedules: BackupSchedule[];
@@ -500,8 +502,10 @@ export interface RestorePreview {
     // The template's, for a restore into a new app.
     default_tag: string;
     // PostgreSQL's restore applies all of a backup or none of it; MySQL's
-    // doesn't.
+    // and Redis's don't.
     atomic: boolean;
+    // Redis's replaces every database in the server, and has no database name.
+    whole_server: boolean;
     // Why it can't go ahead, and what to know before it does.
     refusal: string;
     warning: string;
@@ -521,6 +525,7 @@ export interface NewAppPreview {
     size_bytes: number;
     started_at: string;
     atomic: boolean;
+    whole_server: boolean;
     default_tag: string;
 }
 

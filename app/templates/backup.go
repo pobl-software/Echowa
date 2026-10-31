@@ -11,7 +11,8 @@ import (
 // The commands are constants that read secrets from the container's env
 // inside sh -c: nothing a request sends goes into one.
 type Backup struct {
-	// Database is the env var naming the one database Dump covers.
+	// Database is the env var naming the one database Dump covers, or ""
+	// when Dump covers the whole server, as Redis's does.
 	Database string
 	// Version prints the server's version, which ServerVersion reads.
 	Version []string
@@ -21,9 +22,15 @@ type Backup struct {
 	Ready []string
 	// Dump writes the app's database to stdout.
 	Dump []string
+	// Restorable prints 1 when the running server can take Restore, which
+	// one started by an older release may not. Nil means it always can.
+	Restorable []string
 	// Restore reads a dump on stdin into the app's database, and exits
 	// with a status other than 0 when any of it fails.
 	Restore []string
+	// Unchanged is the status Restore exits with when it refused the dump
+	// before changing anything. 0 means it never says.
+	Unchanged int
 	// Extension is the dump's, without the dot: "dump", "sql.gz".
 	Extension string
 	// Gzip has Echowa compress Dump's output, and decompress it for Restore.
@@ -51,6 +58,12 @@ type Export struct {
 	// Gzip has Echowa compress Dump's output. A gzip stream ends with a
 	// checksum, so a dump that fails part way can't pass for a whole one.
 	Gzip bool `json:"-"`
+}
+
+// WholeServer means a dump holds every database in the server, and a
+// restore replaces all of them.
+func (b *Backup) WholeServer() bool {
+	return b.Database == ""
 }
 
 // FindExport is the export format named, or the first for "".
@@ -174,5 +187,56 @@ var mysqlBackup = &Backup{
 		Format: "sql", Label: "SQL",
 		Hint: "For mysql, or Import in phpMyAdmin.",
 		Dump: mysqlDump, Extension: "sql.gz", Gzip: true,
+	}},
+}
+
+// Redis has no dump a client replays, so a backup is the RDB snapshot a
+// replica would get, every logical database in it. It ends with the 40
+// byte mark that ends a diskless transfer, which redis-cli can't trim from
+// stdout and Redis ignores after the RDB's checksum (ADR 0044).
+var redisDump = []string{"sh", "-c", `export REDISCLI_AUTH="$REDIS_PASSWORD"; exec redis-cli --rdb -`}
+
+// redisRestore loads a snapshot with DEBUG RELOAD, which the server allows
+// from inside its container only. It writes to dump.rdb because the file's
+// name and folder can't be changed at runtime, so it pauses saves first. A
+// file redis-check-rdb refuses never reaches the server. redis-cli exits 0
+// on an error reply, so every reply is checked, or a failed reload, which
+// empties the server, would be written to the append-only file.
+const redisRestore = `set -e
+export REDISCLI_AUTH="$REDIS_PASSWORD"
+expect() { want=$1; shift; out=$(redis-cli "$@"); [ "$out" = "$want" ] || { echo "$*: $out" >&2; exit 1; }; }
+info() { redis-cli INFO persistence | tr -d '\r' | sed -n "s/^$1://p"; }
+[ "$(redis-cli --raw CONFIG GET enable-debug-command | sed -n 2p)" = local ] || { echo "DEBUG is off: redeploy the app first" >&2; exit 3; }
+saves=$(redis-cli --raw CONFIG GET save | sed -n 2p)
+f=/data/echowa-restore.rdb
+expect OK CONFIG SET save ""
+trap 'rm -f "$f"; redis-cli CONFIG SET save "$saves" >/dev/null' EXIT
+while [ "$(info rdb_bgsave_in_progress)" = 1 ]; do sleep 0.1; done
+cat > "$f" || exit 3
+check=$(redis-check-rdb "$f" 2>&1) || { echo "$check" >&2; exit 3; }
+chown redis:redis "$f"
+mv "$f" /data/dump.rdb
+expect OK DEBUG RELOAD NOSAVE
+redis-cli BGREWRITEAOF >/dev/null
+sleep 0.1
+while [ "$(info aof_rewrite_in_progress)" = 1 ] || [ "$(info aof_rewrite_scheduled)" = 1 ]; do sleep 0.1; done
+[ "$(info aof_last_bgrewrite_status)" = ok ] || { echo "The append-only file wasn't rewritten" >&2; exit 1; }`
+
+var redisBackup = &Backup{
+	Version: []string{"redis-server", "--version"},
+	// The image runs no temporary server, but one loading its data
+	// answers LOADING.
+	Ready:      []string{"sh", "-c", `[ "$(` + redisCLI + ` ping)" = PONG ] && echo 1 || echo 0`},
+	Dump:       redisDump,
+	Restorable: []string{"sh", "-c", `[ "$(` + redisCLI + ` --raw CONFIG GET enable-debug-command | sed -n 2p)" = local ] && echo 1 || echo 0`},
+	Restore:    []string{"sh", "-c", redisRestore},
+	Unchanged:  3,
+	Extension:  "rdb",
+	// The RDB format changes in minor releases: 7.4 can't read 8.0's.
+	Compatible: sameOrNewer(2),
+	Exports: []Export{{
+		Format: "rdb", Label: "RDB snapshot",
+		Hint: "For redis-server with appendonly off, as dump.rdb in its dir, or redis-check-rdb.",
+		Dump: redisDump, Extension: "rdb",
 	}},
 }

@@ -71,8 +71,8 @@ func (s *BackupsTestSuite) TestOffSchedulesAndAppsWithoutBackupsNeverRun() {
 	off := s.addSchedule(s.app, "* * * * *", "UTC", 7)
 	_, err := facades.Orm().Query().Model(off).Update("enabled", false)
 	s.Require().NoError(err)
-	cache := s.templateApp("cache", "redis")
-	s.addSchedule(cache, "* * * * *", "UTC", 7)
+	blog := createTestApp(s.T(), "blog", nil)
+	s.addSchedule(blog, "* * * * *", "UTC", 7)
 
 	s.runDueBackups("2027-01-05 10:00")
 
@@ -275,8 +275,8 @@ func (s *BackupsTestSuite) TestTheScheduleForm() {
 	s.Equal(rec.ID, kept.ID, "deleting a schedule keeps its backups")
 	s.Nil(kept.BackupScheduleID)
 
-	cache := s.templateApp("cache", "redis")
-	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backup-schedules", cache.ID), page, map[string]any{
+	blog := createTestApp(s.T(), "blog", nil)
+	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backup-schedules", blog.ID), page, map[string]any{
 		"storage_location_id": s.loc.ID, "schedule": "0 3 * * *", "timezone": "UTC", "keep": 7,
 	}).AssertNotFound()
 }

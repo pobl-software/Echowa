@@ -5,6 +5,8 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -141,24 +143,51 @@ func TestReadDumpHeadReadsMySQLDumps(t *testing.T) {
 	assert.Equal(t, "10.11.6", head.ServerVersion)
 }
 
+// The snapshots are redis-cli --rdb - from the redis:8 and redis:7.4
+// images, with a few keys in databases 0 and 3, ending with the 40 byte
+// mark of a diskless transfer as every backup does.
+func TestReadDumpHeadReadsRedisSnapshots(t *testing.T) {
+	for file, want := range map[string]DumpHead{
+		"redis-8.10.3.rdb": {Template: "redis", ServerVersion: "8.10.3", Made: time.Date(2026, 10, 31, 22, 32, 30, 0, time.UTC)},
+		"redis-7.4.12.rdb": {Template: "redis", ServerVersion: "7.4.12", Made: time.Date(2026, 10, 31, 22, 32, 37, 0, time.UTC)},
+	} {
+		rdb := readTestdata(t, file)
+		head, err := ReadDumpHead(rdb)
+		require.NoError(t, err, file)
+		assert.Equal(t, want, head, file)
+		assert.NoError(t, head.ReadableBy("8.10.3"), "the server version check covers Redis")
+
+		// Only the start of an upload has arrived when it's first read.
+		head, err = ReadDumpHead(rdb[:40])
+		require.NoError(t, err, file)
+		assert.Equal(t, want.ServerVersion, head.ServerVersion, file)
+	}
+}
+
 func TestReadDumpHeadSaysWhyItCantRestoreAFile(t *testing.T) {
 	pg := fromHex(t, postgres18Head)
+	rdb := readTestdata(t, "redis-8.10.3.rdb")
 	tar := append([]byte{}, pg...)
 	tar[10] = 3
 	for name, c := range map[string]struct {
 		head []byte
 		want string
 	}{
-		"plain SQL":      {gzipped(t, "--\n-- PostgreSQL database dump\n--\n\n\\restrict abc\n"), "This is plain SQL from pg_dump."},
-		"another format": {tar, "isn't in the custom format"},
-		"a cut header":   {pg[:60], "ends before its header does"},
-		"an old archive": {[]byte("PGDMP\x01\x09\x00"), "version 1.9"},
-		"no version":     {[]byte("-- MySQL dump 10.13\n-- Host: localhost    Database: shop\n"), "doesn't say which server"},
-		"anything else":  {[]byte("PK\x03\x04 a zip file"), "can't tell what this file is"},
-		"empty":          {nil, "can't tell what this file is"},
-		"a broken gzip":  {[]byte{0x1f, 0x8b, 0x00}, "gzipped, but it can't be read"},
-		"phpMyAdmin's":   {[]byte("-- phpMyAdmin SQL Dump\n-- version 5.2.1\n"), "can't tell what this file is"},
-		"a cut version":  {pg[:80], "ends before its header does"},
+		"plain SQL":          {gzipped(t, "--\n-- PostgreSQL database dump\n--\n\n\\restrict abc\n"), "This is plain SQL from pg_dump."},
+		"another format":     {tar, "isn't in the custom format"},
+		"a cut header":       {pg[:60], "ends before its header does"},
+		"an old archive":     {[]byte("PGDMP\x01\x09\x00"), "version 1.9"},
+		"no version":         {[]byte("-- MySQL dump 10.13\n-- Host: localhost    Database: shop\n"), "doesn't say which server"},
+		"anything else":      {[]byte("PK\x03\x04 a zip file"), "can't tell what this file is"},
+		"empty":              {nil, "can't tell what this file is"},
+		"a broken gzip":      {[]byte{0x1f, 0x8b, 0x00}, "gzipped, but it can't be read"},
+		"phpMyAdmin's":       {[]byte("-- phpMyAdmin SQL Dump\n-- version 5.2.1\n"), "can't tell what this file is"},
+		"a cut version":      {pg[:80], "ends before its header does"},
+		"a cut snapshot":     {rdb[:20], "ends before its header does"},
+		"a snapshot's magic": {rdb[:5], "ends before its header does"},
+		"a bad RDB format":   {[]byte("REDISxxxx\xfa"), "format version can't be read"},
+		"no redis-ver":       {append([]byte("REDIS0015\xfa\x0aredis-bits\xc0\x40"), 0xfe, 0x00), "doesn't say which server made it"},
+		"a gzipped snapshot": {gzipped(t, string(rdb)), "gunzip it first"},
 		// The start of mysqldump --databases and --all-databases, from MySQL 9.7.4.
 		"--databases": {gzipped(t, mysqlHead+"\n--\n-- Current Database: `mysqldb`\n--\n\nCREATE DATABASE /*!32312 IF NOT EXISTS*/ `mysqldb`;\n\nUSE `mysqldb`;\n"),
 			"switches to them"},
@@ -170,4 +199,12 @@ func TestReadDumpHeadSaysWhyItCantRestoreAFile(t *testing.T) {
 			assert.Contains(t, err.Error(), c.want, name)
 		}
 	}
+}
+
+func readTestdata(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	require.NoError(t, err)
+
+	return b
 }

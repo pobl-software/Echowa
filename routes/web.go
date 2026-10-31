@@ -2,6 +2,7 @@ package routes
 
 import (
 	"fmt"
+	"io/fs"
 	nethttp "net/http"
 	"runtime/debug"
 
@@ -36,6 +37,13 @@ func Web() {
 
 	// Built frontend assets, from the binary in a release build.
 	facades.Route().StaticFS("build", assets.Build())
+	facades.Route().Get("/favicon.ico", func(ctx http.Context) http.Response {
+		icon, err := fs.ReadFile(assets.FS(), assets.Favicon)
+		if err != nil {
+			return inertia.NotFound(ctx)
+		}
+		return ctx.Response().Header("Cache-Control", "public, max-age=86400").Data(http.StatusOK, "image/x-icon", icon)
+	})
 
 	// Health check, outside the session stack. The version is only for
 	// this machine: echowa setup and the updater wait for the new one.

@@ -112,7 +112,11 @@ export function AppBackups({ app, section, held }: { app: App; section: BackupsS
             {stored && (
                 <Panel
                     title="Backups"
-                    description={`Dumps of the ${section.database} database in S3, newest first.`}
+                    description={
+                        section.whole_server
+                            ? 'Snapshots of the whole server in S3, newest first.'
+                            : `Dumps of the ${section.database} database in S3, newest first.`
+                    }
                     actions={<BackUpButton app={app} locations={section.locations} running={running} />}
                     flush
                 >
@@ -157,21 +161,25 @@ export function AppBackups({ app, section, held }: { app: App; section: BackupsS
 
             <Panel
                 title="Export and restore"
-                description={`Download the database, or restore ${app.name} from a file or straight from a bucket.`}
+                description={`Download ${section.whole_server ? 'a snapshot' : 'the database'}, or restore ${app.name} from a file or straight from a bucket.`}
                 flush
             >
                 <div className="divide-y">
                     <ConfigSection
                         icon={DownloadIcon}
                         title="Export"
-                        description="Downloads the database to this browser as it's dumped. Nothing is kept on the server or in S3."
+                        description={
+                            section.whole_server
+                                ? "Downloads a snapshot of the server to this browser as it's taken. Nothing is kept on the server or in S3."
+                                : "Downloads the database to this browser as it's dumped. Nothing is kept on the server or in S3."
+                        }
                     >
                         <ExportControl app={app} section={section} held={held} />
                     </ConfigSection>
                     <ConfigSection
                         icon={FileUpIcon}
                         title="Restore from a file"
-                        description="Uploads a dump from this computer, checks it, then restores it into the database."
+                        description={`Uploads a ${section.whole_server ? 'snapshot' : 'dump'} from this computer, checks it, then restores it into the ${section.whole_server ? 'server' : 'database'}.`}
                     >
                         <RestoreFromFile app={app} section={section} blocked={fileBlocked} />
                     </ConfigSection>
@@ -251,15 +259,25 @@ function Coverage({ section }: { section: BackupsSection }) {
                             ? `${formatBytes(kept.reduce((sum, b) => sum + b.size_bytes, 0))}${more ? ' in the newest' : ' in all'}`
                             : 'None kept yet',
                 },
-                {
-                    label: 'Covers',
-                    value: <span className="font-mono text-base">{section.database}</span>,
-                    hint: (
-                        <span title="A backup holds this one database, not others made by hand in the same server.">
-                            {version ? `Server ${version}, this database only` : 'This database only'}
-                        </span>
-                    ),
-                },
+                section.whole_server
+                    ? {
+                          label: 'Covers',
+                          value: 'Every key',
+                          hint: (
+                              <span title="A backup holds every logical database in the server, and a restore replaces all of them.">
+                                  {version ? `Server ${version}, every database` : 'Every database in the server'}
+                              </span>
+                          ),
+                      }
+                    : {
+                          label: 'Covers',
+                          value: <span className="font-mono text-base">{section.database}</span>,
+                          hint: (
+                              <span title="A backup holds this one database, not others made by hand in the same server.">
+                                  {version ? `Server ${version}, this database only` : 'This database only'}
+                              </span>
+                          ),
+                      },
             ]}
         />
     );

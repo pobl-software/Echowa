@@ -215,12 +215,16 @@ export function BackupFacts({ preview, newApp }: { preview: RestorePreview; newA
             )}
             <dt className="text-muted-foreground">Size</dt>
             <dd className="tabular-nums">{formatBytes(preview.size_bytes)}</dd>
-            <dt className="text-muted-foreground">Database</dt>
-            <dd className="font-mono text-xs leading-5 break-all">
-                {newApp || preview.database === preview.app_database
-                    ? preview.database
-                    : `${preview.database} into ${preview.app_database}`}
-            </dd>
+            {!preview.whole_server && (
+                <>
+                    <dt className="text-muted-foreground">Database</dt>
+                    <dd className="font-mono text-xs leading-5 break-all">
+                        {newApp || preview.database === preview.app_database
+                            ? preview.database
+                            : `${preview.database} into ${preview.app_database}`}
+                    </dd>
+                </>
+            )}
             <dt className="text-muted-foreground">{preview.template}</dt>
             <dd className="font-mono text-xs leading-5">
                 {preview.server_version}
@@ -237,10 +241,25 @@ export function BackupFacts({ preview, newApp }: { preview: RestorePreview; newA
     );
 }
 
-// Replaces says what the restore changes, and how it fails. MySQL's isn't
-// all or nothing, so it says so before it's confirmed.
+// Replaces says what the restore changes, and how it fails. MySQL's and
+// Redis's aren't all or nothing, so they say so before it's confirmed.
 export function Replaces({ preview }: { preview: RestorePreview }) {
     const database = <code className="font-mono text-xs">{preview.app_database}</code>;
+    if (preview.whole_server) {
+        return (
+            <Alert>
+                <TriangleAlertIcon className="text-warning" />
+                <AlertTitle>This replaces every key</AlertTitle>
+                <AlertDescription>
+                    <p>
+                        Every database in the server gets the backup&apos;s keys, and keys written since the backup are
+                        gone. The file is checked first, so a damaged one changes nothing, but if loading it fails after
+                        that, the server may be left empty. Apps using it see errors while it loads.
+                    </p>
+                </AlertDescription>
+            </Alert>
+        );
+    }
     if (preview.atomic) {
         return (
             <p className="text-sm text-muted-foreground">

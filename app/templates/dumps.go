@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -81,14 +82,19 @@ var (
 	// switch to it, before any of its tables.
 	mysqlSwitch  = regexp.MustCompile(`(?m)^(-- Current Database: |CREATE DATABASE |USE )`)
 	pgPlainStart = []byte("-- PostgreSQL database dump")
+	rdbMagic     = []byte("REDIS")
 )
 
 // ReadDumpHead reads which template's dump head starts, and what it says.
-// It knows PostgreSQL's custom format and mysqldump's SQL, gzipped or not.
-// An error says, in words for the page, why the file can't be restored.
+// It knows PostgreSQL's custom format, mysqldump's SQL, gzipped or not,
+// and Redis's RDB snapshots. An error says, in words for the page, why the
+// file can't be restored.
 func ReadDumpHead(head []byte) (DumpHead, error) {
 	if bytes.HasPrefix(head, pgdmp) {
 		return readPostgresCustom(head)
+	}
+	if bytes.HasPrefix(head, rdbMagic) {
+		return readRDB(head)
 	}
 	text, gzipped := head, false
 	if bytes.HasPrefix(head, gzipMagic) {
@@ -105,9 +111,11 @@ func ReadDumpHead(head []byte) (DumpHead, error) {
 	case bytes.Contains(start, pgPlainStart):
 		return DumpHead{}, errors.New("This is plain SQL from pg_dump. Restore takes PostgreSQL's custom format, " +
 			"the .dump that Export and backups make. Load plain SQL with psql instead.")
+	case bytes.HasPrefix(start, rdbMagic):
+		return DumpHead{}, errors.New("This is a gzipped Redis snapshot. Restore takes the .rdb as Export and backups make it, so gunzip it first.")
 	}
 
-	return DumpHead{}, errors.New("Echowa can't tell what this file is. Restore takes the .dump or .sql.gz " +
+	return DumpHead{}, errors.New("Echowa can't tell what this file is. Restore takes the .dump, .sql.gz or .rdb " +
 		"that Export or a backup's download made.")
 }
 
@@ -215,6 +223,126 @@ func readPostgresCustom(head []byte) (DumpHead, error) {
 }
 
 var errHeaderCut = errors.New("The file ends before its header does.")
+
+// rdbAux starts one of the auxiliary fields an RDB file begins with.
+const rdbAux = 0xfa
+
+// readRDB reads a Redis snapshot's auxiliary fields, which come before
+// any data: redis-ver, the server that made it, and ctime, when.
+func readRDB(head []byte) (DumpHead, error) {
+	if len(head) < len(rdbMagic)+4 {
+		return DumpHead{}, errHeaderCut
+	}
+	if _, err := strconv.Atoi(string(head[len(rdbMagic) : len(rdbMagic)+4])); err != nil {
+		return DumpHead{}, errors.New("This file starts like a Redis snapshot, but its format version can't be read.")
+	}
+	r := &rdbReader{b: head[len(rdbMagic)+4:]}
+	aux := map[string]string{}
+	for r.err == nil && len(r.b) > 0 && r.b[0] == rdbAux {
+		r.b = r.b[1:]
+		key, value := r.str(), r.str()
+		if r.err == nil {
+			aux[key] = value
+		}
+	}
+	server, ok := aux["redis-ver"]
+	if !ok && (r.err == errHeaderCut || len(r.b) == 0) {
+		return DumpHead{}, errHeaderCut
+	}
+	if !ok {
+		return DumpHead{}, errors.New("This Redis snapshot doesn't say which server made it.")
+	}
+	version, err := ServerVersion([]byte(server))
+	if err != nil {
+		return DumpHead{}, errors.New("This Redis snapshot's server version can't be read.")
+	}
+
+	dump := DumpHead{Template: "redis", ServerVersion: version}
+	if ctime, err := strconv.ParseInt(aux["ctime"], 10, 64); err == nil && ctime > 0 {
+		dump.Made = time.Unix(ctime, 0).UTC()
+	}
+
+	return dump, nil
+}
+
+// rdbReader reads the strings of an RDB file's auxiliary fields. Its first
+// error sticks, and every read after it returns "".
+type rdbReader struct {
+	b   []byte
+	err error
+}
+
+func (r *rdbReader) take(n int) []byte {
+	if r.err != nil {
+		return nil
+	}
+	if n > len(r.b) {
+		r.err = errHeaderCut
+		return nil
+	}
+	b := r.b[:n]
+	r.b = r.b[n:]
+
+	return b
+}
+
+// str is a length, then that many bytes, or an integer stored in 1, 2 or
+// 4 bytes, little-endian, as its decimal digits. A compressed string
+// isn't read: no auxiliary field Echowa needs is long enough to be one.
+func (r *rdbReader) str() string {
+	first := r.take(1)
+	if first == nil {
+		return ""
+	}
+	b := first[0]
+	var n uint64
+	switch b >> 6 {
+	case 0:
+		n = uint64(b & 0x3f)
+	case 1:
+		next := r.take(1)
+		if next == nil {
+			return ""
+		}
+		n = uint64(b&0x3f)<<8 | uint64(next[0])
+	case 2:
+		size := map[byte]int{0x80: 4, 0x81: 8}[b]
+		if size == 0 {
+			r.err = errors.New("This Redis snapshot's header can't be read.")
+			return ""
+		}
+		for _, c := range r.take(size) {
+			n = n<<8 | uint64(c)
+		}
+	default:
+		size := map[byte]int{0: 1, 1: 2, 2: 4}[b&0x3f]
+		if size == 0 {
+			r.err = errors.New("This Redis snapshot's header can't be read.")
+			return ""
+		}
+		var v uint32
+		for i, c := range r.take(size) {
+			v |= uint32(c) << (8 * i)
+		}
+		if r.err != nil {
+			return ""
+		}
+		return strconv.FormatInt(int64(signExtend(v, size)), 10)
+	}
+	if r.err != nil || n > uint64(len(r.b)) {
+		r.err = errHeaderCut
+		return ""
+	}
+
+	return string(r.take(int(n)))
+}
+
+// signExtend reads the low size bytes of v as a signed integer.
+func signExtend(v uint32, size int) int32 {
+	shift := 32 - 8*size
+
+	return int32(v<<shift) >> shift
+}
 
 // archiveReader reads the integers and strings of a custom-format header.
 // Its first error sticks, and every read after it returns zero.

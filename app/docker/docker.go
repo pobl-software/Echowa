@@ -117,7 +117,8 @@ type Client interface {
 	// is. cmd is a template's backup or restore command (ADR 0034). The
 	// error wraps ErrNotRunning or ErrNotManaged as Exec's does, is ctx's
 	// when ctx ends first, or says stdin's read failed, in which case the
-	// command saw its input end early. It returns once the command has
+	// command saw its input end early, and the exit code is still the
+	// command's. It returns once the command has
 	// ended and nothing reads stdin any more.
 	ExecStream(ctx context.Context, service string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
 

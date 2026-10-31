@@ -8,8 +8,8 @@
 //	go test -tags docker ./app/templates/...
 //
 // It pulls postgres:18, mysql:9.7 and redis:8, and needs the docker CLI to
-// exec into the tasks. PostgreSQL and MySQL are also backed up and
-// restored, as ADR 0034 does.
+// exec into the tasks. Each is also backed up and restored, as ADRs 0034
+// and 0044 do.
 package templates
 
 import (
@@ -611,7 +611,9 @@ var backupProbes = map[string]struct {
 
 func TestTemplatesBackUpAndRestore(t *testing.T) {
 	for _, tmpl := range All() {
-		if tmpl.Backup == nil {
+		// A whole server's backup has no tables to probe:
+		// TestRedisBacksUpAndRestoresTheWholeServer covers it.
+		if tmpl.Backup == nil || tmpl.Backup.WholeServer() {
 			continue
 		}
 		t.Run(tmpl.Slug, func(t *testing.T) {
@@ -704,6 +706,101 @@ func TestTemplatesBackUpAndRestore(t *testing.T) {
 			}, time.Minute, time.Second, "a dump of a stopped service fails with ErrNotRunning")
 		})
 	}
+}
+
+func TestRedisBacksUpAndRestoresTheWholeServer(t *testing.T) {
+	tmpl, _ := Find("redis")
+	b := tmpl.Backup
+	cli := func(r *templateRun, args ...string) string {
+		t.Helper()
+		out, err := r.exec(append([]string{"sh", "-c", `REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli "$@"`, "sh"}, args...)...)
+		require.NoError(t, err, out)
+		return strings.TrimSpace(out)
+	}
+	positive := func(r *templateRun, args ...string) {
+		t.Helper()
+		n, err := strconv.Atoi(cli(r, args...))
+		require.NoError(t, err)
+		assert.Positive(t, n, "%v", args)
+	}
+	// Every kind of value, a module's among them, in two databases.
+	seed := func(r *templateRun) {
+		t.Helper()
+		require.Equal(t, "OK", cli(r, "DEBUG", "POPULATE", "5000", "key", "64"))
+		require.Equal(t, "OK", cli(r, "SET", "note", "café ☃"))
+		require.Equal(t, "OK", cli(r, "SET", "session", "abc", "EX", "86400"))
+		require.Equal(t, "2", cli(r, "RPUSH", "queue", "a", "b"))
+		require.Equal(t, "2", cli(r, "HSET", "user", "name", "Ada", "token", "t"))
+		require.Equal(t, "1", cli(r, "HEXPIRE", "user", "86400", "FIELDS", "1", "token"))
+		require.Equal(t, "OK", cli(r, "JSON.SET", "doc", "$", `{"a":[1,2]}`))
+		require.Equal(t, "OK", cli(r, "-n", "3", "SET", "other", "db3"))
+	}
+	assertKept := func(r *templateRun, msg string) {
+		t.Helper()
+		assert.Equal(t, "5005", cli(r, "DBSIZE"), msg)
+		assert.Equal(t, "café ☃", cli(r, "GET", "note"), msg)
+		assert.Equal(t, "a\nb", cli(r, "LRANGE", "queue", "0", "-1"), msg)
+		assert.Equal(t, "Ada", cli(r, "HGET", "user", "name"), msg)
+		assert.Equal(t, `{"a":[1,2]}`, cli(r, "JSON.GET", "doc"), msg)
+		assert.Equal(t, "db3", cli(r, "-n", "3", "GET", "other"), msg)
+		positive(r, "TTL", "session")
+		positive(r, "HTTL", "user", "FIELDS", "1", "token")
+	}
+
+	source := deployTemplate(t, "redis", false)
+	seed(source)
+	out, err := source.engine.Exec(source.ctx, source.spec.Name, b.Version)
+	require.NoError(t, err)
+	version, err := ServerVersion(out)
+	require.NoError(t, err)
+	t.Logf("server version %s (%s)", version, strings.TrimSpace(string(out)))
+
+	start := time.Now()
+	dump, code, stderr := source.stream(b.Dump, nil)
+	require.Equal(t, 0, code, stderr)
+	t.Logf("dumped %d bytes in %s", len(dump), time.Since(start))
+	assert.Contains(t, stderr, "Transfer finished with success")
+	head, err := ReadDumpHead(dump)
+	require.NoError(t, err)
+	assert.Equal(t, "redis", head.Template)
+	assert.Equal(t, version, head.ServerVersion)
+
+	target := deployTemplate(t, "redis", false)
+	out, err = target.engine.Exec(target.ctx, target.spec.Name, b.Restorable)
+	require.NoError(t, err)
+	assert.Equal(t, "1", strings.TrimSpace(string(out)), "a server Echowa deploys can take a restore")
+	saves := cli(target, "CONFIG", "GET", "save")
+	_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump))
+	require.Equal(t, 0, code, stderr)
+	assertKept(target, "restored into a fresh app, with its own password")
+	assert.Equal(t, saves, cli(target, "CONFIG", "GET", "save"), "saves are back on")
+	target.redeploy()
+	assertKept(target, "the restore was written to the append-only file")
+
+	require.Equal(t, "OK", cli(source, "SET", "note", "changed"))
+	require.Equal(t, "OK", cli(source, "SET", "since", "the backup"))
+	require.Equal(t, "1", cli(source, "DEL", "queue"))
+	_, code, stderr = source.stream(b.Restore, bytes.NewReader(dump))
+	require.Equal(t, 0, code, stderr)
+	assertKept(source, "restored over changed data")
+	assert.Equal(t, "0", cli(source, "EXISTS", "since"), "keys written since the backup are gone")
+
+	flipped := bytes.Clone(dump)
+	flipped[len(flipped)/2] ^= 0xff
+	for name, broken := range map[string][]byte{
+		"not a dump": []byte("this is not a dump\n"),
+		"cut off":    dump[:len(dump)/2],
+		"flipped":    flipped,
+		"empty":      nil,
+	} {
+		_, code, stderr = target.stream(b.Restore, bytes.NewReader(broken))
+		assert.Equal(t, b.Unchanged, code, "%s is refused before anything changes: %s", name, stderr)
+		assertKept(target, name+" changed nothing")
+	}
+	assert.Equal(t, saves, cli(target, "CONFIG", "GET", "save"), "saves are back on after a refusal")
+	ls, err := target.exec("ls", "/data")
+	require.NoError(t, err)
+	assert.NotContains(t, ls, "echowa-restore", "a refused dump's file is removed")
 }
 
 // stream runs cmd in the service's task through ExecStream, as a backup

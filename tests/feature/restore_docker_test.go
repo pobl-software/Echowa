@@ -321,3 +321,101 @@ func (s *RestoreDockerTestSuite) TestAPostgres17BackupRestoresIntoANewAppOn18() 
 	s.Equal("18", strings.SplitN(s.sql(app, "SHOW server_version"), ".", 2)[0])
 	s.Equal("1\tfrom 17\n2\tnaïve ☃", s.sql(app, "SELECT id, note FROM kept ORDER BY id"))
 }
+
+// redis runs redis-cli in the app's task with args, as the template's
+// default user.
+func (s *RestoreDockerTestSuite) redis(app *models.App, args ...string) string {
+	s.T().Helper()
+	cmd := append([]string{"sh", "-c", `REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli "$@"`, "sh"}, args...)
+	var out, errs bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	code, err := s.engine.ExecStream(ctx, app.ServiceName(), cmd, nil, &out, &errs)
+	s.Require().NoError(err)
+	s.Require().Equal(0, code, errs.String())
+
+	return strings.TrimSpace(out.String())
+}
+
+// A Redis backup is the whole server, and a restore replaces all of it,
+// every logical database, through the same path as PostgreSQL's (ADR 0044).
+func (s *RestoreDockerTestSuite) TestARedisRestoreBringsBackTheWholeServer() {
+	ctx := context.Background()
+	app := s.deployed("redis")
+	s.waitForSQL(app)
+	s.Equal("OK", s.redis(app, "SET", "note", "café"))
+	s.Equal("OK", s.redis(app, "-n", "3", "SET", "other", "db3"))
+	rec, err := services.BackUpNow(app, &s.loc)
+	s.Require().NoError(err)
+	services.WaitForBackups()
+	s.Require().NoError(facades.Orm().Query().Find(rec, rec.ID))
+	s.Require().Equal(models.BackupSucceeded, rec.Status, "backup: %v %s", rec.Message, rec.Output)
+
+	changed := func() {
+		s.Equal("OK", s.redis(app, "SET", "note", "changed"))
+		s.Equal("OK", s.redis(app, "SET", "since", "the backup"))
+		s.Equal("1", s.redis(app, "-n", "3", "DEL", "other"))
+	}
+	backedUp := func(msg string) {
+		s.Equal("café", s.redis(app, "GET", "note"), msg)
+		s.Equal("db3", s.redis(app, "-n", "3", "GET", "other"), msg)
+		s.Equal("0", s.redis(app, "EXISTS", "since"), msg)
+	}
+	changed()
+
+	src, err := services.BackupSource(ctx, app, rec.ID)
+	s.Require().NoError(err)
+	preview, err := services.PreviewRestore(ctx, app, src)
+	s.Require().NoError(err)
+	s.Empty(preview.Refusal, "a Redis Echowa deployed can take a restore")
+	s.True(preview.WholeServer)
+	restore := s.restored(app, src, &s.loc)
+	s.Require().Equal(models.RestoreSucceeded, restore.Status)
+	backedUp("the backup's keys are back, and only them")
+
+	s.Require().NotNil(restore.SafetyBackupID)
+	src, err = services.BackupSource(ctx, app, *restore.SafetyBackupID)
+	s.Require().NoError(err)
+	s.Require().Equal(models.RestoreSucceeded, s.restored(app, src, nil).Status)
+	s.Equal("changed", s.redis(app, "GET", "note"), "the safety backup held the keys the restore replaced")
+	s.Equal("the backup", s.redis(app, "GET", "since"))
+
+	// An export, uploaded back, says which server it came from.
+	format, _ := services.AppBackup(app).FindExport("")
+	export, err := services.StartExport(ctx, app, format, time.Now())
+	s.Require().NoError(err)
+	file, err := io.ReadAll(export)
+	s.Require().NoError(err)
+	s.Require().NoError(export.Err())
+	s.Require().NoError(export.Close())
+	s.Equal("OK", s.redis(app, "SET", "note", "after the export"))
+	upload, err := services.StartUpload(app, export.Filename, int64(len(file)))
+	s.Require().NoError(err)
+	_, err = upload.Write(0, bytes.NewReader(file))
+	s.Require().NoError(err)
+	src, err = services.UploadSource(app, upload.ID)
+	s.Require().NoError(err)
+	preview, err = services.PreviewRestore(ctx, app, src)
+	s.Require().NoError(err)
+	s.Empty(preview.Refusal)
+	s.Equal(preview.AppVersion, preview.ServerVersion, "the snapshot says which server it came from")
+	s.Require().Equal(models.RestoreSucceeded, s.restored(app, src, nil).Status)
+	s.Equal("changed", s.redis(app, "GET", "note"), "the export's keys are back")
+
+	// A dump changed in the bucket never reaches the server.
+	store := backups.Open(&s.loc)
+	body, err := store.Get(ctx, rec.Key)
+	s.Require().NoError(err)
+	dump, err := io.ReadAll(body)
+	_ = body.Close()
+	s.Require().NoError(err)
+	dump[len(dump)/2] ^= 0xff
+	s.Require().NoError(store.Put(ctx, rec.Key, bytes.NewReader(dump)))
+	src, err = services.BackupSource(ctx, app, rec.ID)
+	s.Require().NoError(err)
+	restore = s.restored(app, src, nil)
+	s.Equal(models.RestoreFailed, restore.Status)
+	s.Equal("The dump in the bucket doesn't match its manifest, so the restore was stopped before its end. Nothing was restored.", *restore.Message,
+		"redis-check-rdb refused what arrived, and said so")
+	s.Equal("changed", s.redis(app, "GET", "note"), "the server kept its keys")
+}

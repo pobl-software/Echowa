@@ -562,8 +562,8 @@ export default function AppsShow({
                                     {backups?.last_succeeded && (
                                         <>
                                             {' '}
-                                            Its backups stay in the bucket. New app, From a backup restores one into a
-                                            new app.
+                                            Its backups stay in the bucket. New app, From a backup under its template
+                                            restores one into a new app.
                                         </>
                                     )}
                                 </p>

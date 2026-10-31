@@ -52,7 +52,7 @@ type Template struct {
 	// template that has none.
 	Inspect *Inspect
 	// Backup dumps and restores the database (ADR 0034). Nil for a
-	// template Echowa doesn't back up, such as Redis.
+	// template Echowa doesn't back up.
 	Backup *Backup
 	// Pooler is the connection pooler the app can run beside the server
 	// (ADR 0035). Nil for a template without one.
@@ -324,7 +324,9 @@ var all = []Template{
 		Healthcheck: redisCLI + ` ping | grep -q PONG`,
 		// The image takes its password only as an argument. sh reads it from
 		// the encrypted env var, and the image's entrypoint still drops root.
-		Server:     `docker-entrypoint.sh redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"`,
+		// A restore loads its snapshot with DEBUG, from inside the container
+		// only (ADR 0044).
+		Server:     `docker-entrypoint.sh redis-server --appendonly yes --requirepass "$REDIS_PASSWORD" --enable-debug-command local`,
 		ReplaceCMD: true,
 		Env: []Env{
 			{Key: "REDIS_PASSWORD", Value: Generated},
@@ -348,5 +350,6 @@ var all = []Template{
 			Client: "Connect with TLS and the CA certificate: redis-cli --tls --cacert <file>, or a rediss:// URL.",
 		},
 		Inspect: redisInspect,
+		Backup:  redisBackup,
 	},
 }

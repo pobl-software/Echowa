@@ -485,8 +485,10 @@ type StorageChoice struct {
 // BackupsSection is a template app's Backups section (ADR 0034), and what
 // its Overview shows.
 type BackupsSection struct {
-	// Database is the one database a backup covers.
-	Database string `json:"database"`
+	// Database is the one database a backup covers, or "" when it covers
+	// the whole server.
+	Database    string `json:"database"`
+	WholeServer bool   `json:"whole_server"`
 	// Locations come with the one the app last backed up to first.
 	Locations []StorageChoice         `json:"locations"`
 	Schedules []BackupScheduleSummary `json:"schedules"`
@@ -521,7 +523,10 @@ func AppBackups(ctx context.Context, app *models.App, limit int, now time.Time) 
 		return nil, err
 	}
 
-	section := &BackupsSection{Database: env[b.Database], Locations: []StorageChoice{}, Backups: []BackupSummary{}, Exports: b.Exports}
+	section := &BackupsSection{
+		Database: env[b.Database], WholeServer: b.WholeServer(),
+		Locations: []StorageChoice{}, Backups: []BackupSummary{}, Exports: b.Exports,
+	}
 	if section.Schedules, err = backupSchedules(ctx, app.ID, now); err != nil {
 		return nil, err
 	}

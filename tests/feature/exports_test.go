@@ -102,12 +102,10 @@ func (s *BackupsTestSuite) TestExportMySQLIsGzippedSQL() {
 }
 
 func (s *BackupsTestSuite) TestExportAnswers404WithoutABackupOrFormat() {
-	redis := s.templateApp("cache", "redis")
 	custom := createTestApp(s.T(), "blog", nil)
 	s.script("", "dump", 0, "", nil)
 	b := signedIn(s.T(), &s.TestCase)
 
-	b.request(nethttp.MethodGet, exportURL(redis, ""), nil, false, nil).AssertNotFound()
 	b.request(nethttp.MethodGet, exportURL(custom, ""), nil, false, nil).AssertNotFound()
 	b.request(nethttp.MethodGet, exportURL(s.app, "tar"), nil, false, nil).AssertNotFound()
 	s.Zero(s.dumpCount())

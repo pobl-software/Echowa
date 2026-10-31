@@ -370,26 +370,21 @@ func (s *BackupsTestSuite) TestRecoveryMarksEarlierBackupsInterruptedAndAbortsTh
 	s.Equal(models.BackupRunning, ours.Status, "this process's own backups are left alone")
 }
 
-func (s *BackupsTestSuite) TestRedisAndCustomAppsHaveNoBackups() {
-	redis := s.templateApp("cache", "redis")
+func (s *BackupsTestSuite) TestCustomAppsHaveNoBackups() {
 	custom := createTestApp(s.T(), "blog", nil)
 	rec := &models.Backup{
-		AppID: redis.ID, StorageLocationID: s.loc.ID, Trigger: models.BackupByHand, Status: models.BackupSucceeded,
+		AppID: custom.ID, StorageLocationID: s.loc.ID, Trigger: models.BackupByHand, Status: models.BackupSucceeded,
 		Key: "k", StartedAt: carbon.NewDateTime(carbon.Now()),
 	}
 	s.Require().NoError(facades.Orm().Query().Create(rec))
 	b := signedIn(s.T(), &s.TestCase)
 
-	for _, app := range []*models.App{redis, custom} {
-		_, page := b.visit(fmt.Sprintf("/apps/%d", app.ID))
-		s.Nil(page.Props["backups"], app.Name)
-		b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backups", app.ID), fmt.Sprintf("/apps/%d", app.ID),
-			map[string]any{"location": s.loc.ID}).AssertNotFound()
-		b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d", app.ID, rec.ID), nil, false, nil).AssertNotFound()
-		b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d/download", app.ID, rec.ID), nil, false, nil).AssertNotFound()
-	}
-	_, page := b.visit(fmt.Sprintf("/apps/%d", redis.ID))
-	s.Equal(false, page.Props["template"].(map[string]any)["backups"])
+	_, page := b.visit(fmt.Sprintf("/apps/%d", custom.ID))
+	s.Nil(page.Props["backups"])
+	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backups", custom.ID), fmt.Sprintf("/apps/%d", custom.ID),
+		map[string]any{"location": s.loc.ID}).AssertNotFound()
+	b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d", custom.ID, rec.ID), nil, false, nil).AssertNotFound()
+	b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d/download", custom.ID, rec.ID), nil, false, nil).AssertNotFound()
 	s.Zero(s.dumpCount())
 }
 

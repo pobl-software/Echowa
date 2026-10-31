@@ -63,12 +63,12 @@ func (s *BackupsTestSuite) scriptNewApp(script newAppScript) {
 
 // restoreToNewApp posts the New app page's From a backup form.
 func (s *BackupsTestSuite) restoreToNewApp(b *browser, data map[string]any) {
-	b.visit("/apps/create?from=backup")
-	b.submit(nethttp.MethodPost, "/apps/restore", "/apps/create?from=backup", data)
+	b.visit("/apps/create?template=postgres&from=backup")
+	b.submit(nethttp.MethodPost, "/apps/restore", "/apps/create?template=postgres&from=backup", data)
 }
 
 func (s *BackupsTestSuite) newAppError(b *browser, field string) any {
-	_, page := b.visit("/apps/create?from=backup")
+	_, page := b.visit("/apps/create?template=postgres&from=backup")
 
 	return page.Props["errors"].(map[string]any)[field]
 }
@@ -105,7 +105,7 @@ func (s *BackupsTestSuite) TestABucketBackupRestoresIntoANewAppOnANewerServer() 
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret)
 
-	_, page := b.visit("/apps/create?from=backup")
+	_, page := b.visit("/apps/create?template=postgres&from=backup")
 	s.Len(page.Props["locations"], 1)
 	folders := s.getJSON(b, fmt.Sprintf("/backups/browse?location=%d", s.loc.ID), nethttp.StatusOK)
 	s.Equal([]any{"old-shop"}, folders["folders"])
@@ -162,7 +162,7 @@ func (s *BackupsTestSuite) TestAnAppsBackupRestoresIntoANewApp() {
 
 func (s *BackupsTestSuite) TestARestoreIntoANewAppThatCantBeMadeMakesNothing() {
 	key := s.putBackup("old-shop", "postgres", "17.2", "none", "old-shop-20261001T030000Z-7.dump", []byte("PGDMP"))
-	redis := s.putBackup("cache", "redis", "8.0", "none", "cache-20261001T030000Z-8.dump", []byte("x"))
+	mongo := s.putBackup("docs", "mongo", "8.0", "none", "docs-20261001T030000Z-8.dump", []byte("x"))
 	s.scriptNewApp(newAppScript{version: postgres186, ready: true})
 	tmpl, _ := templates.Find("postgres")
 	seed, err := tmpl.Seed("leftover")
@@ -182,7 +182,7 @@ func (s *BackupsTestSuite) TestARestoreIntoANewAppThatCantBeMadeMakesNothing() {
 			"The volume " + seed.Volumes[0].Name + " is left from an earlier app called leftover and may hold its data. Pick another name, or remove it on the server with docker volume rm " + seed.Volumes[0].Name + "."},
 		{map[string]any{"location": s.loc.ID, "key": "elsewhere/old-shop/x.json", "name": "shop-copy", "tag": "18"}, "source", "Choose a backup in R2."},
 		{map[string]any{"location": s.loc.ID, "key": backups.JoinKey(s.loc.Prefix, "old-shop/old-shop-20261001T030000Z-7.dump"), "name": "shop-copy", "tag": "18"}, "source", "Choose a backup in R2."},
-		{map[string]any{"location": s.loc.ID, "key": redis, "name": "shop-copy", "tag": "18"}, "source", "This is a backup of a Redis database, which Echowa can't restore."},
+		{map[string]any{"location": s.loc.ID, "key": mongo, "name": "shop-copy", "tag": "18"}, "source", "This is a backup of a mongo database, which Echowa can't restore."},
 		{map[string]any{"location": s.loc.ID, "key": backups.JoinKey(s.loc.Prefix, "gone/gone-1.json"), "name": "shop-copy", "tag": "18"}, "source", "The backup's manifest isn't in R2 any more."},
 	}
 	for _, c := range cases {

@@ -9,10 +9,10 @@ import (
 )
 
 // The release build (make release) is one file: the built frontend, the
-// root template and the licence notices are compiled in. Run `npm run build`
+// favicon, the root template and the licence notices are compiled in. Run `npm run build`
 // and `make licenses` first.
 //
-//go:embed public/build resources/views dist/licenses.txt
+//go:embed public/build public/favicon.ico resources/views dist/licenses.txt
 var files embed.FS
 
 func init() {

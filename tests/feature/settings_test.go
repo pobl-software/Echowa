@@ -68,7 +68,7 @@ func (s *SettingsTestSuite) TestTheOverviewSaysWhatEachSectionNeeds() {
 
 	props = s.overview()
 	s.Equal(map[string]any{"count": float64(1), "apps": float64(1)}, props["registries"])
-	s.Equal(float64(1), props["storage"].(map[string]any)["databases"], "PostgreSQL is backed up; Redis isn't")
+	s.Equal(float64(2), props["storage"].(map[string]any)["databases"], "PostgreSQL and Redis are both backed up")
 	s.Equal(map[string]any{"providers": float64(2), "enabled": float64(1), "failing": []any{"Slack #ops"}}, props["notifications"])
 	s.Equal(float64(0), props["alerts"].(map[string]any)["rules"])
 	s.NotZero(props["alerts"].(map[string]any)["suggestions"])

@@ -299,12 +299,12 @@ PostgreSQL, MySQL or Redis app made from a template keeps its data in a
 Docker volume, `echowa-<app>-data`, which survives deploys but not
 deleting the app.
 
-**PostgreSQL and MySQL apps** have a **Backups** section that dumps the
-app's database (the one its connection URL names) to S3-compatible
-storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, Hetzner or your
-own. Other databases you made by hand in the same server aren't
-included. Redis apps have no Backups section; use the commands further
-down.
+**Template apps** have a **Backups** section that backs the app up to
+S3-compatible storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi,
+Hetzner or your own. For PostgreSQL and MySQL it dumps the app's
+database, the one its connection URL names; other databases you made by
+hand in the same server aren't included. For Redis it's a snapshot of
+the whole server, every logical database in it.
 
 1. **Add a storage location.** In **Settings, S3 storage**, click **Add
    location** and fill in the endpoint, region, bucket, an optional
@@ -325,14 +325,18 @@ down.
    name to confirm. By default, Echowa first backs up the current data,
    so you can go back. PostgreSQL restores all or nothing; MySQL restores
    one table at a time and stops at the first error, which is when that
-   first backup matters. A backup never restores into an older server.
+   first backup matters. A Redis restore replaces every key, and keys
+   written since the backup are gone. It checks the snapshot before
+   loading it, so a damaged one changes nothing. A Redis app deployed by
+   an older Echowa needs one redeploy before its first restore. A backup
+   never restores into an older server.
    **Into a new app** creates a new app on the tag you choose (the same
    major version or newer) and restores into it once it's running.
 
 Each backup is two objects in the bucket,
-`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL) and a
-`.json` manifest beside it with the app, template, server version, size
-and SHA-256. A restore checks the dump against its manifest as it reads
+`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL, `.rdb`
+for Redis) and a `.json` manifest beside it with the app, template,
+server version, size and SHA-256. A restore checks the dump against its manifest as it reads
 it, and stops before the end if they differ. Echowa needs nothing else to find them again:
 after losing the server, install Echowa on a new one, add a location
 with the same bucket and folder, then **New app, From a backup**.
@@ -372,7 +376,7 @@ and restores it into the app, with the same checks as a restore from
 the bucket. The upload needs its size plus 1 GiB free beside Echowa's
 database (`/var/lib/echowa`), and is deleted when the restore ends.
 
-**When Echowa is down,** or for a Redis app, use these. Each command
+**When Echowa is down,** use these. Each command
 runs in the app's container. Find it with:
 
 ```bash

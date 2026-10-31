@@ -26,8 +26,8 @@ func TestEachTriggerFitsTheAppsItIsAbout(t *testing.T) {
 	}{
 		{DeployFailed, []*models.App{custom, postgres, mysql, redis}, nil},
 		{KilledForMemory, []*models.App{custom, redis}, nil},
-		{BackupFailed, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
-		{RestoreSucceeded, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
+		{BackupFailed, []*models.App{postgres, mysql, redis}, []*models.App{custom}},
+		{RestoreSucceeded, []*models.App{postgres, mysql, redis}, []*models.App{custom}},
 		{TaskFailed, []*models.App{custom}, []*models.App{postgres, redis}},
 		{EchowaStarted, nil, []*models.App{custom, postgres}},
 		{Unhealthy, []*models.App{custom, postgres, mysql, redis}, nil},
@@ -38,7 +38,7 @@ func TestEachTriggerFitsTheAppsItIsAbout(t *testing.T) {
 		{DiskUsed, nil, []*models.App{custom, postgres}},
 		{CertificateExpiry, []*models.App{custom}, []*models.App{postgres, redis}},
 		{PoolerDown, []*models.App{postgres}, []*models.App{custom, mysql, redis}},
-		{BackupAge, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
+		{BackupAge, []*models.App{postgres, mysql, redis}, []*models.App{custom}},
 		{UpdateAvailable, nil, []*models.App{custom, postgres}},
 	} {
 		trigger, ok := Find(tc.trigger)
