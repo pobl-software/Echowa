@@ -13,7 +13,6 @@ require (
 	github.com/distribution/reference v0.6.0
 	github.com/goravel/framework v1.18.0
 	github.com/goravel/gin v1.18.0
-	github.com/goravel/openai v1.18.0
 	github.com/goravel/sqlite v1.18.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/moby/moby/api v1.56.1
@@ -27,6 +26,7 @@ require (
 	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	golang.org/x/tools v0.50.0
+	rsc.io/qr v0.2.0
 )
 
 require (
@@ -119,7 +119,6 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-sqlite3/gormlite v0.24.0 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
-	github.com/openai/openai-go/v3 v3.39.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
@@ -141,10 +140,6 @@ require (
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
-	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
@@ -191,5 +186,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/gorm v1.31.2 // indirect
 	gorm.io/plugin/dbresolver v1.6.2 // indirect
-	rsc.io/qr v0.2.0 // indirect
 )

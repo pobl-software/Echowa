@@ -175,20 +175,6 @@ func init() {
 				"enabled": config.Env("OTEL_HTTP_CLIENT_ENABLED", true),
 			},
 
-			// gRPC Server Instrumentation
-			//
-			// Configures the instrumentation for incoming gRPC requests to your server.
-			"grpc_server": map[string]any{
-				"enabled": config.Env("OTEL_GRPC_SERVER_ENABLED", true),
-			},
-
-			// gRPC Client Instrumentation
-			//
-			// Configures the instrumentation for outgoing gRPC calls made by your application.
-			"grpc_client": map[string]any{
-				"enabled": config.Env("OTEL_GRPC_CLIENT_ENABLED", true),
-			},
-
 			// Database Instrumentation
 			//
 			// Spans and metrics for ORM and DB query builder operations,
