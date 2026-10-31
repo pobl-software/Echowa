@@ -1,0 +1,30 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following packages will be upgraded:
+  containerd.io curl docker-ce docker-ce-cli libcurl4t64 libssl3t64 openssl
+  openssl-provider-legacy tzdata
+9 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Inst docker-ce-cli [5:29.9.1-1~debian.13~trixie] (5:29.9.2-1~debian.13~trixie Docker CE:trixie [arm64])
+Inst containerd.io [2.4.2-2~debian.13~trixie] (2.4.2-3~debian.13~trixie Docker CE:trixie [arm64])
+Inst docker-ce [5:29.9.1-1~debian.13~trixie] (5:29.9.2-1~debian.13~trixie Docker CE:trixie [arm64])
+Inst openssl-provider-legacy [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf openssl-provider-legacy (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Inst libssl3t64 [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf libssl3t64 (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Inst tzdata [2026e-0+deb13u1] (2026f-0+deb13u1 Debian:13-updates/stable-updates [all])
+Inst curl [8.14.1-2+deb13u5] (8.14.1-2+deb13u7 Debian-Security:13/stable-security [arm64]) []
+Inst libcurl4t64 [8.14.1-2+deb13u5] (8.14.1-2+deb13u7 Debian-Security:13/stable-security [arm64])
+Inst openssl [3.5.7-1~deb13u2] (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])
+Conf docker-ce-cli (5:29.9.2-1~debian.13~trixie Docker CE:trixie [arm64])
+Conf containerd.io (2.4.2-3~debian.13~trixie Docker CE:trixie [arm64])
+Conf docker-ce (5:29.9.2-1~debian.13~trixie Docker CE:trixie [arm64])
+Conf tzdata (2026f-0+deb13u1 Debian:13-updates/stable-updates [all])
+Conf curl (8.14.1-2+deb13u7 Debian-Security:13/stable-security [arm64])
+Conf libcurl4t64 (8.14.1-2+deb13u7 Debian-Security:13/stable-security [arm64])
+Conf openssl (3.5.7-1~deb13u3 Debian-Security:13/stable-security [arm64])

@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"goravel/app/host"
 )
 
 // token is a well-formed (but not real) Cloudflare Tunnel token.
@@ -91,13 +92,13 @@ func TestRenderEnv(t *testing.T) {
 	key, err := newAppKey()
 	require.NoError(t, err)
 
-	env := parseEnv(renderEnv(string(template), map[string]string{
+	env := parseEnv([]byte(renderEnv(string(template), map[string]string{
 		"APP_KEY":                 key,
 		"APP_URL":                 "https://echowa.example.com",
 		"APP_HOST":                "172.18.0.1",
 		"ECHOWA_CLIENT_IP_HEADER": "X-Real-IP",
 		"ECHOWA_NEW":              "added",
-	}))
+	})))
 	assert.Equal(t, key, env["APP_KEY"])
 	assert.Equal(t, "https://echowa.example.com", env["APP_URL"])
 	assert.Equal(t, "172.18.0.1", env["APP_HOST"])
@@ -151,14 +152,14 @@ func TestNewAppKey(t *testing.T) {
 }
 
 func TestParseOSReleaseAndDockerSources(t *testing.T) {
-	info := parseOSRelease(`PRETTY_NAME="Ubuntu 24.04.3 LTS"
+	info := host.ParseOSRelease([]byte(`PRETTY_NAME="Ubuntu 24.04.3 LTS"
 NAME="Ubuntu"
 VERSION_ID="24.04"
 VERSION_CODENAME=noble
 ID=ubuntu
 ID_LIKE=debian
 UBUNTU_CODENAME=noble
-`)
+`))
 	assert.Equal(t, "ubuntu", info["ID"])
 	assert.Equal(t, "24.04", info["VERSION_ID"])
 	repo, suite, ok := dockerRepo(info)
@@ -174,7 +175,7 @@ UBUNTU_CODENAME=noble
 		"Kali":          {"ID=kali\nID_LIKE=debian\nVERSION_CODENAME=kali-rolling", "", ""},
 		"Fedora":        {"ID=fedora\nVERSION_ID=43", "", ""},
 	} {
-		repo, suite, ok := dockerRepo(parseOSRelease(c.osRelease))
+		repo, suite, ok := dockerRepo(host.ParseOSRelease([]byte(c.osRelease)))
 		assert.Equal(t, c.repo != "", ok, name)
 		assert.Equal(t, c.repo, repo, name)
 		assert.Equal(t, c.suite, suite, name)

@@ -1,9 +1,12 @@
 package tests
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
+	"testing/fstest"
 
 	"github.com/goravel/framework/testing"
 
@@ -38,6 +41,17 @@ func init() {
 	notify.Open = func(p *models.NotificationProvider) (notify.Sender, error) {
 		return fakeNotify.Open(p)
 	}
+	// Nor reads the machine it runs on for maintenance. Suites that care
+	// swap services.Host, and put EmptyHost back.
+	services.Host = EmptyHost
+}
+
+// EmptyHost is a machine with no files, where every command fails.
+var EmptyHost = services.HostReader{
+	FS: fstest.MapFS{},
+	Run: func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("tests never run commands on the host")
+	},
 }
 
 var (

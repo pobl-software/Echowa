@@ -13,7 +13,7 @@ import { templateIcon } from '@/lib/templates';
 import { formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { AppsCPU, Point, Reading } from '@/types/metrics';
-import type { Activity, AppSummary, ServerFacts, ServerMaintenance } from '@/types/models';
+import type { Activity, AppSummary, Maintenance, ServerFacts } from '@/types/models';
 
 type AppReading = Reading['apps'][number];
 
@@ -35,16 +35,6 @@ type LiveOf = (app: AppSummary) => Live;
 
 // The columns every row shares, so a group's rows line up under the list's
 // heading: name, last hour, CPU, memory, status, then room for the chevron.
-// Placeholder until step 28 sends maintenance as a prop: a restart three
-// days overdue and four security updates, so both states show.
-const placeholderMaintenance: ServerMaintenance = {
-    restart_required_since: new Date(Date.now() - 3 * 86400_000).toISOString(),
-    security_updates: 4,
-    failed_services: [],
-    os_support_ends: '2029-05-31',
-    clock_synced: true,
-};
-
 const columns =
     'grid grid-cols-[minmax(0,1fr)_1rem_1rem] items-center gap-x-3 sm:grid-cols-[minmax(0,1fr)_4rem_5rem_1rem_1rem] md:grid-cols-[minmax(0,1fr)_6rem_4rem_5rem_1rem_1rem]';
 
@@ -54,12 +44,18 @@ export default function Dashboard({
     cpu,
     activity,
     server,
+    maintenance,
+    freshMaintenance,
 }: {
     apps: AppSummary[];
     metrics: Reading | null;
     cpu: AppsCPU | null;
     activity: Activity[];
     server: ServerFacts;
+    // The Server page's last read of what the server needs, or null.
+    maintenance: Maintenance | null;
+    // A read of its own, once the sidebar's Refresh asks for one.
+    freshMaintenance?: Maintenance;
 }) {
     // Echowa polls Swarm every 30 seconds and reads the server every 15; follow along.
     usePoll(30000, { only: ['apps', 'activity'] });
@@ -85,7 +81,12 @@ export default function Dashboard({
                     </Link>
                 }
                 sidebar={
-                    <ServerSidebar facts={server} reading={metrics} apps={apps} maintenance={placeholderMaintenance} />
+                    <ServerSidebar
+                        facts={server}
+                        reading={metrics}
+                        apps={apps}
+                        maintenance={freshMaintenance ?? maintenance}
+                    />
                 }
                 className="mx-0 min-[1700px]:max-w-none"
             >

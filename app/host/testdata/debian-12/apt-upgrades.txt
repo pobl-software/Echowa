@@ -1,0 +1,35 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following packages were automatically installed and are no longer required:
+  libx11-6 libx11-data libxau6 libxcb1 libxdmcp6 libxext6 libxmuu1 xauth
+Use 'sudo apt autoremove' to remove them.
+The following packages will be upgraded:
+  containerd.io docker-ce docker-ce-cli libexpat1 libsasl2-2 libsasl2-modules
+  libsasl2-modules-db libssl3 openssl tzdata
+10 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Inst docker-ce-cli [5:29.9.1-1~debian.12~bookworm] (5:29.9.2-1~debian.12~bookworm Docker CE:bookworm [arm64])
+Inst containerd.io [2.4.2-2~debian.12~bookworm] (2.4.2-3~debian.12~bookworm Docker CE:bookworm [arm64])
+Inst docker-ce [5:29.9.1-1~debian.12~bookworm] (5:29.9.2-1~debian.12~bookworm Docker CE:bookworm [arm64])
+Inst tzdata [2026e-0+deb12u1] (2026f-0+deb12u1 Debian-Security:12/oldstable-security [all])
+Inst libexpat1 [2.5.0-1+deb12u2] (2.5.0-1+deb12u5 Debian-Security:12/oldstable-security [arm64])
+Inst libsasl2-modules-db [2.1.28+dfsg-10] (2.1.28+dfsg-10+deb12u1 Debian-Security:12/oldstable-security [arm64])
+Inst libsasl2-2 [2.1.28+dfsg-10] (2.1.28+dfsg-10+deb12u1 Debian-Security:12/oldstable-security [arm64])
+Inst libssl3 [3.0.17-1~deb12u2] (3.0.22-1~deb12u2 Debian-Security:12/oldstable-security [arm64])
+Inst libsasl2-modules [2.1.28+dfsg-10] (2.1.28+dfsg-10+deb12u1 Debian-Security:12/oldstable-security [arm64])
+Inst openssl [3.0.17-1~deb12u2] (3.0.22-1~deb12u2 Debian-Security:12/oldstable-security [arm64])
+Conf docker-ce-cli (5:29.9.2-1~debian.12~bookworm Docker CE:bookworm [arm64])
+Conf containerd.io (2.4.2-3~debian.12~bookworm Docker CE:bookworm [arm64])
+Conf docker-ce (5:29.9.2-1~debian.12~bookworm Docker CE:bookworm [arm64])
+Conf tzdata (2026f-0+deb12u1 Debian-Security:12/oldstable-security [all])
+Conf libexpat1 (2.5.0-1+deb12u5 Debian-Security:12/oldstable-security [arm64])
+Conf libsasl2-modules-db (2.1.28+dfsg-10+deb12u1 Debian-Security:12/oldstable-security [arm64])
+Conf libsasl2-2 (2.1.28+dfsg-10+deb12u1 Debian-Security:12/oldstable-security [arm64])
+Conf libssl3 (3.0.22-1~deb12u2 Debian-Security:12/oldstable-security [arm64])
+Conf libsasl2-modules (2.1.28+dfsg-10+deb12u1 Debian-Security:12/oldstable-security [arm64])
+Conf openssl (3.0.22-1~deb12u2 Debian-Security:12/oldstable-security [arm64])

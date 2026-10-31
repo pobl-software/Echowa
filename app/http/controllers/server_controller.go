@@ -21,6 +21,8 @@ func NewServerController() *ServerController {
 // Show is the Server page: the latest reading, live from memory, and the
 // charts for ?range= from the metrics file (ADR 0024). The page polls
 // every 15 seconds; each prop is worked out only when it's asked for.
+// Maintenance comes after the page, so an apt run never holds it up, and
+// the polls leave it out (ADR 0041).
 func (r *ServerController) Show(ctx http.Context) http.Response {
 	rng := metrics.ParseRange(ctx.Request().Query("range"))
 
@@ -38,6 +40,15 @@ func (r *ServerController) Show(ctx http.Context) http.Response {
 		"appIds": func(c context.Context) (any, error) {
 			return services.AppIDsByName(c)
 		},
+		"maintenance": maintenance(),
+	})
+}
+
+// maintenance is what the server needs doing, sent after the page. Each
+// read is kept for the dashboard (services.LastMaintenance).
+func maintenance() gonertia.DeferProp {
+	return gonertia.Defer(func(c context.Context) (any, error) {
+		return services.HostMaintenance(c), nil
 	})
 }
 

@@ -147,6 +147,17 @@ func (s *DashboardControllerTestSuite) TestServerFactsSayWhatsRunningAndWhatsNew
 	})
 	release.Version = "v1.2.0"
 	services.ResetUpdateCheck()
+	// The first page starts a look at the channel in the background, which
+	// answers when the test says so.
+	answer := make(chan struct{})
+	services.FetchLatestRelease = func(ctx context.Context) (services.LatestRelease, error) {
+		select {
+		case <-answer:
+			return services.LatestRelease{Version: "v1.3.0"}, nil
+		case <-ctx.Done():
+			return services.LatestRelease{}, ctx.Err()
+		}
+	}
 	b := signedIn(s.T(), &s.TestCase)
 
 	_, page := b.visit("/dashboard")
@@ -157,10 +168,8 @@ func (s *DashboardControllerTestSuite) TestServerFactsSayWhatsRunningAndWhatsNew
 	s.Equal("", server["update"])
 	s.Equal(false, server["update_checked"], "no answer from the channel yet")
 
-	services.FetchLatestRelease = func(context.Context) (services.LatestRelease, error) {
-		return services.LatestRelease{Version: "v1.3.0"}, nil
-	}
-	services.CheckForUpdate(context.Background())
+	close(answer)
+	s.Eventually(func() bool { return services.UpdateCheckState().CheckedAt != nil }, 5*time.Second, 10*time.Millisecond)
 	services.WaitForNotifications()
 	_, page = b.visit("/dashboard")
 	server = page.Props["server"].(map[string]any)

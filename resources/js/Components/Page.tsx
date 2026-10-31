@@ -4,6 +4,7 @@ import { Fragment, type ReactNode } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
+import { attentionNote } from '@/lib/maintenance';
 import { useMediaQuery } from '@/lib/media';
 import { useShell } from '@/lib/shell';
 import { cn } from '@/lib/utils';
@@ -43,7 +44,7 @@ export function Page({
     className?: string;
     children: ReactNode;
 }) {
-    const { dockerProblem } = usePage().props;
+    const { dockerProblem, serverAttention } = usePage().props;
     const { openMenu } = useShell();
     const title = crumbs[crumbs.length - 1];
     const wide = useMediaQuery('(min-width: 64rem)');
@@ -57,11 +58,18 @@ export function Page({
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="lg:hidden"
-                            aria-label="Open menu"
+                            className="relative lg:hidden"
+                            aria-label={serverAttention ? `Open menu. ${attentionNote}` : 'Open menu'}
                             onClick={openMenu}
                         >
                             <MenuIcon />
+                            {/* The rail's dot, for phones, where the drawer hides it. */}
+                            {serverAttention && (
+                                <span
+                                    aria-hidden
+                                    className="absolute top-1.5 right-1.5 size-2 rounded-full bg-warning ring-2 ring-background"
+                                />
+                            )}
                         </Button>
                         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
                             {crumbs.slice(0, -1).map((crumb) => (

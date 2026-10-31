@@ -41,5 +41,14 @@ func (r *DashboardController) Index(ctx http.Context) http.Response {
 		"activity": func(c context.Context) (any, error) {
 			return services.RecentActivity(c, 10)
 		},
+		// The sidebar shows the Server page's last read of what the server
+		// needs, so the dashboard never reads the host itself (ADR 0041),
+		// and its Refresh asks for a read of its own.
+		"maintenance": func(context.Context) (any, error) {
+			return services.LastMaintenance(), nil
+		},
+		"freshMaintenance": gonertia.Optional(func(c context.Context) (any, error) {
+			return services.HostMaintenance(c), nil
+		}),
 	})
 }

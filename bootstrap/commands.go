@@ -12,5 +12,6 @@ func Commands() []console.Command {
 		&commands.SetupLink{},
 		&commands.Backup{},
 		&commands.MetricsSample{},
+		&commands.HostMaintenance{},
 	}
 }

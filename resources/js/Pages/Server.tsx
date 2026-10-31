@@ -10,12 +10,14 @@ import { Page } from '@/Components/Page';
 import { Panel } from '@/Components/Panel';
 import { RangePicker, useSeriesRange } from '@/Components/RangePicker';
 import { SectionLabel } from '@/Components/SectionLabel';
+import { ServerMaintenance } from '@/Components/ServerMaintenance';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
 import { formatBytes, formatPercent, formatRate } from '@/lib/format';
+import { useAttentionAfter } from '@/lib/maintenance';
 import { uptime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { diskPercent, memoryPercent, type Point, type Reading, type ServerSeries } from '@/types/metrics';
-import type { ServerFacts } from '@/types/models';
+import type { Maintenance, ServerFacts } from '@/types/models';
 
 interface Props {
     // The range picker's choices, shortest first.
@@ -26,11 +28,14 @@ interface Props {
     server: ServerFacts;
     // App IDs by name, to link the containers table.
     appIds: Record<string, number>;
+    // What the server needs doing; sent after the page, and never polled.
+    maintenance?: Maintenance;
 }
 
-export default function Server({ ranges, series, latest, server, appIds }: Props) {
+export default function Server({ ranges, series, latest, server, appIds, maintenance }: Props) {
     // Echowa reads every 15 seconds and stores a minute at a time.
     usePoll(15_000, { only: ['latest', 'series'] });
+    useAttentionAfter(maintenance);
 
     return (
         <>
@@ -39,6 +44,7 @@ export default function Server({ ranges, series, latest, server, appIds }: Props
                 {/* From xl the server's figures and charts are on the left, its containers on the right. */}
                 <div className="space-y-6 xl:grid xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start xl:gap-6 xl:space-y-0">
                     <div className="min-w-0 space-y-6">
+                        <ServerMaintenance maintenance={maintenance} facts={server} />
                         <Now latest={latest} facts={server} />
                         <Charts series={series} ranges={ranges} cpuCount={latest?.host.cpu_count ?? null} />
                     </div>

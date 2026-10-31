@@ -90,18 +90,51 @@ export interface ServerFacts {
     update_checked: boolean;
 }
 
-// What needs doing to the server's OS (step 28, ADR 0041). Not sent yet:
-// the dashboard shows placeholderMaintenance until it is. Null means not
-// checked.
-export interface ServerMaintenance {
-    // When a reboot was first needed (/var/run/reboot-required), RFC 3339.
-    restart_required_since: string | null;
-    security_updates: number | null;
-    // systemd units in the failed state.
-    failed_services: string[] | null;
-    // The release's end of standard support, YYYY-MM-DD.
-    os_support_ends: string | null;
+// services.Maintenance: what the server itself needs doing (ADR 0041).
+// Sent after the page. A null field wasn't measured: never show it as fine.
+export interface Maintenance {
+    restart: MaintenanceRestart | null;
+    updates: MaintenanceUpdates | null;
+    // Whether unattended-upgrades installs security updates by itself.
+    auto_updates: boolean | null;
+    // A package install that stopped part way.
+    interrupted: boolean | null;
+    support: MaintenanceSupport | null;
+    // systemd's failed units.
+    failed_units: string[] | null;
     clock_synced: boolean | null;
+    // When it was read, RFC 3339: the dashboard shows the last read.
+    read_at: string;
+}
+
+export interface MaintenanceRestart {
+    required: boolean;
+    // When a package asked for a restart, RFC 3339, and which did.
+    since: string | null;
+    packages: string[];
+    running_kernel: string;
+    // A newer kernel than the running one, installed in /boot, or empty.
+    new_kernel: string;
+}
+
+// What apt would install, by package name.
+export interface MaintenanceUpdates {
+    security: string[];
+    other: string[];
+    // The ones, of either, whose upgrade restarts dockerd.
+    docker: string[];
+    // When apt last fetched its lists, RFC 3339; stale after 2 days.
+    lists_updated: string | null;
+    lists_stale: boolean;
+}
+
+export interface MaintenanceSupport {
+    // "Ubuntu 24.04.3 LTS".
+    release: string;
+    // RFC 3339, midnight UTC.
+    ends: string;
+    // Within 90 days of ends, or past it.
+    ending: boolean;
 }
 
 // services.Activity: a deployment, backup, restore or scheduled task run.

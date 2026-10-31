@@ -25,9 +25,11 @@ import {
 } from '@/Components/ui/dropdown-menu';
 import { Sheet, SheetContent, SheetTitle } from '@/Components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/Components/ui/tooltip';
+import { attentionNote } from '@/lib/maintenance';
 import { ShellContext } from '@/lib/shell';
 import { type Theme, useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
+import type { SharedProps } from '@/types';
 
 interface NavItem {
     label: string;
@@ -35,11 +37,19 @@ interface NavItem {
     icon: LucideIcon;
     // URL prefixes that count as this section.
     match: string[];
+    // What needs doing there, for a dot on the item, or null.
+    attention?: (props: SharedProps) => string | null;
 }
 
 const nav: NavItem[] = [
     { label: 'Apps', href: '/dashboard', icon: BoxesIcon, match: ['/dashboard', '/apps'] },
-    { label: 'Server', href: '/server', icon: GaugeIcon, match: ['/server'] },
+    {
+        label: 'Server',
+        href: '/server',
+        icon: GaugeIcon,
+        match: ['/server'],
+        attention: (props) => (props.serverAttention ? attentionNote : null),
+    },
     { label: 'Settings', href: '/settings', icon: SettingsIcon, match: ['/settings'] },
 ];
 
@@ -85,8 +95,14 @@ function useActive() {
     return (item: NavItem) => item.match.some((prefix) => url.startsWith(prefix));
 }
 
+function useAttention() {
+    const { props } = usePage();
+    return (item: NavItem) => item.attention?.(props) ?? null;
+}
+
 function Rail() {
     const isActive = useActive();
+    const attention = useAttention();
 
     return (
         <aside className="hidden w-14 shrink-0 flex-col items-center gap-1 py-3 lg:flex">
@@ -96,16 +112,17 @@ function Rail() {
             <nav aria-label="Main" className="flex flex-col items-center gap-1">
                 {nav.map((item) => {
                     const active = isActive(item);
+                    const note = attention(item);
                     return (
                         <Tooltip key={item.href}>
                             <TooltipTrigger
                                 render={
                                     <Link
                                         href={item.href}
-                                        aria-label={item.label}
+                                        aria-label={note ?? item.label}
                                         aria-current={active ? 'page' : undefined}
                                         className={cn(
-                                            'flex size-10 items-center justify-center rounded-lg transition-colors',
+                                            'relative flex size-10 items-center justify-center rounded-lg transition-colors',
                                             active
                                                 ? 'bg-sidebar-accent text-primary'
                                                 : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
@@ -114,8 +131,9 @@ function Rail() {
                                 }
                             >
                                 <item.icon className="size-[18px]" />
+                                {note && <AttentionDot className="absolute top-2 right-2" />}
                             </TooltipTrigger>
-                            <TooltipContent side="right">{item.label}</TooltipContent>
+                            <TooltipContent side="right">{note ?? item.label}</TooltipContent>
                         </Tooltip>
                     );
                 })}
@@ -197,6 +215,7 @@ function AccountMenu() {
 function Drawer() {
     const { auth } = usePage().props;
     const isActive = useActive();
+    const attention = useAttention();
     const [theme, setTheme] = useTheme();
 
     return (
@@ -207,10 +226,13 @@ function Drawer() {
             <nav aria-label="Main" className="flex-1 space-y-0.5 overflow-y-auto p-3">
                 {nav.map((item) => {
                     const active = isActive(item);
+                    const note = attention(item);
                     return (
                         <Link
                             key={item.href}
                             href={item.href}
+                            aria-label={note ?? undefined}
+                            title={note ?? undefined}
                             aria-current={active ? 'page' : undefined}
                             className={cn(
                                 'flex h-10 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
@@ -221,6 +243,7 @@ function Drawer() {
                         >
                             <item.icon className={cn('size-4', active ? 'text-primary' : 'opacity-70')} />
                             {item.label}
+                            {note && <AttentionDot className="ml-auto" />}
                         </Link>
                     );
                 })}
@@ -273,4 +296,10 @@ function Drawer() {
             </div>
         </div>
     );
+}
+
+// AttentionDot marks a section with something to do. The ring cuts it out
+// of the icon under it.
+function AttentionDot({ className }: { className?: string }) {
+    return <span aria-hidden className={cn('size-2 rounded-full bg-warning ring-2 ring-sidebar', className)} />;
 }
