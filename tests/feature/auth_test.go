@@ -35,10 +35,10 @@ func (s *AuthTestSuite) createUser(email, password string) models.User {
 	return *user
 }
 
-func (s *AuthTestSuite) login(b *browser, email, password string, remember bool) {
+func (s *AuthTestSuite) login(b *browser, email, password string) {
 	b.visit("/login")
 	resp := b.submit(nethttp.MethodPost, "/login", "/login", map[string]any{
-		"email": email, "password": password, "remember": remember,
+		"email": email, "password": password,
 	})
 	resp.AssertFound()
 	resp.AssertHeader("Location", "/dashboard")
@@ -71,7 +71,7 @@ func (s *AuthTestSuite) TestGuestIsSentToLoginThenBack() {
 func (s *AuthTestSuite) TestSignedInUserSkipsGuestPages() {
 	s.createUser("user@example.test", "password123")
 	b := newBrowser(s.T(), &s.TestCase)
-	s.login(b, "user@example.test", "password123", false)
+	s.login(b, "user@example.test", "password123")
 
 	b.request(nethttp.MethodGet, "/login", nil, true, nil).AssertHeader("Location", "/dashboard")
 }
@@ -82,7 +82,7 @@ func (s *AuthTestSuite) TestLoginRotatesSessionAndCsrfToken() {
 	b.visit("/login")
 	before := b.cookieValue(middlewareXsrfCookie)
 
-	s.login(b, "user@example.test", "password123", false)
+	s.login(b, "user@example.test", "password123")
 	b.visit("/dashboard")
 	s.NotEqual(before, b.cookieValue(middlewareXsrfCookie))
 }
@@ -90,7 +90,7 @@ func (s *AuthTestSuite) TestLoginRotatesSessionAndCsrfToken() {
 func (s *AuthTestSuite) TestLogout() {
 	s.createUser("user@example.test", "password123")
 	b := newBrowser(s.T(), &s.TestCase)
-	s.login(b, "user@example.test", "password123", false)
+	s.login(b, "user@example.test", "password123")
 	b.visit("/dashboard")
 
 	resp := b.submit(nethttp.MethodPost, "/logout", "/dashboard", nil)
@@ -98,27 +98,20 @@ func (s *AuthTestSuite) TestLogout() {
 	b.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
 }
 
-func (s *AuthTestSuite) TestRememberMe() {
+// "Remember me" is gone (ADR 0043): asking for it sets no cookie, and a
+// cookie from before signs nothing in.
+func (s *AuthTestSuite) TestRememberMeIsGone() {
 	s.createUser("user@example.test", "password123")
 	b := newBrowser(s.T(), &s.TestCase)
-	s.login(b, "user@example.test", "password123", true)
-	s.NotEmpty(b.cookieValue("remember_web"))
-	rememberCookie := b.cookies["remember_web"]
+	b.visit("/login")
+	b.submit(nethttp.MethodPost, "/login", "/login", map[string]any{
+		"email": "user@example.test", "password": "password123", "remember": true,
+	}).AssertHeader("Location", "/dashboard")
+	s.Empty(b.cookieValue("remember_web"))
 
-	// Session gone (browser restarted, or it expired): the cookie signs back in.
-	for name := range b.cookies {
-		if name != "remember_web" {
-			b.forget(name)
-		}
-	}
-	_, page := b.visit("/dashboard")
-	page.AssertComponent("Dashboard")
-
-	// Logging out invalidates the token, even for a copied cookie.
-	b.submit(nethttp.MethodPost, "/logout", "/dashboard", nil).AssertHeader("Location", "/")
-	thief := newBrowser(s.T(), &s.TestCase)
-	thief.cookies["remember_web"] = rememberCookie
-	thief.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
+	old := newBrowser(s.T(), &s.TestCase)
+	old.cookies["remember_web"] = &nethttp.Cookie{Name: "remember_web", Value: "1|some-token"}
+	old.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
 }
 
 func (s *AuthTestSuite) TestLoginIsRateLimited() {
@@ -153,7 +146,7 @@ func (s *AuthTestSuite) TestRegistrationAndPasswordResetAreGone() {
 func (s *AuthTestSuite) TestSaveUserResetsAnExistingUser() {
 	s.createUser("admin@example.test", "old-password")
 	b := newBrowser(s.T(), &s.TestCase)
-	s.login(b, "admin@example.test", "old-password", true)
+	s.login(b, "admin@example.test", "old-password")
 
 	user, created, err := services.SaveUser("New Name", " Admin@Example.test ", "new-password")
 	s.Require().NoError(err)
@@ -167,14 +160,14 @@ func (s *AuthTestSuite) TestSaveUserResetsAnExistingUser() {
 	var saved models.User
 	s.Require().NoError(facades.Orm().Query().Where("email", "admin@example.test").First(&saved))
 	s.Equal("New Name", saved.Name)
-	s.Nil(saved.RememberToken, "a reset signs remembered browsers out")
+	b.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
 
 	other := newBrowser(s.T(), &s.TestCase)
 	other.visit("/login")
 	other.submit(nethttp.MethodPost, "/login", "/login", map[string]any{
 		"email": "admin@example.test", "password": "old-password",
 	}).AssertHeader("Location", "/login")
-	s.login(newBrowser(s.T(), &s.TestCase), "admin@example.test", "new-password", false)
+	s.login(newBrowser(s.T(), &s.TestCase), "admin@example.test", "new-password")
 }
 
 func (s *AuthTestSuite) TestSaveUserValidates() {

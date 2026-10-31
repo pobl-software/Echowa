@@ -814,13 +814,22 @@ export interface SettingsOverview {
     notifications: { providers: number; enabled: number; failing: string[] };
     alerts: { rules: number; enabled: number; firing: number; suggestions: number };
     prune: PruneSettings;
-    security: TwoFactorStatus;
+    // sessionTimeout is in words ("2 hours").
+    security: { twoFactor: TwoFactorStatus; sessionTimeout: string };
 }
 
 // controllers.twoFactorProps (ADR 0042). The secret is never a prop.
 export interface TwoFactorStatus {
     enabled: boolean;
     confirmed_at: string | null;
+}
+
+// controllers.sessionTimeoutProps (ADR 0043): how long a session lasts
+// with no activity, and the choices, shortest (the default) first.
+export interface SessionTimeout {
+    minutes: number;
+    label: string;
+    choices: { minutes: number; label: string }[];
 }
 
 // services.TwoFactorSetup, from POST /settings/security/two-factor/setup.

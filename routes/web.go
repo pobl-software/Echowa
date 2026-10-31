@@ -47,12 +47,12 @@ func Web() {
 		return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, body)
 	})
 
-	// The "web" stack: session, remember-me login, CSRF, then Inertia. Every
+	// The "web" stack: session, idle timeout, CSRF, then Inertia. Every
 	// page and form goes in here. Webhooks (signed, not session-authenticated)
 	// live outside it. Order matters; see ADR 0008.
 	facades.Route().Middleware(
 		sessionmiddleware.StartSession(),
-		&middleware.AuthenticateFromRememberCookie{},
+		&middleware.SignOutIdleSessions{},
 		&middleware.VerifyCsrfToken{},
 		&middleware.HandleInertiaRequests{},
 	).Group(func(router route.Router) {
@@ -173,6 +173,7 @@ func Web() {
 			router.Get("/settings/alerts", settings.Alerts)
 			security := controllers.NewSecurityController()
 			router.Get("/settings/security", security.Show)
+			router.Put("/settings/security/session-timeout", security.UpdateSessionTimeout)
 			router.Post("/settings/security/two-factor/setup", security.Setup)
 			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Post("/settings/security/two-factor", security.Confirm)
 			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Delete("/settings/security/two-factor", security.Destroy)

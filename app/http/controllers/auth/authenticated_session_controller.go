@@ -52,12 +52,11 @@ func (r *AuthenticatedSessionController) Store(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 
-	remember := ctx.Request().InputBool("remember")
 	if services.TwoFactorOn(user) {
-		services.BeginTwoFactorLogin(ctx, user, remember)
+		services.BeginTwoFactorLogin(ctx, user)
 		return inertia.Redirect(ctx, "/two-factor-challenge")
 	}
-	if err := services.Login(ctx, user, remember); err != nil {
+	if err := services.Login(ctx, user); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 

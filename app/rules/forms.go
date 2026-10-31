@@ -583,6 +583,24 @@ func TwoFactorMessages() validation.Option {
 	})
 }
 
+// SessionTimeout is Settings, Security's session timeout: minutes, one of
+// choices (services.SessionTimeouts, ADR 0043).
+func SessionTimeout(choices []int) map[string]any {
+	in := make([]string, len(choices))
+	for i, minutes := range choices {
+		in[i] = strconv.Itoa(minutes)
+	}
+	return map[string]any{"minutes": "required|int|in:" + strings.Join(in, ",")}
+}
+
+// SessionTimeoutMessages words the session timeout's errors.
+func SessionTimeoutMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"minutes.required": "Choose how long a session lasts.",
+		"minutes.in":       "Choose one of the listed times.",
+	})
+}
+
 // WrongTwoFactorCode is the error for a code that isn't right now, or was
 // used already.
 const WrongTwoFactorCode = "That code isn't right. Try the one your app shows now."

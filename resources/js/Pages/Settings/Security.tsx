@@ -16,38 +16,106 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/Components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { toast } from '@/Components/ui/toast';
 import { postJson } from '@/lib/http';
 import { formatDateTime } from '@/lib/time';
-import type { TwoFactorSetup, TwoFactorStatus } from '@/types/models';
+import type { SessionTimeout, TwoFactorSetup, TwoFactorStatus } from '@/types/models';
 
-export default function SettingsSecurity({ twoFactor }: { twoFactor: TwoFactorStatus }) {
+export default function SettingsSecurity({
+    twoFactor,
+    sessionTimeout,
+}: {
+    twoFactor: TwoFactorStatus;
+    sessionTimeout: SessionTimeout;
+}) {
     return (
         <SettingsPage section="security">
-            <Panel
-                title="Two-factor authentication"
-                description="Logging in takes a code from an authenticator app on your phone as well as your password, so a password that leaks isn't enough."
-                actions={twoFactor.enabled ? <TurnOff /> : <SetUp />}
-            >
-                {twoFactor.enabled ? (
-                    <div className="flex flex-wrap items-center gap-3 text-sm">
-                        <StatusPill tone="success">On</StatusPill>
-                        <span className="text-muted-foreground">
-                            Since {formatDateTime(twoFactor.confirmed_at)}. Lost your phone? Run{' '}
-                            <code className="font-mono whitespace-nowrap">
-                                sudo echowa-artisan user:disable-two-factor
-                            </code>{' '}
-                            on the server.
-                        </span>
-                    </div>
-                ) : (
-                    <div className="flex flex-wrap items-center gap-3 text-sm">
-                        <StatusPill tone="warning">Off</StatusPill>
-                        <span className="text-muted-foreground">Your password is all it takes to log in.</span>
-                    </div>
-                )}
-            </Panel>
+            <div className="space-y-6">
+                <Panel
+                    title="Two-factor authentication"
+                    description="Logging in takes a code from an authenticator app on your phone as well as your password, so a password that leaks isn't enough."
+                    actions={twoFactor.enabled ? <TurnOff /> : <SetUp />}
+                >
+                    {twoFactor.enabled ? (
+                        <div className="flex flex-wrap items-center gap-3 text-sm">
+                            <StatusPill tone="success">On</StatusPill>
+                            <span className="text-muted-foreground">
+                                Since {formatDateTime(twoFactor.confirmed_at)}. Lost your phone? Run{' '}
+                                <code className="font-mono whitespace-nowrap">
+                                    sudo echowa-artisan user:disable-two-factor
+                                </code>{' '}
+                                on the server.
+                            </span>
+                        </div>
+                    ) : (
+                        <div className="flex flex-wrap items-center gap-3 text-sm">
+                            <StatusPill tone="warning">Off</StatusPill>
+                            <span className="text-muted-foreground">Your password is all it takes to log in.</span>
+                        </div>
+                    )}
+                </Panel>
+                <SessionTimeoutPanel sessionTimeout={sessionTimeout} />
+            </div>
         </SettingsPage>
+    );
+}
+
+// SessionTimeoutPanel picks how long a session lasts with no activity
+// (ADR 0043). The choices come from the server, shortest first.
+function SessionTimeoutPanel({ sessionTimeout }: { sessionTimeout: SessionTimeout }) {
+    const form = useForm({ minutes: sessionTimeout.minutes });
+    const submit = (e: FormEvent) => {
+        e.preventDefault();
+        form.put('/settings/security/session-timeout', { preserveScroll: true });
+    };
+    const shortest = sessionTimeout.choices[0];
+    const items = sessionTimeout.choices.map((choice) => ({
+        value: choice.minutes,
+        label: choice.minutes === shortest.minutes ? `${choice.label} (default)` : choice.label,
+    }));
+
+    return (
+        <Panel
+            title="Session timeout"
+            description="How long you stay logged in with no activity. A page that refreshes itself doesn't count, so a tab left open still logs out."
+        >
+            <form onSubmit={submit} className="flex flex-wrap items-start gap-3">
+                <div className="grid gap-1.5">
+                    <Select
+                        items={items}
+                        value={form.data.minutes}
+                        onValueChange={(value) => value !== null && form.setData('minutes', value)}
+                    >
+                        <SelectTrigger
+                            id="session-timeout"
+                            aria-label="Log out after"
+                            className="w-48"
+                            aria-invalid={form.errors.minutes ? true : undefined}
+                        >
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {items.map((item) => (
+                                <SelectItem key={item.value} value={item.value}>
+                                    {item.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    {form.errors.minutes && <p className="text-sm text-destructive">{form.errors.minutes}</p>}
+                </div>
+                <Button type="submit" variant="outline" disabled={form.processing || !form.isDirty}>
+                    Save
+                </Button>
+                {form.data.minutes > shortest.minutes && (
+                    <p className="basis-full text-sm text-muted-foreground">
+                        Longer is more convenient, but anyone at a computer you leave logged in can manage your server
+                        for that long.
+                    </p>
+                )}
+            </form>
+        </Panel>
     );
 }
 

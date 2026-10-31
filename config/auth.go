@@ -31,11 +31,5 @@ func init() {
 				"driver": "orm",
 			},
 		},
-
-		// "Remember me" cookie (see app/services/auth.go).
-		"remember": map[string]any{
-			"cookie": "remember_web",
-			"days":   config.Env("AUTH_REMEMBER_DAYS", 30),
-		},
 	})
 }

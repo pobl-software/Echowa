@@ -21,7 +21,7 @@ func NewTwoFactorChallengeController() *TwoFactorChallengeController {
 // Create asks for the code, or sends a browser that hasn't given the
 // password, or took too long, back to log in.
 func (r *TwoFactorChallengeController) Create(ctx http.Context) http.Response {
-	user, _, err := services.PendingTwoFactorLogin(ctx)
+	user, err := services.PendingTwoFactorLogin(ctx)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -35,7 +35,7 @@ func (r *TwoFactorChallengeController) Create(ctx http.Context) http.Response {
 // Store signs the user in if the code is right. Rate limited by the
 // "two-factor" limiter.
 func (r *TwoFactorChallengeController) Store(ctx http.Context) http.Response {
-	user, remember, err := services.PendingTwoFactorLogin(ctx)
+	user, err := services.PendingTwoFactorLogin(ctx)
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
@@ -61,7 +61,7 @@ func (r *TwoFactorChallengeController) Store(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 
-	if err := services.FinishTwoFactorLogin(ctx, user, remember); err != nil {
+	if err := services.FinishTwoFactorLogin(ctx, user); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 

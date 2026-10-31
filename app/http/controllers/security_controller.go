@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"time"
 
 	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/support/carbon"
@@ -27,7 +28,63 @@ func (r *SecurityController) Show(ctx http.Context) http.Response {
 		return resp
 	}
 
-	return inertia.Render(ctx, "Settings/Security", gonertia.Props{"twoFactor": twoFactorProps(user)})
+	return inertia.Render(ctx, "Settings/Security", gonertia.Props{
+		"twoFactor":      twoFactorProps(user),
+		"sessionTimeout": sessionTimeoutProps(user),
+	})
+}
+
+// sessionTimeoutProps is how long a session lasts without activity, in
+// minutes and in words, and the choices, shortest (the default) first
+// (ADR 0043).
+func sessionTimeoutProps(user *models.User) map[string]any {
+	choice := func(timeout time.Duration) map[string]any {
+		return map[string]any{"minutes": int(timeout / time.Minute), "label": humanDuration(timeout)}
+	}
+	choices := make([]map[string]any, len(services.SessionTimeouts))
+	for i, timeout := range services.SessionTimeouts {
+		choices[i] = choice(timeout)
+	}
+	current := choice(services.SessionTimeouts[0])
+	if user != nil {
+		current = choice(services.SessionTimeout(user))
+	}
+	current["choices"] = choices
+
+	return current
+}
+
+// UpdateSessionTimeout saves how long a session lasts without activity.
+func (r *SecurityController) UpdateSessionTimeout(ctx http.Context) http.Response {
+	user, resp := r.user(ctx)
+	if resp != nil {
+		return resp
+	}
+	choices := make([]int, len(services.SessionTimeouts))
+	for i, timeout := range services.SessionTimeouts {
+		choices[i] = int(timeout / time.Minute)
+	}
+	validator, err := rules.Validate(ctx, rules.SessionTimeout(choices), rules.SessionTimeoutMessages())
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
+	if validator.Fails() {
+		inertia.WithValidationErrors(ctx, validator.Errors())
+		return inertia.Back(ctx)
+	}
+	var input struct {
+		Minutes int `form:"minutes" json:"minutes"`
+	}
+	if err := validator.Bind(&input); err != nil {
+		return inertia.ServerError(ctx, err)
+	}
+	timeout := time.Duration(input.Minutes) * time.Minute
+	if err := services.SetSessionTimeout(ctx.Context(), user, timeout); err != nil {
+		return inertia.ServerError(ctx, err)
+	}
+
+	inertia.Flash(ctx, "success", "Sessions now end after "+humanDuration(timeout)+" with no activity.")
+	return inertia.Redirect(ctx, "/settings/security")
 }
 
 // user is the signed-in user. A session can outlive its user's row, and

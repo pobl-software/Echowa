@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"github.com/goravel/framework/contracts/http"
+	"github.com/goravel/framework/support/carbon"
 
 	"goravel/app/facades"
+	"goravel/app/services"
 )
 
 // AuthenticateStream is the session and sign-in check for Server-Sent
@@ -15,8 +17,8 @@ import (
 // would write back its stale copy over whatever other requests changed in
 // the meantime, such as a flash message or a logout.
 //
-// Guests get a 401, which makes the browser's EventSource stop instead of
-// reconnecting.
+// Guests and idle sessions (ADR 0043) get a 401, which makes the
+// browser's EventSource stop instead of reconnecting.
 type AuthenticateStream struct{}
 
 func (m *AuthenticateStream) Signature() string {
@@ -43,6 +45,17 @@ func (m *AuthenticateStream) Handle(ctx http.Context) {
 	ctx.Request().SetSession(sess)
 
 	if !facades.Auth(ctx).Check() {
+		ctx.Response().String(http.StatusUnauthorized, "Sign in to follow this stream").Abort()
+		return
+	}
+	// A stream is never activity, but an idle session can't open one.
+	user, err := services.CurrentUser(ctx)
+	if err != nil {
+		facades.Log().Error(err)
+		ctx.Response().String(http.StatusInternalServerError, "Session unavailable").Abort()
+		return
+	}
+	if user == nil || services.SessionIdle(ctx, user, carbon.Now().StdTime()) {
 		ctx.Response().String(http.StatusUnauthorized, "Sign in to follow this stream").Abort()
 		return
 	}

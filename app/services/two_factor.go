@@ -26,9 +26,8 @@ var TwoFactorLoginTTL = 5 * time.Minute
 var ErrTwoFactorOn = errors.New("two-factor authentication is already on")
 
 const (
-	pendingUserKey     = "login.two_factor.user"
-	pendingRememberKey = "login.two_factor.remember"
-	pendingExpiresKey  = "login.two_factor.expires"
+	pendingUserKey    = "login.two_factor.user"
+	pendingExpiresKey = "login.two_factor.expires"
 )
 
 // TwoFactorOn reports whether user signs in with a code as well as the
@@ -78,9 +77,7 @@ func StartTwoFactor(ctx context.Context, user *models.User) (*TwoFactorSetup, er
 }
 
 // ConfirmTwoFactor turns two-factor authentication on if code comes from
-// the secret StartTwoFactor gave out, which proves the app has it. It also
-// forgets the "remember me" token: a cookie from before never gave a code,
-// and turning this on is often what someone does after a scare.
+// the secret StartTwoFactor gave out, which proves the app has it.
 func ConfirmTwoFactor(ctx context.Context, user *models.User, code string, now time.Time) (bool, error) {
 	if TwoFactorOn(user) || user.TwoFactorSecret == "" {
 		return false, nil
@@ -93,10 +90,6 @@ func ConfirmTwoFactor(ctx context.Context, user *models.User, code string, now t
 	if err := saveTwoFactor(ctx, user, user.TwoFactorSecret, confirmed, &step); err != nil {
 		return false, err
 	}
-	if _, err := facades.Orm().WithContext(ctx).Query().Model(user).Update("remember_token", nil); err != nil {
-		return false, err
-	}
-	user.RememberToken = nil
 
 	return true, nil
 }
@@ -159,40 +152,39 @@ func saveTwoFactor(ctx context.Context, user *models.User, secret models.Secret,
 // BeginTwoFactorLogin remembers, in the session, that user has given the
 // right password and is yet to give a code. Nothing is signed in until
 // FinishTwoFactorLogin.
-func BeginTwoFactorLogin(ctx http.Context, user *models.User, remember bool) {
+func BeginTwoFactorLogin(ctx http.Context, user *models.User) {
 	session := ctx.Request().Session()
 	session.Put(pendingUserKey, user.ID)
-	session.Put(pendingRememberKey, remember)
 	session.Put(pendingExpiresKey, carbon.Now().StdTime().Add(TwoFactorLoginTTL).Unix())
 }
 
 // PendingTwoFactorLogin is the user whose password was right and who is yet
-// to give a code, and whether they asked to be remembered. The user is nil
-// when there's no such login, or when it took too long.
-func PendingTwoFactorLogin(ctx http.Context) (*models.User, bool, error) {
+// to give a code. It's nil when there's no such login, or when it took too
+// long.
+func PendingTwoFactorLogin(ctx http.Context) (*models.User, error) {
 	session := ctx.Request().Session()
 	if session == nil {
-		return nil, false, nil
+		return nil, nil
 	}
 	id := cast.ToUint(session.Get(pendingUserKey))
 	if id == 0 {
-		return nil, false, nil
+		return nil, nil
 	}
 	if carbon.Now().StdTime().Unix() > cast.ToInt64(session.Get(pendingExpiresKey)) {
 		forgetTwoFactorLogin(ctx)
-		return nil, false, nil
+		return nil, nil
 	}
 
 	var user models.User
 	if err := facades.Orm().WithContext(ctx.Context()).Query().Where("id", id).First(&user); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if user.ID == 0 || !TwoFactorOn(&user) {
 		forgetTwoFactorLogin(ctx)
-		return nil, false, nil
+		return nil, nil
 	}
 
-	return &user, cast.ToBool(session.Get(pendingRememberKey)), nil
+	return &user, nil
 }
 
 // PendingTwoFactorUserID is the ID PendingTwoFactorLogin would look up, or
@@ -206,15 +198,15 @@ func PendingTwoFactorUserID(ctx http.Context) uint {
 }
 
 // FinishTwoFactorLogin signs in the user PendingTwoFactorLogin returned.
-func FinishTwoFactorLogin(ctx http.Context, user *models.User, remember bool) error {
+func FinishTwoFactorLogin(ctx http.Context, user *models.User) error {
 	forgetTwoFactorLogin(ctx)
 
-	return Login(ctx, user, remember)
+	return Login(ctx, user)
 }
 
 func forgetTwoFactorLogin(ctx http.Context) {
 	session := ctx.Request().Session()
-	session.Forget(pendingUserKey, pendingRememberKey, pendingExpiresKey)
+	session.Forget(pendingUserKey, pendingExpiresKey)
 }
 
 // qrCode draws each row's runs of dark modules as rectangles.

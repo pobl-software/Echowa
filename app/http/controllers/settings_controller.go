@@ -108,8 +108,11 @@ func (r *SettingsController) Index(ctx http.Context) http.Response {
 			"firing":      len(alertRules.Firing),
 			"suggestions": len(alertRules.Suggestions),
 		},
-		"prune":    pruneProps(),
-		"security": twoFactorProps(user),
+		"prune": pruneProps(),
+		"security": map[string]any{
+			"twoFactor":      twoFactorProps(user),
+			"sessionTimeout": sessionTimeoutProps(user)["label"],
+		},
 	})
 }
 

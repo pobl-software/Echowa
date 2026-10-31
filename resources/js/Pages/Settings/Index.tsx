@@ -92,10 +92,15 @@ const summaries: Record<Exclude<SettingsSection, 'overview' | 'updates'>, (o: Se
             text: `${plural(alerts.rules, 'alert')}${alerts.enabled < alerts.rules ? ` · ${alerts.rules - alerts.enabled} off` : ''} · none firing`,
         };
     },
-    security: ({ security }) =>
-        security.enabled
-            ? { tone: 'success', text: `Two-factor authentication on since ${formatDate(security.confirmed_at)}` }
-            : { tone: 'warning', text: 'Two-factor authentication off' },
+    security: ({ security: { twoFactor, sessionTimeout } }) => {
+        const timeout = `logs out after ${sessionTimeout} idle`;
+        return twoFactor.enabled
+            ? {
+                  tone: 'success',
+                  text: `Two-factor authentication on since ${formatDate(twoFactor.confirmed_at)} · ${timeout}`,
+              }
+            : { tone: 'warning', text: `Two-factor authentication off · ${timeout}` };
+    },
 };
 
 const dot: Record<Tone, string> = {

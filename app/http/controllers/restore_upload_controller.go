@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/goravel/framework/contracts/http"
+	"github.com/goravel/framework/support/carbon"
 
 	"goravel/app/facades"
 	"goravel/app/inertia"
@@ -57,7 +58,9 @@ func (r *RestoreUploadController) Store(ctx http.Context) http.Response {
 
 // Show answers how much of the file has arrived, as JSON. It's in the web
 // group, so the dialog asks now and then during a long upload to keep the
-// session alive: the chunks, in routes/streams.go, never save it.
+// session alive: the chunks, in routes/streams.go, never save it. A JSON
+// read isn't activity by itself (services.IsActivity), so it records some
+// while the upload is there.
 func (r *RestoreUploadController) Show(ctx http.Context) http.Response {
 	var app models.App
 	if resp := findBackupApp(ctx, &app); resp != nil {
@@ -67,6 +70,8 @@ func (r *RestoreUploadController) Show(ctx http.Context) http.Response {
 	if !ok {
 		return ctx.Response().Json(http.StatusNotFound, http.Json{"error": "The upload isn't there any more. Choose the file again."})
 	}
+
+	services.TouchSession(ctx, carbon.Now().StdTime())
 
 	return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, http.Json{"received": upload.Received()})
 }

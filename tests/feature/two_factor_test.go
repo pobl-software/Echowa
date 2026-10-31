@@ -80,10 +80,10 @@ func (s *TwoFactorTestSuite) enableIn(b *browser) string {
 }
 
 // password gives the password at login, as far as the code step.
-func (s *TwoFactorTestSuite) password(b *browser, remember bool) {
+func (s *TwoFactorTestSuite) password(b *browser) {
 	b.visit("/login")
 	b.submit(nethttp.MethodPost, "/login", "/login", map[string]any{
-		"email": "admin@example.test", "password": "password123", "remember": remember,
+		"email": "admin@example.test", "password": "password123",
 	}).AssertHeader("Location", "/two-factor-challenge")
 }
 
@@ -113,7 +113,9 @@ func (s *TwoFactorTestSuite) TestSetupConfirmsWithACodeAndNeverPutsTheSecretInAP
 	s.NotNil(page.Props["twoFactor"].(map[string]any)["confirmed_at"])
 
 	_, page = b.visit("/settings")
-	s.Equal(true, page.Props["security"].(map[string]any)["enabled"])
+	security := page.Props["security"].(map[string]any)
+	s.Equal(true, security["twoFactor"].(map[string]any)["enabled"])
+	s.Equal("2 hours", security["sessionTimeout"])
 
 	// Once it's on, a new secret takes turning it off first.
 	b.request(nethttp.MethodPost, "/settings/security/two-factor/setup", map[string]any{}, false, map[string]string{
@@ -141,7 +143,7 @@ func (s *TwoFactorTestSuite) TestLoginAsksForACode() {
 
 	// Where they were going survives both steps.
 	b.request(nethttp.MethodGet, "/server?x=1", nil, true, nil).AssertHeader("Location", "/login")
-	s.password(b, false)
+	s.password(b)
 
 	_, page := b.visit("/two-factor-challenge")
 	page.AssertComponent("Auth/TwoFactorChallenge")
@@ -164,7 +166,7 @@ func (s *TwoFactorTestSuite) TestACodeWorksOnce() {
 	code := s.code(secret, 1)
 
 	first := newBrowser(s.T(), &s.TestCase)
-	s.password(first, false)
+	s.password(first)
 	// The password alone signs nothing in.
 	first.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
 	first.submit(nethttp.MethodPost, "/two-factor-challenge", "/two-factor-challenge", map[string]any{"code": code}).
@@ -172,45 +174,16 @@ func (s *TwoFactorTestSuite) TestACodeWorksOnce() {
 
 	// Someone who saw the code, with the password too.
 	second := newBrowser(s.T(), &s.TestCase)
-	s.password(second, false)
+	s.password(second)
 	second.submit(nethttp.MethodPost, "/two-factor-challenge", "/two-factor-challenge", map[string]any{"code": code}).
 		AssertHeader("Location", "/two-factor-challenge")
 	second.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
 }
 
-func (s *TwoFactorTestSuite) TestRememberMeWaitsForTheCode() {
-	_, secret := s.enable()
-	b := newBrowser(s.T(), &s.TestCase)
-	s.password(b, true)
-	s.Empty(b.cookieValue("remember_web"))
-
-	b.submit(nethttp.MethodPost, "/two-factor-challenge", "/two-factor-challenge", map[string]any{
-		"code": s.code(secret, 1),
-	}).AssertHeader("Location", "/dashboard")
-	s.NotEmpty(b.cookieValue("remember_web"))
-}
-
-func (s *TwoFactorTestSuite) TestTurningItOnEndsRememberMeCookies() {
-	b := signedIn(s.T(), &s.TestCase)
-	remembered := newBrowser(s.T(), &s.TestCase)
-	remembered.visit("/login")
-	remembered.submit(nethttp.MethodPost, "/login", "/login", map[string]any{
-		"email": "admin@example.test", "password": "password123", "remember": true,
-	}).AssertHeader("Location", "/dashboard")
-	cookie := remembered.cookies["remember_web"]
-	s.Require().NotNil(cookie)
-
-	s.enableIn(b)
-
-	stolen := newBrowser(s.T(), &s.TestCase)
-	stolen.cookies["remember_web"] = cookie
-	stolen.request(nethttp.MethodGet, "/dashboard", nil, true, nil).AssertHeader("Location", "/login")
-}
-
 func (s *TwoFactorTestSuite) TestTheCodeStepExpires() {
 	_, secret := s.enable()
 	b := newBrowser(s.T(), &s.TestCase)
-	s.password(b, false)
+	s.password(b)
 
 	carbon.SetTestNow(carbon.Now().AddDuration((services.TwoFactorLoginTTL + time.Second).String()))
 	b.request(nethttp.MethodGet, "/two-factor-challenge", nil, true, nil).AssertHeader("Location", "/login")
@@ -233,7 +206,7 @@ func (s *TwoFactorTestSuite) TestTheCodeStepNeedsThePasswordFirst() {
 func (s *TwoFactorTestSuite) TestCodesAreRateLimitedPerUser() {
 	_, secret := s.enable()
 	b := newBrowser(s.T(), &s.TestCase)
-	s.password(b, false)
+	s.password(b)
 
 	for range 5 {
 		b.submit(nethttp.MethodPost, "/two-factor-challenge", "/two-factor-challenge", map[string]any{"code": "000000"})

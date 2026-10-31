@@ -11,8 +11,10 @@ type User struct {
 	Email           string           `json:"email"`
 	EmailVerifiedAt *carbon.DateTime `json:"email_verified_at"`
 	// Never serialised: props end up in the page HTML and JSON.
-	Password      string  `json:"-"`
-	RememberToken *string `json:"-"`
+	Password string `json:"-"`
+	// How long a session lasts without activity, in minutes, or nil for
+	// the default (services.SessionTimeout, ADR 0043).
+	SessionTimeoutMinutes *int `json:"-"`
 	// Two-factor authentication is on once it's confirmed (ADR 0042). A
 	// secret without a confirmation is a setup that wasn't finished.
 	TwoFactorSecret      Secret           `json:"-"`

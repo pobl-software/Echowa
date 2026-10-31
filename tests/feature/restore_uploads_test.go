@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/goravel/framework/support/carbon"
+
 	"goravel/app/facades"
 	"goravel/app/models"
 	"goravel/app/services"
@@ -257,21 +259,18 @@ func (s *BackupsTestSuite) TestAnUploadsStatusKeepsTheSessionAlive() {
 	b.visit(fmt.Sprintf("/apps/%d?tab=backups", s.app.ID))
 	id := s.startUpload(b, s.app, "shop.dump", 10)
 	s.putChunk(b, s.app, id, 0, []byte("PGDMP"), nethttp.StatusOK)
-	session := filepath.Join(facades.Config().GetString("session.files"), b.cookieValue(facades.Config().GetString("session.cookie")))
-	idle := func(d time.Duration) {
-		then := time.Now().Add(-d)
-		s.Require().NoError(os.Chtimes(session, then, then))
-	}
+	start := carbon.Now()
+	s.T().Cleanup(carbon.ClearTestNow)
+	at := func(d time.Duration) { carbon.SetTestNow(start.Copy().AddDuration(d.String())) }
 
-	idle(100 * time.Minute)
+	at(100 * time.Minute)
 	s.putChunk(b, s.app, id, 5, []byte("12"), nethttp.StatusOK)
 	s.Equal(float64(7), s.getJSON(b, fmt.Sprintf("/apps/%d/restores/uploads/%s", s.app.ID, id), nethttp.StatusOK)["received"])
-	written, err := os.Stat(session)
-	s.Require().NoError(err)
-	s.WithinDuration(time.Now(), written.ModTime(), time.Minute, "the status saved the session")
 
-	idle(121 * time.Minute)
-	s.putChunk(b, s.app, id, 7, []byte("345"), nethttp.StatusUnauthorized)
+	at(219 * time.Minute)
+	s.putChunk(b, s.app, id, 7, []byte("3"), nethttp.StatusOK)
+	at(221*time.Minute + time.Second)
+	s.putChunk(b, s.app, id, 8, []byte("45"), nethttp.StatusUnauthorized)
 }
 
 func (s *BackupsTestSuite) TestUploadsNeedASignedInUser() {
