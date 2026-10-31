@@ -46,7 +46,8 @@ func init() {
 	services.Host = EmptyHost
 }
 
-// EmptyHost is a machine with no files, where every command fails.
+// EmptyHost is a machine with no files, where every command fails, and
+// no reference clock.
 var EmptyHost = services.HostReader{
 	FS: fstest.MapFS{},
 	Run: func(context.Context, string, ...string) ([]byte, error) {

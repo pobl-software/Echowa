@@ -347,6 +347,41 @@ func (s *HostMaintenanceTestSuite) TestAttentionNeverRunsACommand() {
 	s.Equal(runs, s.script.total())
 }
 
+// A clock systemd says isn't in sync is checked against the reference, as
+// OrbStack's are: the Mac sets them, with no sync service in the machine.
+func (s *HostMaintenanceTestSuite) TestAClockNoServiceSyncsIsCheckedAgainstTheReference() {
+	asked := 0
+	reference := func(ahead time.Duration, err error) {
+		services.Host.ClockOffset = func(context.Context) (time.Duration, error) {
+			asked++
+			return ahead, err
+		}
+	}
+
+	reference(time.Hour, nil)
+	m := services.HostMaintenance(context.Background())
+	s.Equal(ptr(true), m.ClockSynced)
+	s.Nil(m.ClockOffset)
+	s.Zero(asked, "in sync by systemd's account: nothing to check")
+
+	s.script.set("timedatectl", []byte("no\n"), nil)
+	for name, c := range map[string]struct {
+		ahead  time.Duration
+		err    error
+		synced bool
+		offset *float64
+	}{
+		"right to within a second": {ahead: 300 * time.Millisecond, synced: true, offset: ptr(0.3)},
+		"42 seconds slow":          {ahead: -42 * time.Second, synced: false, offset: ptr(-42.0)},
+		"no answer":                {err: errors.New("offline"), synced: false},
+	} {
+		reference(c.ahead, c.err)
+		m := services.HostMaintenance(context.Background())
+		s.Equal(ptr(c.synced), m.ClockSynced, name)
+		s.Equal(c.offset, m.ClockOffset, name)
+	}
+}
+
 // The Server page asks for maintenance once it's loaded, so an apt run
 // never holds it up, and its polls never ask for it.
 func (s *HostMaintenanceTestSuite) TestTheServerPageAsksForItAfterLoading() {

@@ -102,7 +102,11 @@ export interface Maintenance {
     support: MaintenanceSupport | null;
     // systemd's failed units.
     failed_units: string[] | null;
+    // Whether the clock is right: in sync, or close to a reference when
+    // nothing syncs it.
     clock_synced: boolean | null;
+    // Seconds ahead of the reference, when it was compared with one.
+    clock_offset: number | null;
     // When it was read, RFC 3339: the dashboard shows the last read.
     read_at: string;
 }

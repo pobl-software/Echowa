@@ -270,18 +270,34 @@ const definitions: Definition[] = [
         icon: ClockIcon,
         label: 'Clock',
         summary: true,
-        read: (m) =>
-            m.clock_synced == null
-                ? null
-                : m.clock_synced
-                  ? { tone: 'ok', value: 'Synced' }
-                  : {
-                        title: 'Clock not synced',
-                        tone: 'warning',
-                        value: 'Not synced',
-                        why: 'Certificates, schedules and backups rely on the time.',
-                        command: 'timedatectl status',
-                    },
+        read: ({ clock_synced: synced, clock_offset: offset }) => {
+            if (synced == null) {
+                return null;
+            }
+            if (synced) {
+                // With an offset, nothing syncs the clock but it's right:
+                // OrbStack sets its machines' clocks from the Mac.
+                return { tone: 'ok', value: offset == null ? 'Synced' : 'On time' };
+            }
+            if (offset == null) {
+                return {
+                    title: 'Clock not synced',
+                    tone: 'warning',
+                    value: 'Not synced',
+                    why: 'Certificates, schedules and backups rely on the time.',
+                    command: 'timedatectl status',
+                };
+            }
+            const off = `${Math.round(Math.abs(offset))} s ${offset > 0 ? 'fast' : 'slow'}`;
+
+            return {
+                title: 'Clock is off',
+                tone: 'warning',
+                value: off,
+                why: `It’s ${off}, and nothing keeps it in sync. Certificates, schedules and backups rely on the time.`,
+                command: 'sudo timedatectl set-ntp true',
+            };
+        },
     },
     {
         key: 'echowa',

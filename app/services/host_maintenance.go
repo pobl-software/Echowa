@@ -1,13 +1,16 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +35,14 @@ type Maintenance struct {
 	Support     *Support `json:"support"`
 	// FailedUnits is systemd's failed units, [] when none.
 	FailedUnits []string `json:"failed_units"`
-	ClockSynced *bool    `json:"clock_synced"`
+	// ClockSynced is whether the clock is right: in sync by systemd's
+	// account, or, when it isn't, within clockTolerance of a reference.
+	// OrbStack sets its machines' clocks from the Mac with no sync service,
+	// so systemd says unsynchronized there while the time is right.
+	ClockSynced *bool `json:"clock_synced"`
+	// ClockOffset is how many seconds ahead of the reference the clock is,
+	// when systemd said it isn't in sync and the reference answered.
+	ClockOffset *float64 `json:"clock_offset"`
 	// ReadAt is when it was read: the dashboard shows the last read.
 	ReadAt time.Time `json:"read_at"`
 }
@@ -73,7 +83,10 @@ type Support struct {
 
 const (
 	listsStaleAfter = 2 * 24 * time.Hour
-	supportWarning  = 90 * 24 * time.Hour
+	// clockTolerance is how far off a clock no service syncs may be. The
+	// reference is good to about a second.
+	clockTolerance = 5 * time.Second
+	supportWarning = 90 * 24 * time.Hour
 	// aptTimeout bounds a simulation, which runs apart from the request.
 	aptTimeout = 30 * time.Second
 )
@@ -99,10 +112,44 @@ type HostReader struct {
 	FS fs.FS
 	// Run runs a command under nice with LC_ALL=C, until ctx is done.
 	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// ClockOffset is how far ahead of a reference the clock is. Nil has
+	// no reference.
+	ClockOffset func(ctx context.Context) (time.Duration, error)
 }
 
 // Host is the machine Echowa runs on.
-var Host = HostReader{FS: os.DirFS("/"), Run: runOnHost}
+var Host = HostReader{FS: os.DirFS("/"), Run: runOnHost, ClockOffset: traceClockOffset}
+
+// traceClockOffset compares the clock with Cloudflare's trace, whose ts is
+// the time it answered: about halfway through the request.
+func traceClockOffset(ctx context.Context) (time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, traceURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("%s answered %s", traceURL, resp.Status)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if value, ok := strings.CutPrefix(scanner.Text(), "ts="); ok {
+			seconds, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, err
+			}
+			reference := time.UnixMilli(int64(seconds * 1000))
+			return start.Add(time.Since(start) / 2).Sub(reference), nil
+		}
+	}
+
+	return 0, fmt.Errorf("%s didn't say the time", traceURL)
+}
 
 func runOnHost(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "nice", append([]string{"-n", "10", name}, args...)...)
@@ -183,6 +230,9 @@ func readMaintenance(ctx context.Context, h HostReader, live bool) Maintenance {
 			}
 			if out, ok := hostCommand(ctx, h, ntpSynchronized); ok {
 				m.ClockSynced = parseYesNo(out)
+				if m.ClockSynced != nil && !*m.ClockSynced && h.ClockOffset != nil {
+					m.ClockSynced, m.ClockOffset = checkClock(ctx, h)
+				}
 			}
 		}
 		if hasApt {
@@ -212,6 +262,18 @@ func hostCommand(ctx context.Context, h HostReader, command []string) ([]byte, b
 	}
 
 	return out, true
+}
+
+// checkClock compares a clock systemd says isn't in sync with the
+// reference. Without an answer it stays not synced, as systemd says.
+func checkClock(ctx context.Context, h HostReader) (synced *bool, offset *float64) {
+	ahead, err := h.ClockOffset(ctx)
+	if err != nil {
+		facades.Log().Warning(fmt.Errorf("server maintenance: the reference clock: %w", err))
+		return ptr(false), nil
+	}
+
+	return ptr(ahead.Abs() <= clockTolerance), ptr(ahead.Round(time.Millisecond).Seconds())
 }
 
 func parseYesNo(out []byte) *bool {
