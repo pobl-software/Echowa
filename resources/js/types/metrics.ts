@@ -2,6 +2,8 @@
 // query.go, database.go) and app/services (server_metrics.go,
 // app_metrics.go, databases.go).
 
+import type { DeploymentTrigger } from '@/types/models';
+
 // metrics.Point: one bucket, at its start (Unix seconds). Null values mark
 // a gap.
 export interface Point {
@@ -42,6 +44,17 @@ export interface AppSeries extends SeriesWindow {
     memory: Point[];
     network: { rx: Point[]; tx: Point[] };
     block: { read: Point[]; write: Point[] };
+    // The deployments that finished in the window, oldest first.
+    deploys: ChartDeploy[];
+}
+
+// services.ChartDeploy: a deployment that changed what the app runs, at
+// the time it finished (Unix seconds).
+export interface ChartDeploy {
+    id: number;
+    at: number;
+    ref: string;
+    trigger: DeploymentTrigger;
 }
 
 // services.DatabaseSeries: a template database's own figures (ADR 0027).

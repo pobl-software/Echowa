@@ -3,6 +3,7 @@ import { ChevronRightIcon, DatabaseIcon, TriangleAlertIcon } from 'lucide-react'
 import type { ComponentProps, MouseEvent, ReactNode } from 'react';
 
 import { ResourceCharts } from '@/Components/AppMetrics';
+import { DeploysSwitch, useDeployMarkers } from '@/Components/DeployMarkers';
 import { MetricChart } from '@/Components/LazyMetricChart';
 import { MeterBar, meterLevel } from '@/Components/Meter';
 import { ChartCell, ChartGrid, Stats } from '@/Components/Panel';
@@ -141,8 +142,10 @@ export function DatabaseMetrics({
     usePoll(30_000, { only: ['database', 'databaseSeries'] });
     const { range, loading, pick } = useSeriesRange(databaseSeries, ['series', 'databaseSeries']);
 
+    const deploys = useDeployMarkers(app.id, series.deploys);
+
     const db = databaseSeries;
-    const chart = { from: db.from, to: db.to, step: db.step_seconds, height: 'h-36' };
+    const chart = { from: db.from, to: db.to, step: db.step_seconds, height: 'h-36', markers: deploys.markers };
     const words = wording(template.slug);
     // On, slow queries are worth a place near the top; off, the switch waits at the end.
     const slowOn = template.slow_queries === 'always' || (template.slow_queries === 'switch' && app.slow_queries);
@@ -151,7 +154,9 @@ export function DatabaseMetrics({
 
     return (
         <>
-            <RangePicker ranges={ranges} range={range} step={db.step_seconds} onPick={pick} />
+            <RangePicker ranges={ranges} range={range} step={db.step_seconds} onPick={pick}>
+                <DeploysSwitch {...deploys} />
+            </RangePicker>
             {database && <DatabaseWarnings database={database} />}
             <DatabaseVitals
                 template={template}
@@ -261,7 +266,7 @@ export function DatabaseMetrics({
                 )}
             </ChartGrid>
             <ChartGrid title="Resources" description="Its container, as Docker measures it." className={dim}>
-                <ResourceCharts series={series} live={metrics} />
+                <ResourceCharts series={series} live={metrics} markers={deploys.markers} />
             </ChartGrid>
             {!slowOn && slowPanel}
         </>

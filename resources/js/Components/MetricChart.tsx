@@ -1,3 +1,4 @@
+import { router } from '@inertiajs/react';
 import { useMemo } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -19,6 +20,15 @@ export interface ChartLine {
     curve?: 'step';
 }
 
+// A moment to mark, such as a deploy, in Unix seconds. The tooltip lists
+// a bucket's own markers. Markers too close to tell apart at the chart's
+// range share one flag, at the first, which leads to the newest's page.
+export interface ChartMarker {
+    at: number;
+    label: string;
+    href: string;
+}
+
 interface Props {
     lines: ChartLine[];
     // The range shown, in Unix seconds, and the bucket size.
@@ -33,6 +43,7 @@ interface Props {
     // the data's max.
     max?: number;
     reference?: { value: number; label: string };
+    markers?: ChartMarker[];
     // The plot's height class.
     height?: string;
     className?: string;
@@ -62,11 +73,13 @@ export function MetricChart({
     unit,
     max,
     reference,
+    markers,
     height = 'h-48',
     className,
 }: Props) {
     const visible = lines.filter((line) => line.points.length > 0);
     const rows = useMemo(() => mergeRows(lines), [lines]);
+    const placed = useMemo(() => placeMarkers(markers ?? [], from, to, step), [markers, from, to, step]);
     const ticks = useMemo(() => timeTicks(from, to), [from, to]);
     const peaks = lines.length === 1;
     // The keys drawn: each line's averages, and the first line's peaks.
@@ -131,6 +144,15 @@ export function MetricChart({
                                 }}
                             />
                         )}
+                        {placed.flags.map((flag) => (
+                            <ReferenceLine
+                                key={flag.t}
+                                x={flag.t}
+                                stroke="var(--muted-foreground)"
+                                strokeOpacity={0.45}
+                                label={<Flag flag={flag} />}
+                            />
+                        ))}
                         <Tooltip
                             cursor={{ stroke: 'var(--muted-foreground)', strokeWidth: 1 }}
                             isAnimationActive={false}
@@ -141,6 +163,7 @@ export function MetricChart({
                                         lines={lines}
                                         step={step}
                                         format={format}
+                                        marked={placed.byBucket.get((payload[0].payload as Row).t)}
                                     />
                                 ) : null
                             }
@@ -268,20 +291,91 @@ function Legend({ lines, format, peaks }: { lines: ChartLine[]; format: (value: 
     );
 }
 
+interface MarkerFlag {
+    // The bucket's start, in milliseconds, as rows have it.
+    t: number;
+    labels: string[];
+    href: string;
+}
+
+// Flags closer than a 24th of the range would overlap on a narrow chart,
+// so a marker within that of a flag's first joins it. Measuring from the
+// first, not the one before, keeps a run of deploys from becoming one flag.
+function placeMarkers(markers: ChartMarker[], from: number, to: number, step: number) {
+    const gap = (to - from) / 24;
+    const byBucket = new Map<number, string[]>();
+    const flags: MarkerFlag[] = [];
+    let first = Number.NEGATIVE_INFINITY;
+    for (const marker of [...markers].sort((a, b) => a.at - b.at)) {
+        const t = Math.floor(marker.at / step) * step * 1000;
+        byBucket.set(t, [...(byBucket.get(t) ?? []), marker.label]);
+        const flag = flags.at(-1);
+        if (flag && marker.at - first < gap) {
+            flag.labels.push(marker.label);
+            flag.href = marker.href;
+        } else {
+            flags.push({ t, labels: [marker.label], href: marker.href });
+            first = marker.at;
+        }
+    }
+    return { byBucket, flags };
+}
+
+// A small pennant above the plot, linking to the marker's page. Recharts
+// passes the line's viewBox to its label. It's out of the tab order: every
+// chart repeats it, and the Deployments section lists the same pages.
+function Flag({ flag, viewBox }: { flag: MarkerFlag; viewBox?: { x?: number; y?: number } }) {
+    if (viewBox?.x == null || viewBox.y == null) {
+        return null;
+    }
+    const { x, y } = viewBox;
+    return (
+        <a
+            href={flag.href}
+            tabIndex={-1}
+            onClick={(e) => {
+                if (!e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                    e.preventDefault();
+                    router.visit(flag.href);
+                }
+            }}
+            className="cursor-pointer"
+        >
+            <title>
+                {flag.labels.length > 1
+                    ? `${flag.labels.at(-1)} and ${flag.labels.length - 1} earlier`
+                    : flag.labels[0]}
+            </title>
+            <rect x={x - 12} y={y - 8} width={24} height={24} fill="transparent" />
+            <path d={`M${x - 4} ${y - 6}h8l-4 6z`} fill="var(--foreground)" fillOpacity={0.55} />
+        </a>
+    );
+}
+
 function ChartTooltip({
     row,
     lines,
     step,
     format,
+    marked,
 }: {
     row: Row;
     lines: ChartLine[];
     step: number;
     format: (value: number) => string;
+    marked?: string[];
 }) {
     return (
         <div className="grid min-w-40 gap-1.5 rounded-lg border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-xl">
             <div className="font-medium">{formatBucket(row.t, step)}</div>
+            {marked?.map((label) => (
+                <div key={label} className="flex items-center gap-2 text-muted-foreground">
+                    <svg width="14" height="8" viewBox="0 0 14 8" className="shrink-0" aria-hidden="true">
+                        <path d="M3 1h8l-4 6z" fill="var(--foreground)" fillOpacity={0.55} />
+                    </svg>
+                    {label}
+                </div>
+            ))}
             {lines.map((line, i) => {
                 if (line.points.length === 0) {
                     return null;

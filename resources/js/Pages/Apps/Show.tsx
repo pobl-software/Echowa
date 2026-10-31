@@ -540,7 +540,7 @@ export default function AppsShow({
                                 slowQueries={slowQueries}
                             />
                         ) : (
-                            <AppMetrics ranges={ranges} series={series} live={metrics} />
+                            <AppMetrics appId={app.id} ranges={ranges} series={series} live={metrics} />
                         ))}
 
                     {section === 'alerts' && <AppAlerts app={app} alerts={alerts} />}

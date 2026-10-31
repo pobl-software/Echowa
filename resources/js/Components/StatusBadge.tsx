@@ -161,12 +161,13 @@ export function DeploymentStatusBadge({ status, quiet }: { status: DeploymentSta
     );
 }
 
-// Marks the deployment the app is running now. It sits next to the
-// deployment's status, so it has no dot of its own.
+// Marks the deployment the app is running now, in green so it never reads
+// like a red Failed. A deployments table shows it in place of the row's
+// status dot, since the version running now always succeeded.
 export function CurrentBadge() {
     return (
-        <StatusPill tone="primary" plain title="The version running now">
-            Current
+        <StatusPill tone="success" title="The version running now">
+            Live
         </StatusPill>
     );
 }

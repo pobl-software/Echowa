@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"goravel/app/facades"
 	"goravel/app/metrics"
 	"goravel/app/models"
 )
@@ -27,6 +28,35 @@ type AppSeries struct {
 		Read  []metrics.Point `json:"read"`
 		Write []metrics.Point `json:"write"`
 	} `json:"block"`
+	// Deploys are the deployments that finished in the window, oldest
+	// first, for the charts' optional markers.
+	Deploys []ChartDeploy `json:"deploys"`
+}
+
+// ChartDeploy is a deployment that changed what the app runs, at the time
+// it finished (Unix seconds). A failed or rolled back one left the old
+// version running, so it isn't one.
+type ChartDeploy struct {
+	ID      uint                     `json:"id"`
+	At      int64                    `json:"at"`
+	Ref     string                   `json:"ref"`
+	Trigger models.DeploymentTrigger `json:"trigger"`
+}
+
+func chartDeploys(ctx context.Context, appID uint, w metrics.Window) ([]ChartDeploy, error) {
+	var rows []models.Deployment
+	err := facades.Orm().WithContext(ctx).Query().Select("id", "ref", "trigger", "finished_at").
+		Where("app_id", appID).Where("status", models.DeploymentSucceeded).
+		// finished_at is RFC 3339 text with nanoseconds, so compare instants,
+		// not strings. One app's deploys run one at a time, so ids are in order.
+		Where("unixepoch(finished_at) BETWEEN ? AND ?", w.From, w.To).
+		Order("id").Get(&rows)
+	deploys := make([]ChartDeploy, 0, len(rows))
+	for _, d := range rows {
+		deploys = append(deploys, ChartDeploy{ID: d.ID, At: d.FinishedAt.Timestamp(), Ref: d.Ref, Trigger: d.Trigger})
+	}
+
+	return deploys, err
 }
 
 // AppMetrics returns an app's series for the range ending at now. Every
@@ -38,6 +68,11 @@ func AppMetrics(ctx context.Context, app *models.App, r metrics.Range, now time.
 	series.CPU, series.Tasks, series.Memory = empty, empty, empty
 	series.Network.Rx, series.Network.Tx = empty, empty
 	series.Block.Read, series.Block.Write = empty, empty
+	deploys, err := chartDeploys(ctx, app.ID, series.Window)
+	if err != nil {
+		return nil, err
+	}
+	series.Deploys = deploys
 
 	db, err := MetricsDB()
 	if err != nil {

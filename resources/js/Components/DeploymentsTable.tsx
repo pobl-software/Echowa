@@ -8,7 +8,7 @@ import { duration, formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { DeploymentSummary } from '@/types/models';
 
-const shortRef = (ref: string) => (ref.startsWith('sha256:') ? ref.slice(0, 19) : ref);
+export const shortRef = (ref: string) => (ref.startsWith('sha256:') ? ref.slice(0, 19) : ref);
 const shortDigest = (digest: string | null) => (digest?.split('sha256:')[1] ?? '').slice(0, 12);
 
 export function DeploymentsTable({
@@ -50,7 +50,7 @@ export function DeploymentsTable({
                     return (
                         <TableRow
                             key={d.id}
-                            className={cn(current && 'bg-primary/[0.04] hover:bg-primary/[0.07]')}
+                            className={cn(current && 'bg-success/[0.05] hover:bg-success/[0.08]')}
                             aria-current={current || undefined}
                         >
                             {/* An accent bar on the left edge marks the running version. */}
@@ -58,7 +58,7 @@ export function DeploymentsTable({
                                 className={cn(
                                     'relative',
                                     current &&
-                                        'before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary',
+                                        'before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-success',
                                 )}
                             >
                                 <Link
@@ -73,10 +73,7 @@ export function DeploymentsTable({
                                 </div>
                             </TableCell>
                             <TableCell>
-                                <span className="flex items-center gap-2">
-                                    <DeploymentStatusBadge status={d.status} quiet />
-                                    {current && <CurrentBadge />}
-                                </span>
+                                {current ? <CurrentBadge /> : <DeploymentStatusBadge status={d.status} quiet />}
                             </TableCell>
                             <TableCell className="hidden font-mono text-xs sm:table-cell">
                                 {/* The digest it pulled shows on hover. */}
