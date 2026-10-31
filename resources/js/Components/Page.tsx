@@ -4,6 +4,7 @@ import { Fragment, type ReactNode } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/Components/ui/alert';
 import { Button } from '@/Components/ui/button';
+import { unreadNote } from '@/lib/alarms';
 import { attentionNote } from '@/lib/maintenance';
 import { useMediaQuery } from '@/lib/media';
 import { useShell } from '@/lib/shell';
@@ -44,7 +45,8 @@ export function Page({
     className?: string;
     children: ReactNode;
 }) {
-    const { dockerProblem, serverAttention } = usePage().props;
+    const { dockerProblem, serverAttention, unreadAlarms } = usePage().props;
+    const notes = [serverAttention ? attentionNote : null, unreadNote(unreadAlarms)].filter(Boolean);
     const { openMenu } = useShell();
     const title = crumbs[crumbs.length - 1];
     const wide = useMediaQuery('(min-width: 64rem)');
@@ -59,12 +61,12 @@ export function Page({
                             variant="ghost"
                             size="icon"
                             className="relative lg:hidden"
-                            aria-label={serverAttention ? `Open menu. ${attentionNote}` : 'Open menu'}
+                            aria-label={notes.length > 0 ? `Open menu. ${notes.join('. ')}` : 'Open menu'}
                             onClick={openMenu}
                         >
                             <MenuIcon />
                             {/* The rail's dot, for phones, where the drawer hides it. */}
-                            {serverAttention && (
+                            {notes.length > 0 && (
                                 <span
                                     aria-hidden
                                     className="absolute top-1.5 right-1.5 size-2 rounded-full bg-warning ring-2 ring-background"

@@ -74,6 +74,10 @@ func Web() {
 		router.Middleware(&middleware.Authenticate{}).Group(func(router route.Router) {
 			router.Get("/dashboard", controllers.NewDashboardController().Index)
 			router.Get("/server", controllers.NewServerController().Show)
+			alarms := controllers.NewAlarmController()
+			router.Get("/alarms", alarms.Index)
+			router.Post("/alarms/read", alarms.ReadAll)
+			router.Post("/alarms/{alarm}/read", alarms.Read)
 			router.Post("/logout", auth.NewAuthenticatedSessionController().Destroy)
 
 			apps := controllers.NewAppController()

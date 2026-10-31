@@ -1,5 +1,6 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import {
+    BellIcon,
     BoxesIcon,
     GaugeIcon,
     LogOutIcon,
@@ -25,6 +26,7 @@ import {
 } from '@/Components/ui/dropdown-menu';
 import { Sheet, SheetContent, SheetTitle } from '@/Components/ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/Components/ui/tooltip';
+import { unreadNote } from '@/lib/alarms';
 import { attentionNote } from '@/lib/maintenance';
 import { ShellContext } from '@/lib/shell';
 import { type Theme, useTheme } from '@/lib/theme';
@@ -49,6 +51,13 @@ const nav: NavItem[] = [
         icon: GaugeIcon,
         match: ['/server'],
         attention: (props) => (props.serverAttention ? attentionNote : null),
+    },
+    {
+        label: 'Alarms',
+        href: '/alarms',
+        icon: BellIcon,
+        match: ['/alarms'],
+        attention: (props) => unreadNote(props.unreadAlarms),
     },
     { label: 'Settings', href: '/settings', icon: SettingsIcon, match: ['/settings'] },
 ];

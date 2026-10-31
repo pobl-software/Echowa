@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goravel/framework/database/orm"
 	"github.com/goravel/framework/support/carbon"
 
 	"goravel/app/alerts"
@@ -103,6 +104,8 @@ func deliver(ctx context.Context, rules []models.AlertRule, e alerts.Event) {
 			}
 		}
 	}
+	recordAlarm(ctx, rules, e)
+
 	ids := make([]uint, 0, len(targets))
 	for id := range targets {
 		ids = append(ids, id)
@@ -317,19 +320,29 @@ func RecoverNotifications(ctx context.Context) error {
 	return err
 }
 
-// PruneNotifications forgets notifications older than NotificationsKept.
-// IDs grow with time, so it deletes up to the newest old one, a batch at
-// a time.
+// PruneNotifications forgets notifications and alarms older than
+// NotificationsKept.
 func PruneNotifications(ctx context.Context, now time.Time) error {
 	cutoff := now.Add(-NotificationsKept)
+	if err := pruneBefore(ctx, cutoff, func(n models.Notification) orm.Model { return n.Model }); err != nil {
+		return err
+	}
+
+	return pruneBefore(ctx, cutoff, func(a models.Alarm) orm.Model { return a.Model })
+}
+
+// pruneBefore deletes the T made before cutoff. IDs grow with time, so it
+// deletes up to the newest old one, a batch at a time.
+func pruneBefore[T any](ctx context.Context, cutoff time.Time, model func(T) orm.Model) error {
 	for {
-		var batch []models.Notification
+		var batch []T
 		if err := facades.Orm().WithContext(ctx).Query().Select("id", "created_at").Order("id").Limit(500).Get(&batch); err != nil {
 			return err
 		}
 		// Compared in Go, as deploy.Recover does.
-		old := slices.IndexFunc(batch, func(n models.Notification) bool {
-			return n.CreatedAt == nil || !n.CreatedAt.StdTime().Before(cutoff)
+		old := slices.IndexFunc(batch, func(row T) bool {
+			created := model(row).CreatedAt
+			return created == nil || !created.StdTime().Before(cutoff)
 		})
 		if len(batch) == 0 || old == 0 {
 			return nil
@@ -337,7 +350,8 @@ func PruneNotifications(ctx context.Context, now time.Time) error {
 		if old < 0 {
 			old = len(batch)
 		}
-		if _, err := facades.Orm().WithContext(ctx).Query().Where("id <= ?", batch[old-1].ID).Delete(&models.Notification{}); err != nil {
+		var zero T
+		if _, err := facades.Orm().WithContext(ctx).Query().Where("id <= ?", model(batch[old-1]).ID).Delete(&zero); err != nil {
 			return err
 		}
 		if old < len(batch) {

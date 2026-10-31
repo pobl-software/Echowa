@@ -281,6 +281,19 @@ export interface FiringAlert {
     path: string;
 }
 
+// services.AlarmSummary: one time an alert went off.
+export interface AlarmSummary {
+    id: number;
+    title: string;
+    summary: string;
+    // info, warning, critical, or resolved for a condition that cleared.
+    severity: AlertSeverity | 'resolved';
+    // The page it's about, or empty.
+    path: string;
+    read: boolean;
+    created_at: string | null;
+}
+
 // services.NotificationSummary.
 export interface NotificationSummary {
     id: number;
