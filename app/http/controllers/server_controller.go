@@ -32,6 +32,9 @@ func (r *ServerController) Show(ctx http.Context) http.Response {
 		"latest": func(c context.Context) (any, error) {
 			return services.LatestMetrics(), nil
 		},
+		"server": func(c context.Context) (any, error) {
+			return services.CurrentServerFacts(c), nil
+		},
 		"appIds": func(c context.Context) (any, error) {
 			return services.AppIDsByName(c)
 		},

@@ -3,7 +3,7 @@ import { formatDateTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { DeploymentStatus, LiveStatus, RunStatus } from '@/types/models';
 
-type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'primary';
+export type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'primary';
 
 const tones: Record<Tone, { pill: string; dot: string; halo: string }> = {
     success: { pill: 'bg-success/10 text-success', dot: 'bg-success', halo: 'ring-success/15' },
@@ -125,6 +125,16 @@ export function LiveStatusBadge({ status, quiet }: { status: LiveStatus; quiet?:
             )}
         </StatusPill>
     );
+}
+
+// LiveStatusDot is the service's state as a dot whatever it is, for a
+// column of them that has to line up. Hovering it shows the word.
+export function LiveStatusDot({ status }: { status: LiveStatus }) {
+    const { label, tone } = status.unhealthy_since
+        ? { label: 'Unhealthy', tone: 'danger' as const }
+        : live[status.state];
+
+    return <StatusDot tone={tone} label={label} />;
 }
 
 const deployment: Record<DeploymentStatus, { label: string; tone: Tone; pulse?: boolean }> = {

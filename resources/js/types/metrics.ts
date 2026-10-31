@@ -30,6 +30,11 @@ export interface ServerSeries extends SeriesWindow {
 }
 
 // services.AppSeries: one app's figures, summed over its tasks.
+// services.AppsCPU: every app's CPU over the last hour, by app ID.
+export interface AppsCPU extends SeriesWindow {
+    apps: Record<string, Point[]>;
+}
+
 export interface AppSeries extends SeriesWindow {
     // A percentage of one core.
     cpu: Point[];

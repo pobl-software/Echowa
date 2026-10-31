@@ -76,6 +76,47 @@ export interface AppSummary {
     links: number[];
 }
 
+// services.ServerFacts. A fact the host won't give is empty.
+export interface ServerFacts {
+    hostname: string;
+    os: string;
+    kernel: string;
+    // RFC 3339, with a zone.
+    booted_at: string | null;
+    version: string;
+    // A newer release's version, or empty.
+    update: string;
+    // Whether the release channel has been checked; a dev build never is.
+    update_checked: boolean;
+}
+
+// What needs doing to the server's OS (step 28, ADR 0041). Not sent yet:
+// the dashboard shows placeholderMaintenance until it is. Null means not
+// checked.
+export interface ServerMaintenance {
+    // When a reboot was first needed (/var/run/reboot-required), RFC 3339.
+    restart_required_since: string | null;
+    security_updates: number | null;
+    // systemd units in the failed state.
+    failed_services: string[] | null;
+    // The release's end of standard support, YYYY-MM-DD.
+    os_support_ends: string | null;
+    clock_synced: boolean | null;
+}
+
+// services.Activity: a deployment, backup, restore or scheduled task run.
+export interface Activity {
+    kind: 'deployment' | 'backup' | 'restore' | 'task';
+    id: number;
+    app_id: number;
+    status: string;
+    trigger: string;
+    // A task's name, and a deployment's ref.
+    name: string;
+    ref: string;
+    created_at: string;
+}
+
 // models.Registry. The token is never sent.
 export interface Registry {
     id: number;

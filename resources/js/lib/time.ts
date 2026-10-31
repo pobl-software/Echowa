@@ -68,3 +68,16 @@ export function formatInZone(value: string, zone: string): string {
         minute: '2-digit',
     });
 }
+
+// "3 days", "5 hours", "12 minutes".
+export function uptime(bootedAt: string): string {
+    const minutes = Math.max(0, Math.floor((Date.now() - new Date(bootedAt).getTime()) / 60000));
+    const [value, unit] =
+        minutes >= 1440
+            ? [Math.floor(minutes / 1440), 'day']
+            : minutes >= 60
+              ? [Math.floor(minutes / 60), 'hour']
+              : [minutes, 'minute'];
+
+    return `${value} ${unit}${value === 1 ? '' : 's'}`;
+}

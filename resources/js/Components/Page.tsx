@@ -15,8 +15,9 @@ export interface Crumb {
 // Page is every signed-in page inside the layout's frame: a top bar with
 // breadcrumbs (the last is the page's title), status and actions; an
 // optional sub nav (aside on wide screens, tabs on phones); then the
-// content, which scrolls on its own. Phones show only the title, or
-// phoneTitle when the last crumb alone says too little.
+// content, which scrolls on its own; and an optional sidebar, a column on
+// the right from lg and under the content below it. Phones show only the
+// title, or phoneTitle when the last crumb alone says too little.
 export function Page({
     crumbs,
     phoneTitle,
@@ -25,6 +26,7 @@ export function Page({
     aside,
     tabs,
     description,
+    sidebar,
     className,
     children,
 }: {
@@ -35,6 +37,7 @@ export function Page({
     aside?: ReactNode;
     tabs?: ReactNode;
     description?: ReactNode;
+    sidebar?: ReactNode;
     className?: string;
     children: ReactNode;
 }) {
@@ -68,7 +71,13 @@ export function Page({
                                 <ChevronRightIcon className="hidden size-3.5 shrink-0 text-muted-foreground/60 sm:block" />
                             </Fragment>
                         ))}
-                        <h1 className="truncate font-medium">
+                        {/* A top-level page's one crumb is its title; nested pages keep the breadcrumb's size. */}
+                        <h1
+                            className={cn(
+                                'truncate font-medium',
+                                crumbs.length === 1 && 'font-display text-lg tracking-tight',
+                            )}
+                        >
                             {phoneTitle ? (
                                 <>
                                     <span className="sm:hidden">{phoneTitle}</span>
@@ -83,19 +92,27 @@ export function Page({
                     {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}
                 </header>
                 {tabs && <div className="shrink-0 border-b lg:hidden">{tabs}</div>}
-                <div className="flex-1 overflow-y-auto">
-                    <div className={cn('mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8', className)}>
-                        {status && <div className="mb-4 flex flex-wrap items-center gap-2 sm:hidden">{status}</div>}
-                        {dockerProblem && (
-                            <Alert variant="destructive" className="mb-6">
-                                <TriangleAlertIcon />
-                                <AlertTitle>Docker needs attention</AlertTitle>
-                                <AlertDescription>{dockerProblem}</AlertDescription>
-                            </Alert>
-                        )}
-                        {description && <p className="mb-6 text-sm text-muted-foreground">{description}</p>}
-                        {children}
+                {/* With a sidebar, the content and the sidebar scroll apart from lg; below it they stack and scroll together. */}
+                <div className={cn('min-h-0 flex-1 overflow-y-auto', sidebar && 'lg:flex lg:overflow-hidden')}>
+                    <div className={cn(sidebar && 'lg:min-w-0 lg:flex-1 lg:overflow-y-auto')}>
+                        <div className={cn('mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8', className)}>
+                            {status && <div className="mb-4 flex flex-wrap items-center gap-2 sm:hidden">{status}</div>}
+                            {dockerProblem && (
+                                <Alert variant="destructive" className="mb-6">
+                                    <TriangleAlertIcon />
+                                    <AlertTitle>Docker needs attention</AlertTitle>
+                                    <AlertDescription>{dockerProblem}</AlertDescription>
+                                </Alert>
+                            )}
+                            {description && <p className="mb-6 text-sm text-muted-foreground">{description}</p>}
+                            {children}
+                        </div>
                     </div>
+                    {sidebar && (
+                        <aside className="border-t lg:w-72 lg:shrink-0 xl:w-80 lg:overflow-y-auto lg:border-t-0 lg:border-l">
+                            {sidebar}
+                        </aside>
+                    )}
                 </div>
             </div>
         </div>
