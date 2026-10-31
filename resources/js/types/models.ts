@@ -814,6 +814,21 @@ export interface SettingsOverview {
     notifications: { providers: number; enabled: number; failing: string[] };
     alerts: { rules: number; enabled: number; firing: number; suggestions: number };
     prune: PruneSettings;
+    security: TwoFactorStatus;
+}
+
+// controllers.twoFactorProps (ADR 0042). The secret is never a prop.
+export interface TwoFactorStatus {
+    enabled: boolean;
+    confirmed_at: string | null;
+}
+
+// services.TwoFactorSetup, from POST /settings/security/two-factor/setup.
+// qr.path draws the dark modules on a qr.size square grid.
+export interface TwoFactorSetup {
+    secret: string;
+    uri: string;
+    qr: { size: number; path: string };
 }
 
 // update.Status: the last update the root updater ran (ADR 0021).

@@ -8,6 +8,7 @@ import {
     type LucideIcon,
     SendIcon,
     SettingsIcon,
+    ShieldCheckIcon,
     Trash2Icon,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef } from 'react';
@@ -67,6 +68,14 @@ export const settingsSections = [
         icon: BellIcon,
         description: 'Alerts about the server, and ones that cover every app.',
     },
+    {
+        group: 'Account',
+        id: 'security',
+        label: 'Security',
+        href: '/settings/security',
+        icon: ShieldCheckIcon,
+        description: 'Two-factor authentication: a code from your phone as well as your password.',
+    },
 ] as const satisfies readonly {
     group: string | null;
     id: string;
@@ -77,7 +86,7 @@ export const settingsSections = [
 }[];
 export type SettingsSection = (typeof settingsSections)[number]['id'];
 
-export const settingsGroups = ['Apps', 'Monitoring'] as const;
+export const settingsGroups = ['Apps', 'Monitoring', 'Account'] as const;
 
 export function settingsSection(id: SettingsSection) {
     return settingsSections.find((s) => s.id === id) ?? settingsSections[0];

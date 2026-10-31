@@ -68,6 +68,9 @@ func Web() {
 			setup := auth.NewSetupController()
 			router.Get("/setup", setup.Create)
 			router.Middleware(frameworkmiddleware.Throttle("login")).Post("/setup", setup.Store)
+			challenge := auth.NewTwoFactorChallengeController()
+			router.Get("/two-factor-challenge", challenge.Create)
+			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Post("/two-factor-challenge", challenge.Store)
 		})
 
 		// Signed-in users only.
@@ -168,6 +171,11 @@ func Web() {
 			router.Get("/settings/storage", settings.Storage)
 			router.Get("/settings/notifications", settings.Notifications)
 			router.Get("/settings/alerts", settings.Alerts)
+			security := controllers.NewSecurityController()
+			router.Get("/settings/security", security.Show)
+			router.Post("/settings/security/two-factor/setup", security.Setup)
+			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Post("/settings/security/two-factor", security.Confirm)
+			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Delete("/settings/security/two-factor", security.Destroy)
 
 			registries := controllers.NewRegistryController()
 			router.Get("/settings/registries", registries.Index)

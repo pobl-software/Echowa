@@ -77,6 +77,11 @@ func (r *SettingsController) Index(ctx http.Context) http.Response {
 	if err != nil {
 		return inertia.ServerError(ctx, err)
 	}
+	user, err := services.CurrentUser(ctx)
+	if err != nil {
+		return inertia.ServerError(ctx, err)
+	}
+
 	on := 0
 	for _, rule := range alertRules.Rules {
 		if rule.Enabled {
@@ -103,7 +108,8 @@ func (r *SettingsController) Index(ctx http.Context) http.Response {
 			"firing":      len(alertRules.Firing),
 			"suggestions": len(alertRules.Suggestions),
 		},
-		"prune": pruneProps(),
+		"prune":    pruneProps(),
+		"security": twoFactorProps(user),
 	})
 }
 

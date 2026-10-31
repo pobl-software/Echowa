@@ -7,7 +7,7 @@ import { SettingsPage, type SettingsSection, settingsGroups, settingsSections } 
 import { StatusPill, type Tone } from '@/Components/StatusBadge';
 import { buttonVariants } from '@/Components/ui/button';
 import { formatBytes } from '@/lib/format';
-import { formatDateTime, timeAgo } from '@/lib/time';
+import { formatDate, formatDateTime, timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { SettingsOverview, UpdateSettings } from '@/types/models';
 
@@ -92,6 +92,10 @@ const summaries: Record<Exclude<SettingsSection, 'overview' | 'updates'>, (o: Se
             text: `${plural(alerts.rules, 'alert')}${alerts.enabled < alerts.rules ? ` · ${alerts.rules - alerts.enabled} off` : ''} · none firing`,
         };
     },
+    security: ({ security }) =>
+        security.enabled
+            ? { tone: 'success', text: `Two-factor authentication on since ${formatDate(security.confirmed_at)}` }
+            : { tone: 'warning', text: 'Two-factor authentication off' },
 };
 
 const dot: Record<Tone, string> = {

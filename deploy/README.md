@@ -158,6 +158,11 @@ sudo echowa-artisan setup:link
 Forgot the password later? `sudo echowa-artisan user:create` resets it, and
 signs every browser out.
 
+Turn on two-factor authentication in Settings, Security: logging in then
+takes a code from an authenticator app as well. Lost the phone?
+`sudo echowa-artisan user:disable-two-factor` turns it off, and you can set
+it up again after logging in with the password.
+
 **Back up `APP_KEY` now.** It's in `/etc/echowa/env`. Registry tokens and
 env values are encrypted with it. A database without its key can't be
 decrypted, and a lost key can't be recovered. Keep it in a password manager,
