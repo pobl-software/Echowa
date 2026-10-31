@@ -286,7 +286,7 @@ func SendHeldBack(ctx context.Context) error {
 			Trigger: heldBackTrigger,
 			Title:   title,
 			Summary: fmt.Sprintf("Echowa sends %s at most %d notifications in %s, and kept the rest. It sends again now.", p.Name, NotifyBurst, minutes(int(NotifyWindow/time.Minute))),
-			Path:    "/settings",
+			Path:    "/settings/notifications",
 		}
 		enqueue(ctx, p, models.Notification{NotificationProviderID: p.ID, Trigger: e.Trigger, Severity: string(notify.Warning), Title: e.Title, Summary: e.Summary}, message(notify.Warning, e))
 	}
@@ -462,7 +462,7 @@ func notifyUpdate(latest LatestRelease) {
 		Title:   "Echowa " + latest.Version + " is out",
 		Summary: "This server runs " + release.Version + ". Update it from Settings, Updates.",
 		Fields:  []notify.Field{{Label: "Released", Value: latest.PublishedAt.UTC().Format("2 Jan 2006")}},
-		Path:    "/settings",
+		Path:    "/settings/updates",
 	})
 }
 

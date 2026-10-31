@@ -163,7 +163,7 @@ func (s *AppControllerTestSuite) TestEmptyListsAreArraysNotNull() {
 	_, page = b.visit("/apps/create")
 	s.Equal([]any{}, page.Props["registries"])
 
-	_, page = b.visit("/registries")
+	_, page = b.visit("/settings/registries")
 	s.Equal([]any{}, page.Props["registries"])
 
 	s.Require().NoError(services.DeleteApp(context.Background(), app))

@@ -69,7 +69,7 @@ func (s *UpdateTestSuite) check() {
 func (s *UpdateTestSuite) TestSettingsShowsTheNewestRelease() {
 	s.check()
 	b := signedIn(s.T(), &s.TestCase)
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/updates")
 
 	s.Equal("v1.2.0", prop(page, "update.current"), "update.current")
 	s.Equal(false, prop(page, "update.dev"), "update.dev")
@@ -94,14 +94,14 @@ func (s *UpdateTestSuite) TestAFailedCheckKeepsTheLastAnswer() {
 func (s *UpdateTestSuite) TestUpdatingWritesARequestForTheUpdater() {
 	s.check()
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/updates")
 
-	b.submit(nethttp.MethodPost, "/settings/update", "/settings", map[string]any{"version": "v1.3.0"}).AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodPost, "/settings/update", "/settings/updates", map[string]any{"version": "v1.3.0"}).AssertHeader("Location", "/settings/updates")
 	requested, ok := update.Requested()
 	s.True(ok)
 	s.Equal("v1.3.0", requested)
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/updates")
 	s.Equal("Update requested. Echowa restarts when it's ready.", page.Flash["success"])
 	s.Equal("v1.3.0", prop(page, "update.requested"), "update.requested")
 	s.Equal(true, prop(page, "update.busy"), "update.busy")
@@ -144,7 +144,7 @@ func (s *UpdateTestSuite) TestDevBuildsNeverCheck() {
 		return services.LatestRelease{}, nil
 	}
 	b := signedIn(s.T(), &s.TestCase)
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/updates")
 	s.Equal(true, prop(page, "update.dev"), "update.dev")
 	s.Equal(false, prop(page, "update.available"), "update.available")
 	s.check()

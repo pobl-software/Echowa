@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	nethttp "net/http"
+	"strings"
 	"sync"
 
 	"github.com/goravel/framework/contracts/http"
@@ -69,6 +70,53 @@ func Share(ctx http.Context, props gonertia.Props) {
 // Render responds with the given page component, as a full HTML document on a
 // first visit or as JSON when the Inertia client is navigating.
 func Render(ctx http.Context, component string, props ...gonertia.Props) http.Response {
+	return render(ctx, ctx.Response().Writer(), component, props...)
+}
+
+// NotFound answers 404. A browser or the Inertia client gets the
+// Errors/NotFound page; anything else (fetch, a stream, a WebSocket) gets
+// plain text. It needs no session, so the router's fallback can use it.
+func NotFound(ctx http.Context) http.Response {
+	req := ctx.Request()
+	if req.Header("X-Inertia") == "" && !strings.Contains(req.Header("Accept"), "text/html") {
+		return ctx.Response().String(nethttp.StatusNotFound, "404 page not found")
+	}
+
+	w := &statusWriter{ResponseWriter: ctx.Response().Writer(), status: nethttp.StatusNotFound}
+	if resp := render(ctx, w, "Errors/NotFound", gonertia.Props{"path": req.Origin().URL.Path}); resp != nil {
+		return resp
+	}
+
+	// Never nil: callers such as findOr404 stop on a non-nil response.
+	return written{}
+}
+
+// written is a response that has already been written.
+type written struct{}
+
+func (written) Render() error { return nil }
+
+// statusWriter sends status whatever gonertia asks for: it writes 200 for
+// the Inertia client, and nothing (so 200) for a full page.
+type statusWriter struct {
+	nethttp.ResponseWriter
+	status int
+	sent   bool
+}
+
+func (w *statusWriter) WriteHeader(int) {
+	if !w.sent {
+		w.sent = true
+		w.ResponseWriter.WriteHeader(w.status)
+	}
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	w.WriteHeader(w.status)
+	return w.ResponseWriter.Write(b)
+}
+
+func render(ctx http.Context, w nethttp.ResponseWriter, component string, props ...gonertia.Props) http.Response {
 	i, err := boot()
 	if err != nil {
 		return renderError(ctx, err)
@@ -89,7 +137,7 @@ func Render(ctx http.Context, component string, props ...gonertia.Props) http.Re
 		rctx = gonertia.SetTemplateDatum(rctx, "vite", tags)
 	}
 
-	if err := i.Render(ctx.Response().Writer(), r.WithContext(rctx), component, props...); err != nil {
+	if err := i.Render(w, r.WithContext(rctx), component, props...); err != nil {
 		return renderError(ctx, err)
 	}
 

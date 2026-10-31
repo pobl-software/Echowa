@@ -100,7 +100,7 @@ export function AppForm({ registries, template }: AppFormProps) {
                     {form.errors.registry_id && <FieldError>{form.errors.registry_id}</FieldError>}
                     {registries.length === 0 && (
                         <FieldDescription>
-                            Private image? <Link href="/registries/create">Add a registry</Link> first.
+                            Private image? <Link href="/settings/registries/create">Add a registry</Link> first.
                         </FieldDescription>
                     )}
                 </Field>

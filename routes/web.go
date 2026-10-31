@@ -15,6 +15,7 @@ import (
 	"goravel/app/http/controllers"
 	"goravel/app/http/controllers/auth"
 	"goravel/app/http/middleware"
+	"goravel/app/inertia"
 	"goravel/app/release"
 	"goravel/app/services"
 )
@@ -152,20 +153,26 @@ func Web() {
 			router.Get("/apps/{app}/deployments/{deployment}", deployments.Show)
 			router.Post("/apps/{app}/deployments/{deployment}/redeploy", deployments.Redeploy)
 
-			registries := controllers.NewRegistryController()
-			router.Get("/registries", registries.Index)
-			router.Get("/registries/create", registries.Create)
-			router.Post("/registries", registries.Store)
-			router.Get("/registries/{registry}/edit", registries.Edit)
-			router.Put("/registries/{registry}", registries.Update)
-			router.Delete("/registries/{registry}", registries.Destroy)
-			router.Post("/registries/{registry}/test", registries.Test)
-
+			// Settings: an overview, then a page per section.
 			settings := controllers.NewSettingsController()
 			router.Get("/settings", settings.Index)
-			router.Post("/settings/prune", settings.Prune)
+			router.Get("/settings/updates", settings.Updates)
 			router.Post("/settings/update/check", settings.CheckForUpdate)
 			router.Post("/settings/update", settings.Update)
+			router.Get("/settings/pruning", settings.Pruning)
+			router.Post("/settings/prune", settings.Prune)
+			router.Get("/settings/storage", settings.Storage)
+			router.Get("/settings/notifications", settings.Notifications)
+			router.Get("/settings/alerts", settings.Alerts)
+
+			registries := controllers.NewRegistryController()
+			router.Get("/settings/registries", registries.Index)
+			router.Get("/settings/registries/create", registries.Create)
+			router.Post("/settings/registries", registries.Store)
+			router.Get("/settings/registries/{registry}/edit", registries.Edit)
+			router.Put("/settings/registries/{registry}", registries.Update)
+			router.Delete("/settings/registries/{registry}", registries.Destroy)
+			router.Post("/settings/registries/{registry}/test", registries.Test)
 
 			storage := controllers.NewStorageLocationController()
 			router.Post("/settings/storage", storage.Store)
@@ -200,7 +207,5 @@ func Web() {
 	// Gin's built-in 404 runs after the global Timeout middleware has already
 	// written a 200 from its buffer, so unknown URLs came back as empty 200s.
 	// A fallback route sets the status itself.
-	facades.Route().Fallback(func(ctx http.Context) http.Response {
-		return ctx.Response().String(http.StatusNotFound, "404 page not found")
-	})
+	facades.Route().Fallback(inertia.NotFound)
 }

@@ -104,7 +104,7 @@ export default function Dashboard({
                             <Link href="/apps/create" className={buttonVariants()}>
                                 Create an app
                             </Link>
-                            <Link href="/registries" className={buttonVariants({ variant: 'outline' })}>
+                            <Link href="/settings/registries" className={buttonVariants({ variant: 'outline' })}>
                                 Registries
                             </Link>
                         </div>

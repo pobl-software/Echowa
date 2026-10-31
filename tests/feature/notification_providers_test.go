@@ -71,7 +71,7 @@ func (s *NotificationProvidersTestSuite) named(name string) (models.Notification
 }
 
 func (s *NotificationProvidersTestSuite) errors(b *browser) map[string]any {
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/notifications")
 	errs, _ := page.Props["errors"].(map[string]any)
 
 	return errs
@@ -83,7 +83,7 @@ func (s *NotificationProvidersTestSuite) TestSettingsListsProvidersWithoutTheirS
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(slackWebhook, "slack-secret", ntfyTopic, "tk_token")
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/notifications")
 
 	rows := page.Props["notificationProviders"].([]any)
 	s.Require().Len(rows, 2)
@@ -102,7 +102,7 @@ func (s *NotificationProvidersTestSuite) TestSettingsListsProvidersWithoutTheirS
 func (s *NotificationProvidersTestSuite) TestStoreKeepsEachKindsFieldsAndEncryptsItsSecrets() {
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(slackWebhook, ntfyTopic, resendKey, smtpPassword)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	for _, form := range []map[string]any{
 		{"name": " Slack ", "kind": "slack", "webhook_url": slackWebhook, "host": "ignored.example.com"},
@@ -111,7 +111,7 @@ func (s *NotificationProvidersTestSuite) TestStoreKeepsEachKindsFieldsAndEncrypt
 			"password": smtpPassword, "from": "alerts@example.com", "to": "a@example.com, b@example.com"},
 		{"name": "Resend", "kind": "resend", "api_key": resendKey, "from": "alerts@example.com", "to": "a@example.com"},
 	} {
-		b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form).AssertHeader("Location", "/settings")
+		b.submit(nethttp.MethodPost, "/settings/notifications", "/settings/notifications", form).AssertHeader("Location", "/settings/notifications")
 		s.Empty(s.errors(b), form["kind"])
 	}
 
@@ -141,7 +141,7 @@ func (s *NotificationProvidersTestSuite) TestStoreKeepsEachKindsFieldsAndEncrypt
 func (s *NotificationProvidersTestSuite) TestStoreValidatesByKind() {
 	s.createSlack()
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	for _, tc := range []struct {
 		form   map[string]any
@@ -155,7 +155,7 @@ func (s *NotificationProvidersTestSuite) TestStoreValidatesByKind() {
 			"from": "Echowa <a@example.com>", "to": "a@example.com, nope"}, []string{"host", "port", "security", "from", "to"}},
 		{map[string]any{"name": "Resend", "kind": "resend", "from": "a@example.com", "to": ""}, []string{"api_key", "to"}},
 	} {
-		b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", tc.form).AssertHeader("Location", "/settings")
+		b.submit(nethttp.MethodPost, "/settings/notifications", "/settings/notifications", tc.form).AssertHeader("Location", "/settings/notifications")
 		errs := s.errors(b)
 		for _, field := range tc.fields {
 			s.Contains(errs, field, tc.form)
@@ -170,15 +170,15 @@ func (s *NotificationProvidersTestSuite) TestStoreValidatesByKind() {
 
 func (s *NotificationProvidersTestSuite) TestPlainSMTPIsOnlyForLoopback() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 	form := map[string]any{"name": "Mail", "kind": "smtp", "host": "smtp.example.com", "port": 25, "security": "none",
 		"from": "alerts@example.com", "to": "a@example.com"}
 
-	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form)
+	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings/notifications", form)
 	s.Contains(s.errors(b)["security"], "only allowed for localhost")
 
 	form["host"] = "localhost"
-	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form)
+	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings/notifications", form)
 	s.Empty(s.errors(b))
 	mail, _ := s.named("Mail")
 	s.Equal("none", mail.Config.Security)
@@ -186,29 +186,29 @@ func (s *NotificationProvidersTestSuite) TestPlainSMTPIsOnlyForLoopback() {
 
 func (s *NotificationProvidersTestSuite) TestAnSMTPUsernameNeedsAPassword() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 	form := map[string]any{"name": "Mail", "kind": "smtp", "host": "smtp.example.com", "port": 587, "security": "starttls",
 		"username": "echowa", "from": "alerts@example.com", "to": "a@example.com"}
 
-	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form)
+	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings/notifications", form)
 	s.Contains(s.errors(b)["password"], "Enter the password")
 
 	form["password"] = smtpPassword
-	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings", form)
+	b.submit(nethttp.MethodPost, "/settings/notifications", "/settings/notifications", form)
 	s.Empty(s.errors(b))
 	mail, _ := s.named("Mail")
 	url := fmt.Sprintf("/settings/notifications/%d", mail.ID)
 
 	form["password"] = nil
-	b.submit(nethttp.MethodPut, url, "/settings", form)
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", form)
 	s.Empty(s.errors(b), "the stored password is kept")
 
 	form["password"] = ""
-	b.submit(nethttp.MethodPut, url, "/settings", form)
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", form)
 	s.Contains(s.errors(b), "password", "nor can it be removed")
 
 	form["username"] = ""
-	b.submit(nethttp.MethodPut, url, "/settings", form)
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", form)
 	s.Empty(s.errors(b), "without a username, it doesn't sign in")
 }
 
@@ -216,36 +216,36 @@ func (s *NotificationProvidersTestSuite) TestUpdateKeepsSecretsSentAsNull() {
 	phone := s.createNtfy()
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(ntfyTopic, "tk_token", "tk_new")
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 	url := fmt.Sprintf("/settings/notifications/%d", phone.ID)
 
-	b.submit(nethttp.MethodPut, url, "/settings", map[string]any{"name": "Pixel", "server": "https://ntfy.example.com", "topic": nil, "token": nil}).
-		AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", map[string]any{"name": "Pixel", "server": "https://ntfy.example.com", "topic": nil, "token": nil}).
+		AssertHeader("Location", "/settings/notifications")
 	s.Empty(s.errors(b))
 	updated, secrets := s.load(phone.ID)
 	s.Equal("Pixel", updated.Name)
 	s.Equal("https://ntfy.example.com", updated.Config.Server)
 	s.Equal(models.NotificationSecrets{Topic: ntfyTopic, Token: "tk_token"}, secrets)
 
-	b.submit(nethttp.MethodPut, url, "/settings", map[string]any{"name": "Pixel", "server": "https://ntfy.sh", "topic": nil, "token": "tk_new"})
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", map[string]any{"name": "Pixel", "server": "https://ntfy.sh", "topic": nil, "token": "tk_new"})
 	_, secrets = s.load(phone.ID)
 	s.Equal("tk_new", secrets.Token)
 
-	b.submit(nethttp.MethodPut, url, "/settings", map[string]any{"name": "Pixel", "server": "https://ntfy.sh", "topic": nil, "token": ""})
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", map[string]any{"name": "Pixel", "server": "https://ntfy.sh", "topic": nil, "token": ""})
 	_, secrets = s.load(phone.ID)
 	s.Empty(secrets.Token, "an optional secret sent empty is removed")
 	s.Equal(ntfyTopic, secrets.Topic)
 
-	b.submit(nethttp.MethodPut, url, "/settings", map[string]any{"name": "Pixel", "server": "https://ntfy.sh", "topic": ""})
+	b.submit(nethttp.MethodPut, url, "/settings/notifications", map[string]any{"name": "Pixel", "server": "https://ntfy.sh", "topic": ""})
 	s.Contains(s.errors(b), "topic", "a required secret can't be removed")
 }
 
 func (s *NotificationProvidersTestSuite) TestUpdateNeverChangesTheKind() {
 	slack := s.createSlack()
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
-	b.submit(nethttp.MethodPut, fmt.Sprintf("/settings/notifications/%d", slack.ID), "/settings",
+	b.submit(nethttp.MethodPut, fmt.Sprintf("/settings/notifications/%d", slack.ID), "/settings/notifications",
 		map[string]any{"name": "Slack #ops", "kind": "ntfy", "server": "https://ntfy.sh", "topic": "x", "webhook_url": nil})
 
 	s.Empty(s.errors(b))
@@ -257,14 +257,14 @@ func (s *NotificationProvidersTestSuite) TestUpdateNeverChangesTheKind() {
 func (s *NotificationProvidersTestSuite) TestEnabledAndDestroy() {
 	slack := s.createSlack()
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 	url := fmt.Sprintf("/settings/notifications/%d", slack.ID)
 
-	b.submit(nethttp.MethodPut, url+"/enabled", "/settings", map[string]any{"enabled": false}).AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodPut, url+"/enabled", "/settings/notifications", map[string]any{"enabled": false}).AssertHeader("Location", "/settings/notifications")
 	updated, _ := s.load(slack.ID)
 	s.False(updated.Enabled)
 
-	b.submit(nethttp.MethodDelete, url, "/settings", nil).AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodDelete, url, "/settings/notifications", nil).AssertHeader("Location", "/settings/notifications")
 	count, err := facades.Orm().Query().Model(&models.NotificationProvider{}).Count()
 	s.Require().NoError(err)
 	s.Zero(count)
@@ -299,7 +299,7 @@ func (s *NotificationProvidersTestSuite) test(b *browser, form map[string]any, s
 
 func (s *NotificationProvidersTestSuite) TestTestSendsASampleWithTheFormsValues() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	result := s.test(b, map[string]any{"kind": "slack", "webhook_url": slackWebhook}, nethttp.StatusAccepted)
 
@@ -312,13 +312,13 @@ func (s *NotificationProvidersTestSuite) TestTestSendsASampleWithTheFormsValues(
 	s.Equal(slackWebhook, secrets.WebhookURL)
 	s.Equal("Test notification", sent[0].Message.Title)
 	s.Equal(notify.Info, sent[0].Message.Severity)
-	s.Contains(sent[0].Message.URL, "/settings")
+	s.Contains(sent[0].Message.URL, "/settings/notifications")
 }
 
 func (s *NotificationProvidersTestSuite) TestTestReportsTheProvidersAnswer() {
 	s.notify.Err = errors.New("the provider answered 404 Not Found: no_service")
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	result := s.test(b, map[string]any{"kind": "slack", "webhook_url": slackWebhook}, nethttp.StatusAccepted)
 
@@ -330,7 +330,7 @@ func (s *NotificationProvidersTestSuite) TestTestOfASavedProviderUsesItsStoredSe
 	phone := s.createNtfy()
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(ntfyTopic)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	result := s.test(b, map[string]any{"id": phone.ID, "kind": "slack", "server": "https://ntfy.example.com", "topic": nil, "token": nil}, nethttp.StatusAccepted)
 
@@ -347,7 +347,7 @@ func (s *NotificationProvidersTestSuite) TestTestOfASavedProviderUsesItsStoredSe
 
 func (s *NotificationProvidersTestSuite) TestTestValidatesBeforeSending() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	result := s.test(b, map[string]any{"kind": "smtp", "host": "smtp.example.com", "port": 25, "security": "none",
 		"from": "alerts@example.com", "to": "a@example.com"}, nethttp.StatusUnprocessableEntity)
@@ -362,7 +362,7 @@ func (s *NotificationProvidersTestSuite) TestTestValidatesBeforeSending() {
 
 func (s *NotificationProvidersTestSuite) TestAnExpiredTestSaysSo() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/notifications")
 
 	b.request(nethttp.MethodGet, "/settings/notifications/test/nope", nil, false, map[string]string{"Accept": "application/json"}).
 		AssertStatus(nethttp.StatusNotFound)

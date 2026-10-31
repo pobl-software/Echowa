@@ -284,11 +284,11 @@ func (s *BackupsTestSuite) TestTheScheduleForm() {
 func (s *BackupsTestSuite) TestALocationASchedulesUsesCantBeDeleted() {
 	s.addSchedule(s.app, "0 3 * * *", "UTC", 7)
 	b := signedIn(s.T(), &s.TestCase)
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 	s.Equal(float64(1), page.Props["storageLocations"].([]any)[0].(map[string]any)["schedules"])
 
-	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/storage/%d", s.loc.ID), "/settings", nil)
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/storage/%d", s.loc.ID), "/settings/storage", nil)
+	_, page = b.visit("/settings/storage")
 	s.Equal("R2 is where the backup schedules of shop-db go. Change or delete them first.", page.Flash["error"])
 	n, err := facades.Orm().Query().Model(&models.StorageLocation{}).Count()
 	s.Require().NoError(err)

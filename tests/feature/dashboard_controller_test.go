@@ -100,7 +100,7 @@ func (s *DashboardControllerTestSuite) TestDockerBanner() {
 	s.Nil(page.Props["dockerProblem"], "no banner when Docker is a Swarm manager")
 
 	s.docker.CheckErr = fmt.Errorf("%w (node state %q)", docker.ErrNotSwarm, "inactive")
-	_, page = b.visit("/registries")
+	_, page = b.visit("/settings/registries")
 	s.Contains(page.Props["dockerProblem"], "docker swarm init")
 
 	s.docker.CheckErr = fmt.Errorf("%w: dial unix /var/run/docker.sock: connect: no such file", docker.ErrDaemonUnreachable)

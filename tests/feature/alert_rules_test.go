@@ -212,7 +212,7 @@ func (s *AlertRulesTestSuite) TestAnAlertIsOnlyReachedFromWhereItLives() {
 	for _, id := range []uint{theirs.ID, everyApp.ID} {
 		b.submit(nethttp.MethodDelete, fmt.Sprintf("/apps/%d/alerts/%d", s.app.ID, id), s.alertsURL(s.app), nil).AssertNotFound()
 	}
-	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/alerts/%d", theirs.ID), "/settings", nil).AssertNotFound()
+	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/alerts/%d", theirs.ID), "/settings/alerts", nil).AssertNotFound()
 	s.Len(s.rules(), 2)
 }
 
@@ -235,12 +235,12 @@ func (s *AlertRulesTestSuite) TestTheSwitchAndDelete() {
 
 func (s *AlertRulesTestSuite) TestSettingsAlertsCoverTheServerOrEveryAppByTrigger() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/alerts")
 
 	for _, trigger := range []string{alerts.EchowaStarted, alerts.BackupFailed} {
-		b.submit(nethttp.MethodPost, "/settings/alerts", "/settings", map[string]any{
+		b.submit(nethttp.MethodPost, "/settings/alerts", "/settings/alerts", map[string]any{
 			"trigger": trigger, "severity": "info", "providers": []uint{s.ops.ID},
-		}).AssertHeader("Location", "/settings")
+		}).AssertHeader("Location", "/settings/alerts")
 	}
 
 	s.Equal([]string{"server echowa.started info [Slack #ops]", "all_apps backup.failed info [Slack #ops]"}, s.rules())
@@ -353,7 +353,7 @@ func (s *AlertRulesTestSuite) TestSuggestionsAreAddedAtTheirSeverity() {
 
 func (s *AlertRulesTestSuite) TestSettingsSuggestsTheServersAndEveryAppsAlerts() {
 	b := signedIn(s.T(), &s.TestCase)
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/alerts")
 	var suggested []string
 	for _, t := range page.Props["alerts"].(map[string]any)["suggestions"].([]any) {
 		suggested = append(suggested, t.(map[string]any)["id"].(string))
@@ -365,9 +365,9 @@ func (s *AlertRulesTestSuite) TestSettingsSuggestsTheServersAndEveryAppsAlerts()
 		alerts.BackupFailed, alerts.BackupAge, alerts.TaskFailed,
 	}, suggested, "an every-app alert covers apps made later, so Settings suggests them all")
 
-	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
+	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings/alerts", map[string]any{
 		"triggers": []string{alerts.EchowaStarted, alerts.DiskUsed, alerts.DeployFailed, alerts.Unhealthy}, "providers": []uint{s.ops.ID},
-	}).AssertHeader("Location", "/settings")
+	}).AssertHeader("Location", "/settings/alerts")
 
 	s.Equal([]string{
 		"server echowa.started info [Slack #ops]",
@@ -382,17 +382,17 @@ func (s *AlertRulesTestSuite) TestSettingsSuggestsTheServersAndEveryAppsAlerts()
 	s.Equal(5, disk.ForMinutes)
 	s.True(disk.NotifyResolved)
 
-	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
+	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings/alerts", map[string]any{
 		"triggers": suggested[1:], "providers": []uint{s.ops.ID},
 	})
-	s.NotEmpty(s.errors(b, "/settings"), "the ones just added aren't suggested any more")
+	s.NotEmpty(s.errors(b, "/settings/alerts"), "the ones just added aren't suggested any more")
 	remaining := slices.DeleteFunc(slices.Clone(suggested), func(id string) bool {
 		return slices.Contains([]string{alerts.EchowaStarted, alerts.DiskUsed, alerts.DeployFailed, alerts.Unhealthy}, id)
 	})
-	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings", map[string]any{
+	b.submit(nethttp.MethodPost, "/settings/alerts/suggested", "/settings/alerts", map[string]any{
 		"triggers": remaining, "providers": []uint{s.ops.ID},
-	}).AssertHeader("Location", "/settings")
-	_, page = b.visit("/settings")
+	}).AssertHeader("Location", "/settings/alerts")
+	_, page = b.visit("/settings/alerts")
 	s.Empty(page.Props["alerts"].(map[string]any)["suggestions"])
 	section, err := services.AppAlertsSection(context.Background(), s.app)
 	s.Require().NoError(err)
@@ -408,7 +408,7 @@ func (s *AlertRulesTestSuite) TestAProviderSaysWhichAlertsUseItAndHowItsLastSend
 		Severity: "critical", Title: "Deploy of blog failed", Status: models.NotificationFailed, Attempts: 1, Error: &failure}))
 	b := signedIn(s.T(), &s.TestCase)
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/notifications")
 
 	rows := page.Props["notificationProviders"].([]any)
 	db, ops := rows[0].(map[string]any), rows[1].(map[string]any)
@@ -419,6 +419,6 @@ func (s *AlertRulesTestSuite) TestAProviderSaysWhichAlertsUseItAndHowItsLastSend
 	s.Equal(failure, last["error"])
 	s.Nil(db["last"])
 
-	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/notifications/%d", s.db.ID), "/settings", nil)
+	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/notifications/%d", s.db.ID), "/settings/notifications", nil)
 	s.Contains(s.rules(), fmt.Sprintf("app:%d deploy.failed critical [Slack #ops]", s.app.ID), "the alert keeps its other provider")
 }

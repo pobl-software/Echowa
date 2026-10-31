@@ -137,7 +137,7 @@ func notifyPrune(run PruneRun) {
 		Title:   title,
 		Summary: "It freed " + sizeText(run.SpaceReclaimed) + ".",
 		Fields:  []notify.Field{{Label: "Started by", Value: startedBy}},
-		Path:    "/settings",
+		Path:    "/settings/pruning",
 	})
 }
 

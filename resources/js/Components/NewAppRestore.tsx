@@ -138,8 +138,8 @@ export function FromBackup({ locations }: { locations: StorageChoice[] }) {
             <Panel title="From a backup">
                 <p className="text-sm text-muted-foreground">
                     Backups are read from an S3 storage location. Add the one your backups are in on{' '}
-                    <Link href="/settings" className="font-medium text-foreground underline underline-offset-4">
-                        Settings
+                    <Link href="/settings/storage" className="font-medium text-foreground underline underline-offset-4">
+                        Settings, S3 storage
                     </Link>
                     , with the same bucket and prefix, then come back here.
                 </p>

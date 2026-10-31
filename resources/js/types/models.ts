@@ -752,6 +752,20 @@ export interface PruneSettings {
     last: PruneRun | null;
 }
 
+// controllers.SettingsController.Index: what Settings' overview says about
+// each section.
+export interface SettingsOverview {
+    update: UpdateSettings;
+    // apps counts the apps that pull through one.
+    registries: { count: number; apps: number };
+    // databases counts the apps whose template Echowa backs up.
+    storage: { locations: number; backups: number; databases: number };
+    // failing names the enabled providers whose newest send failed.
+    notifications: { providers: number; enabled: number; failing: string[] };
+    alerts: { rules: number; enabled: number; firing: number; suggestions: number };
+    prune: PruneSettings;
+}
+
 // update.Status: the last update the root updater ran (ADR 0021).
 export interface UpdateStatus {
     state: 'running' | 'succeeded' | 'rolled_back' | 'failed';

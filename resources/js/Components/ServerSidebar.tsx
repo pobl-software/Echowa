@@ -83,12 +83,13 @@ function Machine({ facts }: { facts: ServerFacts }) {
     const about = [facts.os, facts.booted_at && `up ${uptime(facts.booted_at)}`].filter(Boolean).join(' · ');
 
     return (
-        <div className="p-2">
+        // h-14, as Page's top bar, so the line under it meets the top bar's.
+        <div className="flex h-14 items-center px-2">
             <Link
                 href="/server"
-                className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/50"
+                className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1 transition-colors hover:bg-muted/50"
             >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/50">
                     <ServerIcon className="size-4 text-muted-foreground" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -297,7 +298,7 @@ function checks(facts: ServerFacts, m: ServerMaintenance): Check[] {
         icon: PackageIcon,
         label: 'Echowa',
         ...(facts.update
-            ? { tone: 'update', value: `${facts.update} available`, href: '/settings' }
+            ? { tone: 'update', value: `${facts.update} available`, href: '/settings/updates' }
             : {
                   tone: facts.update_checked ? 'ok' : 'unknown',
                   value: facts.update_checked ? facts.version : `${facts.version} · not checked`,

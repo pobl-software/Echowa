@@ -266,7 +266,7 @@ func (s *ConditionsTestSuite) TestMetricConditions() {
 	s.Require().NoError(facades.Orm().Query().Where("state", "firing").Order("subject").Get(&firing))
 	s.Len(firing, 2, "the disk and Docker, not the stopped app")
 
-	_, page := signedIn(s.T(), &s.TestCase).visit("/settings")
+	_, page := signedIn(s.T(), &s.TestCase).visit("/settings/alerts")
 	var subjects []string
 	for _, alert := range page.Props["alerts"].(map[string]any)["firing"].([]any) {
 		subjects = append(subjects, alert.(map[string]any)["subject"].(string))
@@ -319,7 +319,7 @@ func (s *ConditionsTestSuite) TestTheAlertsSectionShowsWhatsFiring() {
 	s.Equal("pending", section["every_app"].([]any)[0].(map[string]any)["state"])
 	s.Equal("Unhealthy for 5 minutes", section["every_app"].([]any)[0].(map[string]any)["description"])
 
-	_, page = b.visit("/settings")
+	_, page = b.visit("/settings/alerts")
 	settings := page.Props["alerts"].(map[string]any)
 	s.Empty(settings["firing"], "an app's own alert fires on its page")
 	s.Equal("pending", settings["rules"].([]any)[0].(map[string]any)["state"])

@@ -503,26 +503,26 @@ func (s *BackupsTestSuite) TestALocationWithBackupsKeepsItsBucket() {
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret)
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 	row := page.Props["storageLocations"].([]any)[0].(map[string]any)
 	s.Equal(float64(1), row["backups"])
 	s.NotContains(row, "secret_key")
 
 	url := fmt.Sprintf("/settings/storage/%d", s.loc.ID)
-	b.submit(nethttp.MethodPut, url, "/settings", storageForm(map[string]any{"bucket": "another-bucket", "secret_key": ""}))
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodPut, url, "/settings/storage", storageForm(map[string]any{"bucket": "another-bucket", "secret_key": ""}))
+	_, page = b.visit("/settings/storage")
 	s.Contains(page.Props["errors"].(map[string]any)["bucket"], "can't change")
 	var loc models.StorageLocation
 	s.Require().NoError(facades.Orm().Query().Find(&loc, s.loc.ID))
 	s.Equal("echowa-backups", loc.Bucket)
 
-	b.submit(nethttp.MethodPut, url, "/settings", storageForm(map[string]any{"name": "Renamed", "secret_key": ""})).
-		AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodPut, url, "/settings/storage", storageForm(map[string]any{"name": "Renamed", "secret_key": ""})).
+		AssertHeader("Location", "/settings/storage")
 	s.Require().NoError(facades.Orm().Query().Find(&loc, s.loc.ID))
 	s.Equal("Renamed", loc.Name, "the rest can change")
 
-	b.submit(nethttp.MethodDelete, url, "/settings", nil)
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodDelete, url, "/settings/storage", nil)
+	_, page = b.visit("/settings/storage")
 	s.Equal("Deleted Renamed and Echowa's records of its 1 backup. They're still in the bucket.", page.Flash["success"])
 	count, err := facades.Orm().Query().Model(&models.Backup{}).Count()
 	s.Require().NoError(err)

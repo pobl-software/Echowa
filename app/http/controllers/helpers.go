@@ -1,8 +1,6 @@
 package controllers
 
 import (
-	nethttp "net/http"
-
 	"github.com/goravel/framework/contracts/http"
 
 	"goravel/app/facades"
@@ -29,7 +27,7 @@ func findOr404(ctx http.Context, param string, model any, preload ...string) htt
 }
 
 func notFound(ctx http.Context) http.Response {
-	return ctx.Response().String(nethttp.StatusNotFound, "404 page not found")
+	return inertia.NotFound(ctx)
 }
 
 // failed sends the user back to the form with field errors, the way

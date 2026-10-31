@@ -53,7 +53,7 @@ func (r *NotificationProviderController) save(ctx http.Context, p *models.Notifi
 	}
 	inertia.Flash(ctx, "success", done+p.Name+".")
 
-	return inertia.Redirect(ctx, "/settings")
+	return inertia.Redirect(ctx, "/settings/notifications")
 }
 
 // kind picks the rules: a saved provider's own kind, which never changes,
@@ -90,7 +90,7 @@ func (r *NotificationProviderController) Enabled(ctx http.Context) http.Response
 		inertia.Flash(ctx, "success", p.Name+" won't send notifications until you turn it back on.")
 	}
 
-	return inertia.Redirect(ctx, "/settings")
+	return inertia.Redirect(ctx, "/settings/notifications")
 }
 
 func (r *NotificationProviderController) Destroy(ctx http.Context) http.Response {
@@ -103,7 +103,7 @@ func (r *NotificationProviderController) Destroy(ctx http.Context) http.Response
 	}
 	inertia.Flash(ctx, "success", "Deleted "+p.Name+".")
 
-	return inertia.Redirect(ctx, "/settings")
+	return inertia.Redirect(ctx, "/settings/notifications")
 }
 
 // Test sends a sample message with the form's values, saved or not, and

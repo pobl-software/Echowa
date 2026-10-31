@@ -2,7 +2,6 @@ import { Link, router, usePage } from '@inertiajs/react';
 import {
     BoxesIcon,
     GaugeIcon,
-    KeyRoundIcon,
     LogOutIcon,
     type LucideIcon,
     MonitorIcon,
@@ -41,7 +40,6 @@ interface NavItem {
 const nav: NavItem[] = [
     { label: 'Apps', href: '/dashboard', icon: BoxesIcon, match: ['/dashboard', '/apps'] },
     { label: 'Server', href: '/server', icon: GaugeIcon, match: ['/server'] },
-    { label: 'Registries', href: '/registries', icon: KeyRoundIcon, match: ['/registries'] },
     { label: 'Settings', href: '/settings', icon: SettingsIcon, match: ['/settings'] },
 ];
 
@@ -75,11 +73,8 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         <Drawer />
                     </SheetContent>
                 </Sheet>
-                <div className="flex min-w-0 flex-1 lg:py-2 lg:pr-2">
-                    <div className="flex min-w-0 flex-1 overflow-hidden bg-background lg:rounded-xl lg:border">
-                        {children}
-                    </div>
-                </div>
+                {/* Page draws the bordered frame, so a sidebar can sit beside it. */}
+                <div className="flex min-w-0 flex-1 lg:py-2 lg:pr-2">{children}</div>
             </div>
         </ShellContext.Provider>
     );

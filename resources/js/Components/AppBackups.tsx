@@ -275,9 +275,10 @@ function NoStorage({ app }: { app: App }) {
             </span>
             <h2 className="font-medium">Back {app.name} up to S3</h2>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                Add a bucket in Settings, then back up by hand or on a schedule. Any S3-compatible provider works.
+                Add a bucket in Settings, S3 storage, then back up by hand or on a schedule. Any S3-compatible provider
+                works.
             </p>
-            <Link href="/settings" className={buttonVariants({ className: 'mt-5' })}>
+            <Link href="/settings/storage" className={buttonVariants({ className: 'mt-5' })}>
                 <PlusIcon />
                 Add S3 storage
             </Link>

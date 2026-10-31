@@ -38,11 +38,11 @@ func (r *RegistryController) Index(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 
-	return inertia.Render(ctx, "Registries/Index", gonertia.Props{"registries": rows})
+	return inertia.Render(ctx, "Settings/Registries", gonertia.Props{"registries": rows})
 }
 
 func (r *RegistryController) Create(ctx http.Context) http.Response {
-	return inertia.Render(ctx, "Registries/Form", gonertia.Props{"registry": nil})
+	return inertia.Render(ctx, "Settings/RegistryForm", gonertia.Props{"registry": nil})
 }
 
 func (r *RegistryController) Store(ctx http.Context) http.Response {
@@ -65,7 +65,7 @@ func (r *RegistryController) Store(ctx http.Context) http.Response {
 	}
 	inertia.Flash(ctx, "success", "Added "+registry.Name+". Use “Test connection” to check the login.")
 
-	return inertia.Redirect(ctx, "/registries")
+	return inertia.Redirect(ctx, "/settings/registries")
 }
 
 // Edit never sends the token: the form shows an empty field that replaces
@@ -76,7 +76,7 @@ func (r *RegistryController) Edit(ctx http.Context) http.Response {
 		return resp
 	}
 
-	return inertia.Render(ctx, "Registries/Form", gonertia.Props{"registry": registry})
+	return inertia.Render(ctx, "Settings/RegistryForm", gonertia.Props{"registry": registry})
 }
 
 func (r *RegistryController) Update(ctx http.Context) http.Response {
@@ -103,7 +103,7 @@ func (r *RegistryController) Update(ctx http.Context) http.Response {
 	}
 	inertia.Flash(ctx, "success", "Saved "+registry.Name+".")
 
-	return inertia.Redirect(ctx, "/registries")
+	return inertia.Redirect(ctx, "/settings/registries")
 }
 
 func (r *RegistryController) Destroy(ctx http.Context) http.Response {
@@ -122,7 +122,7 @@ func (r *RegistryController) Destroy(ctx http.Context) http.Response {
 	}
 	inertia.Flash(ctx, "success", "Deleted "+registry.Name+".")
 
-	return inertia.Redirect(ctx, "/registries")
+	return inertia.Redirect(ctx, "/settings/registries")
 }
 
 // Test logs in to the registry through the Docker daemon with the stored
