@@ -241,8 +241,9 @@ export function BackupFacts({ preview, newApp }: { preview: RestorePreview; newA
     );
 }
 
-// Replaces says what the restore changes, and how it fails. MySQL's and
-// Redis's aren't all or nothing, so they say so before it's confirmed.
+// Replaces says what the restore changes, and how it fails. MySQL's,
+// MongoDB's and Redis's aren't all or nothing, so they say so before it's
+// confirmed.
 export function Replaces({ preview }: { preview: RestorePreview }) {
     const database = <code className="font-mono text-xs">{preview.app_database}</code>;
     if (preview.whole_server) {
@@ -276,9 +277,9 @@ export function Replaces({ preview }: { preview: RestorePreview }) {
             <AlertTitle>This restore isn&apos;t all or nothing</AlertTitle>
             <AlertDescription>
                 <p>
-                    It drops and recreates each table in the backup in the {database} database, one at a time. If it
-                    fails part way, some tables are restored and others aren&apos;t. Tables made since the backup stay.
-                    Apps using the database see errors while it runs.
+                    It drops and recreates each of the {preview.parts} in the backup in the {database} database, one at
+                    a time. If it fails part way, some {preview.parts} are restored and others aren&apos;t. Any{' '}
+                    {preview.parts} made since the backup stay. Apps using the database see errors while it runs.
                 </p>
             </AlertDescription>
         </Alert>

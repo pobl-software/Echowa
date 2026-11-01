@@ -225,6 +225,36 @@ func (s *BackupsTestSuite) TestAnUploadedMariaDBDumpRestoresIntoAMariaDBAppOnly(
 	s.Equal([]string{mariadbDumpText}, s.restoredSoFar(), "Echowa gunzips the dump into mariadb")
 }
 
+// A mongodump archive from the mongo 9.0 image restores gunzipped, as
+// mongodump --gzip and Echowa's own backups write it, into a MongoDB app
+// whatever its database's name.
+func (s *BackupsTestSuite) TestAnUploadedMongoArchiveRestoresIntoAMongoApp() {
+	archive, err := os.ReadFile("../../app/templates/testdata/mongodb-9.0.4-shop.archive")
+	s.Require().NoError(err)
+	orders := s.templateApp("orders", "mongodb")
+	s.scriptRestore("db version v9.0.4\n", "", 0, nil)
+	b := signedIn(s.T(), &s.TestCase)
+
+	id := s.upload(b, s.app, "shop.archive.gz", gzipText(string(archive)))
+	body := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", s.app.ID, id), nethttp.StatusUnprocessableEntity)
+	s.Equal("This is a dump of a MongoDB database, and shop-db is PostgreSQL.", body["error"])
+
+	id = s.upload(b, orders, "shop.archive.gz", gzipText(string(archive)))
+	preview := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", orders.ID, id), nethttp.StatusOK)
+	s.Equal("MongoDB", preview["template"])
+	s.Equal("collections", preview["parts"])
+	s.Equal("shop", preview["database"])
+	s.Equal("9.0.4", preview["server_version"])
+	s.Equal(false, preview["atomic"])
+	s.Empty(preview["refusal"])
+
+	s.restore(b, orders, map[string]any{"upload": id, "safety": false, "confirm": "orders"})
+	services.WaitForRestores()
+	rec := s.restores(orders.ID)[0]
+	s.Equal(models.RestoreSucceeded, rec.Status, "message: %v", rec.Message)
+	s.Equal([]string{string(archive)}, s.restoredSoFar(), "Echowa gunzips the archive into mongorestore")
+}
+
 func (s *BackupsTestSuite) TestAnUploadThatCantRestoreIntoTheAppIsRefused() {
 	orders := s.templateApp("orders", "mysql")
 	s.scriptRestore("postgres (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)\n", "", 0, nil)

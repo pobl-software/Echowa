@@ -76,7 +76,7 @@ func TestFind(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "PostgreSQL", postgres.Name)
 
-	_, ok = Find("mongodb")
+	_, ok = Find("cassandra")
 	assert.False(t, ok)
 }
 

@@ -12,6 +12,27 @@ import { timeAgo } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import type { App, SlowQuery, SlowQueryResult, TemplateOption } from '@/types/models';
 
+// What each database lists: Redis's commands by name, MongoDB's operations
+// on each collection, and the others' queries.
+type Listing = { title: string; description: string; heading: string };
+const listings: Record<string, Listing> = {
+    postgres: {
+        title: 'Slow queries',
+        description: 'The queries that took the most time in total, with values as placeholders.',
+        heading: 'Query',
+    },
+    mongodb: {
+        title: 'Slow operations',
+        description: 'Each collection’s operations that took the most time in total, by kind only.',
+        heading: 'Operation',
+    },
+    redis: {
+        title: 'Slow commands',
+        description: 'The commands that took the most time in total, by name only.',
+        heading: 'Command',
+    },
+};
+
 // SlowQueriesPanel lists the queries that took the database the most time
 // in total (ADR 0027). They're read from the database when the section
 // opens and on Refresh, never polled. A template that needs a switch for
@@ -65,31 +86,33 @@ export function SlowQueriesPanel({
     }
 
     const report = result?.report;
-    const commands = template.slug === 'redis';
+    const words = listings[template.slug] ?? listings.postgres;
 
     return (
         <Panel
-            title={commands ? 'Slow commands' : 'Slow queries'}
-            description={`${commands ? 'The commands that took the most time in total, by name only.' : 'The queries that took the most time in total, with values as placeholders.'}${report?.since ? ` Counting began ${timeAgo(report.since)}.` : ''}`}
+            title={words.title}
+            description={`${words.description}${report?.since ? ` Counting began ${timeAgo(report.since)}.` : ''}${template.slow_queries_reset ? '' : ' Counting began when the server last started.'}`}
             actions={
                 <>
                     <Button variant="outline" size="sm" onClick={load} disabled={loading}>
                         <RefreshCwIcon className={cn(loading && 'animate-spin')} />
                         Refresh
                     </Button>
-                    <ConfirmDelete
-                        trigger={
-                            <Button variant="outline" size="sm" disabled={!report}>
-                                Reset
-                            </Button>
-                        }
-                        title="Reset the totals?"
-                        confirmLabel="Reset"
-                        onConfirm={() => router.post(`/apps/${app.id}/slow-queries/reset`, {}, { onSuccess: load })}
-                    >
-                        Every query&apos;s totals go back to zero, so the list starts again from now. Useful after
-                        fixing a slow query.
-                    </ConfirmDelete>
+                    {template.slow_queries_reset && (
+                        <ConfirmDelete
+                            trigger={
+                                <Button variant="outline" size="sm" disabled={!report}>
+                                    Reset
+                                </Button>
+                            }
+                            title="Reset the totals?"
+                            confirmLabel="Reset"
+                            onConfirm={() => router.post(`/apps/${app.id}/slow-queries/reset`, {}, { onSuccess: load })}
+                        >
+                            Every query&apos;s totals go back to zero, so the list starts again from now. Useful after
+                            fixing a slow query.
+                        </ConfirmDelete>
+                    )}
                     {switched && (
                         <ConfirmDelete
                             trigger={
@@ -119,11 +142,7 @@ export function SlowQueriesPanel({
                     </Alert>
                 </div>
             ) : report ? (
-                <QueryTable
-                    queries={report.queries}
-                    dropped={report.dropped}
-                    heading={commands ? 'Command' : 'Query'}
-                />
+                <QueryTable queries={report.queries} dropped={report.dropped} heading={words.heading} />
             ) : (
                 <p className="p-4 text-sm text-muted-foreground sm:p-5">Reading them from the database…</p>
             )}

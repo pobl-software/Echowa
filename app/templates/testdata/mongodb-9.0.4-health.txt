@@ -1,0 +1,2 @@
+205248
+{"connections":1,"max_connections":8192,"cache_hits":313,"cache_misses":30,"commits":47}

@@ -52,7 +52,7 @@ func TestPoolerSpecNeedsTheDatabasesPassword(t *testing.T) {
 }
 
 func TestOnlyPostgresAppsHaveAPooler(t *testing.T) {
-	for _, slug := range []string{"mysql", "mariadb", "redis"} {
+	for _, slug := range []string{"mysql", "mariadb", "mongodb", "redis"} {
 		_, err := PoolerSpec(&models.App{Name: "db", Template: &slug}, map[string]string{})
 		assert.ErrorIs(t, err, ErrNoPooler, slug)
 	}

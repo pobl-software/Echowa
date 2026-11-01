@@ -67,6 +67,8 @@ type TemplateOption struct {
 	// they're switched on, "always" when it lists them anyway, and empty
 	// when it can't (ADR 0027).
 	SlowQueries string `json:"slow_queries"`
+	// SlowQueriesReset says the totals can be cleared without a restart.
+	SlowQueriesReset bool `json:"slow_queries_reset"`
 	// Backups says the app has a Backups section (ADR 0034).
 	Backups bool `json:"backups"`
 }
@@ -105,6 +107,7 @@ func templateOption(t templates.Template) TemplateOption {
 		if t.Inspect.SlowQueryFlags != "" {
 			option.SlowQueries = "switch"
 		}
+		option.SlowQueriesReset = t.Inspect.ResetSlowQueries != nil
 	}
 
 	return option

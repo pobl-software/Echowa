@@ -55,7 +55,7 @@ export default function AppsCreate({
                             href={`/apps/create?template=${template?.slug ?? ''}`}
                             icon={LayoutTemplateIcon}
                             title="Template"
-                            detail={templates.map((t) => t.name).join(', ')}
+                            detail="Databases, set up for you"
                             selected={fromTemplate}
                         />
                     </nav>

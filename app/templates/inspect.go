@@ -1,10 +1,12 @@
 package templates
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"goravel/app/metrics"
@@ -28,7 +30,7 @@ type Inspect struct {
 	// values.
 	SlowQueries      []string
 	ParseSlowQueries func([]byte) (SlowQueryReport, error)
-	// ResetSlowQueries clears the totals.
+	// ResetSlowQueries clears the totals. Nil when only a restart does.
 	ResetSlowQueries []string
 }
 
@@ -70,6 +72,21 @@ func parseHealthJSON(out []byte) (metrics.DatabaseStatus, error) {
 	var status metrics.DatabaseStatus
 	if err := json.Unmarshal(out, &status); err != nil {
 		return metrics.DatabaseStatus{}, fmt.Errorf("reading the database's status: %w", err)
+	}
+
+	return status, nil
+}
+
+// parseSizedHealthJSON reads du's KiB on the first line, then the JSON.
+func parseSizedHealthJSON(out []byte) (metrics.DatabaseStatus, error) {
+	first, rest, _ := bytes.Cut(out, []byte("\n"))
+	status, err := parseHealthJSON(rest)
+	if err != nil {
+		return metrics.DatabaseStatus{}, err
+	}
+	if kib, err := strconv.ParseFloat(string(bytes.TrimSpace(first)), 64); err == nil {
+		size := kib * 1024
+		status.SizeBytes = &size
 	}
 
 	return status, nil

@@ -230,6 +230,8 @@ type RestorePreview struct {
 	Atomic bool `json:"atomic"`
 	// WholeServer means it replaces every database in the server.
 	WholeServer bool `json:"whole_server"`
+	// Parts are what the backup is made of: "tables", "collections".
+	Parts string `json:"parts"`
 	// Refusal says why the restore can't go ahead, and Warning what to
 	// know before it does.
 	Refusal string `json:"refusal"`
@@ -247,7 +249,7 @@ func PreviewRestore(ctx context.Context, app *models.App, src *RestoreSource) (*
 	preview := &RestorePreview{
 		Name: m.Object, Uploaded: src.Upload != nil, Database: m.Database, ServerVersion: m.ServerVersion,
 		SizeBytes: m.Size, AppDatabase: env[b.Database], Template: templateName(m.Template), Atomic: b.Atomic,
-		WholeServer: b.WholeServer(),
+		WholeServer: b.WholeServer(), Parts: b.Parts,
 	}
 	if src.Location != nil {
 		preview.Location = src.Location.Name
@@ -401,10 +403,20 @@ func partly(app *models.App, b *templates.Backup, rec *models.Restore) string {
 	case b != nil && b.WholeServer():
 		return fmt.Sprintf(" %s may have lost its keys, and there's no safety backup.", app.Name)
 	case rec.SafetyBackupID != nil:
-		return fmt.Sprintf(" Some tables may have been restored and others not. The safety backup is #%d.", *rec.SafetyBackupID)
+		return fmt.Sprintf(" Some %s may have been restored and others not. The safety backup is #%d.", parts(b), *rec.SafetyBackupID)
 	default:
-		return " Some tables may have been restored and others not, and there's no safety backup."
+		return fmt.Sprintf(" Some %s may have been restored and others not, and there's no safety backup.", parts(b))
 	}
+}
+
+// parts are what b's dumps are made of, for a template Echowa no longer
+// has too.
+func parts(b *templates.Backup) string {
+	if b == nil {
+		return "parts of the backup"
+	}
+
+	return b.Parts
 }
 
 // notRestored is what a restore into a new app that never began leaves.

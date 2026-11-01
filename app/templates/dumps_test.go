@@ -188,6 +188,33 @@ func TestReadDumpHeadReadsRedisSnapshots(t *testing.T) {
 	}
 }
 
+// mongodump --archive of one database and of the whole server, from the
+// mongo 9.0 image, as the template's Dump runs it and without --db.
+func TestReadDumpHeadReadsMongoArchives(t *testing.T) {
+	archive := readTestdata(t, "mongodb-9.0.4-shop.archive")
+	want := DumpHead{Template: "mongodb", Database: "shop", ServerVersion: "9.0.4"}
+	head, err := ReadDumpHead(archive)
+	require.NoError(t, err)
+	assert.Equal(t, want, head)
+	assert.NoError(t, head.ReadableBy("9.0.4"))
+
+	want.Gzip = true
+	head, err = ReadDumpHead(gzipped(t, string(archive)))
+	require.NoError(t, err)
+	assert.Equal(t, want, head, "as Echowa and mongodump --gzip write it")
+
+	// The header and the first collection, as if a long prelude went on.
+	head, err = ReadDumpHead(archive[:500])
+	require.NoError(t, err)
+	assert.Equal(t, "shop", head.Database, "the head ends inside the prelude")
+
+	_, err = ReadDumpHead(archive[:60])
+	assert.ErrorContains(t, err, "ends before its header does")
+
+	_, err = ReadDumpHead(readTestdata(t, "mongodb-9.0.4-whole-server.archive"))
+	assert.ErrorContains(t, err, "holds the databases shop, admin")
+}
+
 func TestReadDumpHeadSaysWhyItCantRestoreAFile(t *testing.T) {
 	pg := fromHex(t, postgres18Head)
 	rdb := readTestdata(t, "redis-8.10.3.rdb")

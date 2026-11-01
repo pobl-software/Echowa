@@ -506,6 +506,8 @@ export interface RestorePreview {
     atomic: boolean;
     // Redis's replaces every database in the server, and has no database name.
     whole_server: boolean;
+    // What the backup is made of: 'tables', 'collections'.
+    parts: string;
     // Why it can't go ahead, and what to know before it does.
     refusal: string;
     warning: string;
@@ -576,6 +578,8 @@ export interface TemplateOption {
     // 'switch' when it lists its slow queries once they're switched on,
     // 'always' when it lists them anyway, empty when it can't (ADR 0027).
     slow_queries: '' | 'switch' | 'always';
+    // The totals can be cleared without a restart.
+    slow_queries_reset: boolean;
     // The app has a Backups section (ADR 0034).
     backups: boolean;
 }

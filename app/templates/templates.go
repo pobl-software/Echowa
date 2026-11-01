@@ -37,8 +37,11 @@ type Template struct {
 	// CMD lacks something, such as Redis's password. Otherwise the image's
 	// CMD runs until an option adds flags.
 	ReplaceCMD bool
-	Env        []Env
-	Volumes    []Volume
+	// Setup runs as root before Server, on every start, to write files the
+	// image reads. A template with one needs ReplaceCMD.
+	Setup   string
+	Env     []Env
+	Volumes []Volume
 	// Connect builds the URL another app connects with, from the service's
 	// host and port and the app's env.
 	Connect func(host string, port int, env map[string]string) string
@@ -70,6 +73,9 @@ type TLS struct {
 	Port int
 	// Client says how to connect with the app's CA certificate.
 	Client string
+	// Bundle writes the certificate and key to one file, server.pem, as
+	// well, for a server that reads them together.
+	Bundle bool
 }
 
 // Env is one env var a template sets.
@@ -356,6 +362,59 @@ var all = []Template{
 		},
 		Inspect: mariadbInspect,
 		Backup:  mariadbBackup,
+	},
+	{
+		Slug:        "mongodb",
+		Name:        "MongoDB",
+		Description: "A MongoDB server with one database and generated passwords.",
+		Repository:  "mongo",
+		// Not "9": a minor release raises the feature compatibility version,
+		// which MongoDB won't start an older release on.
+		DefaultTag: "9.0",
+		Port:       27017,
+		// Signed in, so the root user exists, and past the server the
+		// entrypoint runs while it initialises, which listens on 127.0.0.1
+		// only.
+		Healthcheck: `mongosh --quiet --norc --eval '` + mongoAuth +
+			`quit(db.adminCommand({getCmdLineOpts: 1}).parsed.net.bindIp === "127.0.0.1" ? 1 : 0)'`,
+		Server:     "docker-entrypoint.sh mongod",
+		ReplaceCMD: true,
+		Setup:      mongoSetup,
+		Env: []Env{
+			{Key: "MONGO_INITDB_ROOT_USERNAME", Value: Fixed("root")},
+			{Key: "MONGO_INITDB_ROOT_PASSWORD", Value: Generated},
+			{Key: "MONGO_INITDB_DATABASE", Value: AppName},
+			// Not the image's: mongoAppUser makes this user, who owns the
+			// app's database and nothing else.
+			{Key: "MONGO_USER", Value: Fixed("app")},
+			{Key: "MONGO_PASSWORD", Value: Generated},
+		},
+		Volumes: []Volume{{Name: "data", Target: "/data/db"}},
+		// The user is in the app's database, so the path is also where it
+		// signs in.
+		Connect: func(host string, port int, env map[string]string) string {
+			u := url.URL{
+				Scheme: "mongodb",
+				User:   url.UserPassword(env["MONGO_USER"], env["MONGO_PASSWORD"]),
+				Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+				Path:   "/" + env["MONGO_INITDB_DATABASE"],
+			}
+			return u.String()
+		},
+		// Clients that don't ask for TLS still connect in the clear on the
+		// same port, as PostgreSQL's do. mongod asks for a client
+		// certificate and won't start without a CA to check one against
+		// unless told not to.
+		TLS: &TLS{
+			Owner: "mongodb",
+			Flags: "--tlsMode preferTLS --tlsCertificateKeyFile " + tlsDir + "/server.pem " +
+				"--tlsAllowConnectionsWithoutCertificates --setParameter tlsUseSystemCA=true",
+			Bundle: true,
+			Client: "Connect with TLS and the CA certificate, without checking the host name, which the certificate doesn't have: " +
+				"tls=true&tlsCAFile=<file>&tlsAllowInvalidHostnames=true in the URL, or --tls --tlsCAFile <file> --tlsAllowInvalidHostnames for mongosh.",
+		},
+		Inspect: mongoInspect,
+		Backup:  mongoBackup,
 	},
 	{
 		Slug:        "redis",

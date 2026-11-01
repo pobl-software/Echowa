@@ -16,10 +16,10 @@ type Options struct {
 // Server (ADR 0027). Nil keeps the image's CMD.
 func (t Template) Args(opts Options) []string {
 	command := []string{t.Server}
-	setup := ""
+	setup := t.Setup
 	if opts.TLS && t.TLS != nil {
 		command = append(command, t.TLS.Flags)
-		setup = tlsSetup(t.TLS.Owner)
+		setup += tlsSetup(*t.TLS)
 	}
 	if opts.SlowQueries && t.Inspect != nil && t.Inspect.SlowQueryFlags != "" {
 		command = append(command, t.Inspect.SlowQueryFlags)

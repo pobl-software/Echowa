@@ -139,7 +139,7 @@ var catalogue = []Trigger{
 		Unit: UnitCount, Threshold: 1_500_000_000},
 	{ID: EvictedKeys, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"redis"}, Group: "Database", Label: "Evicted keys", Severity: notify.Warning,
 		Unit: UnitPerSecond, Threshold: 0, ForMinutes: 5},
-	{ID: CacheHitRate, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres", "mysql", "mariadb"}, Group: "Database", Label: "Cache hit rate", Severity: notify.Warning,
+	{ID: CacheHitRate, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres", "mysql", "mariadb", "mongodb"}, Group: "Database", Label: "Cache hit rate", Severity: notify.Warning,
 		Unit: UnitPercent, Below: true, Threshold: 90, ForMinutes: 15},
 	{ID: PoolerDown, Kind: KindCondition, Scope: ScopeApp, Apps: []string{"postgres"}, Group: "Database", Label: "Connection pooler down", Severity: notify.Critical, Suggested: true,
 		ForMinutes: 2, Summary: "Apps that connect through the pooler can't reach the database."},

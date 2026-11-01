@@ -289,6 +289,9 @@ func ResetSlowQueries(ctx context.Context, app *models.App) error {
 	if !ok {
 		return errors.New("This database doesn't list its slow queries.")
 	}
+	if tmpl.Inspect.ResetSlowQueries == nil {
+		return errors.New("This database keeps its totals until it restarts.")
+	}
 	if _, err := slowQueryExec(ctx, app, tmpl.Inspect.ResetSlowQueries); err != nil {
 		return errors.New(slowQueryProblem(app, err))
 	}

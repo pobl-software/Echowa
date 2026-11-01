@@ -29,29 +29,37 @@ const LONG_TRANSACTION_SECONDS = 5 * 60;
 const TRANSACTION_ID_AGE = 1_000_000_000;
 const LOW_CACHE_HIT_PERCENT = 95;
 
-// Redis reports commands where the others report commits, and its cache
-// hits are lookups that found their key.
+// Redis reports commands and MongoDB operations where the others report
+// commits. Redis's cache hits are lookups that found their key, and
+// MongoDB's are pages its storage engine found in memory.
 type Wording = { commits: string; transactions: string; cacheHits: string; cacheHitsOf: string; size: string };
-const wording = (slug: string): Wording =>
-    slug === 'redis'
-        ? {
-              commits: 'Commands',
-              transactions: 'Commands',
-              cacheHits:
-                  'Lookups that found their key. Low for long, keys expire or are evicted before they’re read again.',
-              cacheHitsOf: 'of lookups, last minute',
-              size: 'Its volume: the append-only file and snapshots.',
-          }
-        : {
-              commits: 'Commits',
-              transactions: 'Transactions',
-              cacheHits: `Reads served from memory. Below ${LOW_CACHE_HIT_PERCENT}% for long, the cache is too small for what’s read.`,
-              cacheHitsOf: 'of reads, last minute',
-              size:
-                  slug === 'mysql' || slug === 'mariadb'
-                      ? 'Its data directory on disk, with the binary and redo logs.'
-                      : 'Its data and write-ahead log on disk.',
-          };
+const sqlWording = (size: string): Wording => ({
+    commits: 'Commits',
+    transactions: 'Transactions',
+    cacheHits: `Reads served from memory. Below ${LOW_CACHE_HIT_PERCENT}% for long, the cache is too small for what’s read.`,
+    cacheHitsOf: 'of reads, last minute',
+    size,
+});
+const wordings: Record<string, Wording> = {
+    postgres: sqlWording('Its data and write-ahead log on disk.'),
+    mysql: sqlWording('Its data directory on disk, with the binary and redo logs.'),
+    mariadb: sqlWording('Its data directory on disk, with the binary and redo logs.'),
+    mongodb: {
+        commits: 'Operations',
+        transactions: 'Operations',
+        cacheHits: `Pages read from WiredTiger’s cache, not disk. Below ${LOW_CACHE_HIT_PERCENT}% for long, the cache is too small for what’s read.`,
+        cacheHitsOf: 'of page reads, last minute',
+        size: 'Its volume: the data files and the journal.',
+    },
+    redis: {
+        commits: 'Commands',
+        transactions: 'Commands',
+        cacheHits: 'Lookups that found their key. Low for long, keys expire or are evicted before they’re read again.',
+        cacheHitsOf: 'of lookups, last minute',
+        size: 'Its volume: the append-only file and snapshots.',
+    },
+};
+const wording = (slug: string): Wording => wordings[slug] ?? wordings.postgres;
 
 type Warning = { title: string; body: ReactNode; critical: boolean };
 

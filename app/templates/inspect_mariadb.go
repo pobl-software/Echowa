@@ -72,7 +72,7 @@ var mariadbInspect = &Inspect{
 	Health: []string{"sh", "-c",
 		`du -sk /var/lib/mysql | cut -f1; ` + mariadbClient + ` -e "$1$2"`,
 		"sh", mariadbQuiet, mariadbHealth},
-	ParseHealth:      parseMySQLHealth,
+	ParseHealth:      parseSizedHealthJSON,
 	SlowQueryFlags:   mariadbSlowQueryFlags,
 	SlowQueries:      mariadb(mariadbSlowQueries),
 	ParseSlowQueries: parseSlowQueryJSON,

@@ -4,7 +4,7 @@
 // Echowa's own deploy, backup and restore, on a real Swarm manager and the
 // dev machine's S3 server (deploy/s3), and restores a PostgreSQL 17 backup
 // into a new app on 18. Run it with deploy/dev-vm.sh test-docker. It pulls
-// postgres:17, postgres:18, mysql:9.7 and mariadb:12.3.
+// postgres:17, postgres:18, mysql:9.7, mariadb:12.3 and mongo:9.0.
 package feature
 
 import (
@@ -47,6 +47,27 @@ var probes = map[string][]string{
 	"postgres": {"sh", "-c", `exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -F "$(printf '\t')" -c "$1"`, "sh"},
 	"mysql":    {"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root -N -B "$MYSQL_DATABASE" -e "$1"`, "sh"},
 	"mariadb":  {"sh", "-c", `export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -u root -N -B "$MARIADB_DATABASE" -e "$1"`, "sh"},
+	"mongodb": {"sh", "-c", `exec mongosh --quiet --norc --eval 'db.getSiblingDB("admin").auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD); ` +
+		`db = db.getSiblingDB(process.env.MONGO_INITDB_DATABASE); '"$1"`, "sh"},
+}
+
+// keptStatements make, change and read the rows these tests back up and restore,
+// in each template's own language. read prints "id\tnote" lines.
+type keptStatements struct{ create, change, read string }
+
+var sqlKept = keptStatements{
+	create: "CREATE TABLE kept (id int PRIMARY KEY, note varchar(50)); INSERT INTO kept VALUES (1, 'café'), (2, 'naïve ☃')",
+	change: "UPDATE kept SET note = 'changed' WHERE id = 1; DELETE FROM kept WHERE id = 2",
+	read:   "SELECT id, note FROM kept ORDER BY id",
+}
+
+var kept = map[string]keptStatements{
+	"postgres": sqlKept, "mysql": sqlKept, "mariadb": sqlKept,
+	"mongodb": {
+		create: `db.kept.insertMany([{_id: 1, note: "café"}, {_id: 2, note: "naïve ☃"}])`,
+		change: `db.kept.updateOne({_id: 1}, {$set: {note: "changed"}}); db.kept.deleteOne({_id: 2})`,
+		read:   `db.kept.find().sort({_id: 1}).forEach(d => print(d._id + "\t" + d.note))`,
+	},
 }
 
 func (s *RestoreDockerTestSuite) SetupTest() {
@@ -167,12 +188,12 @@ func (s *RestoreDockerTestSuite) restored(app *models.App, src *services.Restore
 }
 
 func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup() {
-	for _, slug := range []string{"postgres", "mysql", "mariadb"} {
+	for _, slug := range []string{"postgres", "mysql", "mariadb", "mongodb"} {
 		s.Run(slug, func() {
+			k := kept[slug]
 			app := s.deployed(slug)
 			s.waitForSQL(app)
-			s.sql(app, "CREATE TABLE kept (id int PRIMARY KEY, note varchar(50))")
-			s.sql(app, "INSERT INTO kept VALUES (1, 'café'), (2, 'naïve ☃')")
+			s.sql(app, k.create)
 
 			rec, err := services.BackUpNow(app, &s.loc)
 			s.Require().NoError(err)
@@ -180,15 +201,14 @@ func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup(
 			s.Require().NoError(facades.Orm().Query().Find(rec, rec.ID))
 			s.Require().Equal(models.BackupSucceeded, rec.Status, "backup: %v %s", rec.Message, rec.Output)
 
-			s.sql(app, "UPDATE kept SET note = 'changed' WHERE id = 1")
-			s.sql(app, "DELETE FROM kept WHERE id = 2")
-			s.Equal("1\tchanged", s.sql(app, "SELECT id, note FROM kept ORDER BY id"))
+			s.sql(app, k.change)
+			s.Equal("1\tchanged", s.sql(app, k.read))
 
 			src, err := services.BackupSource(context.Background(), app, rec.ID)
 			s.Require().NoError(err)
 			restore := s.restored(app, src, &s.loc)
 			s.Require().Equal(models.RestoreSucceeded, restore.Status)
-			s.Equal("1\tcafé\n2\tnaïve ☃", s.sql(app, "SELECT id, note FROM kept ORDER BY id"), "the backup's data is back")
+			s.Equal("1\tcafé\n2\tnaïve ☃", s.sql(app, k.read), "the backup's data is back")
 
 			s.Require().NotNil(restore.SafetyBackupID)
 			var safety models.Backup
@@ -205,7 +225,7 @@ func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup(
 			src, err = services.BackupSource(context.Background(), app, safety.ID)
 			s.Require().NoError(err)
 			s.Require().Equal(models.RestoreSucceeded, s.restored(app, src, nil).Status)
-			s.Equal("1\tchanged", s.sql(app, "SELECT id, note FROM kept ORDER BY id"))
+			s.Equal("1\tchanged", s.sql(app, k.read))
 		})
 	}
 }
@@ -214,13 +234,13 @@ func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup(
 // changed data: the round trip Restore from a file is for. Its first bytes
 // say which server it came from, with no manifest.
 func (s *RestoreDockerTestSuite) TestAnExportUploadedBackRestoresOverChangedData() {
-	for _, slug := range []string{"postgres", "mysql", "mariadb"} {
+	for _, slug := range []string{"postgres", "mysql", "mariadb", "mongodb"} {
 		s.Run(slug, func() {
 			ctx := context.Background()
+			k := kept[slug]
 			app := s.deployed(slug)
 			s.waitForSQL(app)
-			s.sql(app, "CREATE TABLE kept (id int PRIMARY KEY, note varchar(50))")
-			s.sql(app, "INSERT INTO kept VALUES (1, 'café'), (2, 'naïve ☃')")
+			s.sql(app, k.create)
 
 			format, _ := services.AppBackup(app).FindExport("")
 			export, err := services.StartExport(ctx, app, format, time.Now())
@@ -230,8 +250,7 @@ func (s *RestoreDockerTestSuite) TestAnExportUploadedBackRestoresOverChangedData
 			s.Require().NoError(export.Err())
 			s.Require().NoError(export.Close())
 
-			s.sql(app, "UPDATE kept SET note = 'changed' WHERE id = 1")
-			s.sql(app, "DELETE FROM kept WHERE id = 2")
+			s.sql(app, k.change)
 
 			upload, err := services.StartUpload(app, export.Filename, int64(len(file)))
 			s.Require().NoError(err)
@@ -249,7 +268,7 @@ func (s *RestoreDockerTestSuite) TestAnExportUploadedBackRestoresOverChangedData
 
 			restore := s.restored(app, src, nil)
 			s.Require().Equal(models.RestoreSucceeded, restore.Status)
-			s.Equal("1\tcafé\n2\tnaïve ☃", s.sql(app, "SELECT id, note FROM kept ORDER BY id"), "the export's data is back")
+			s.Equal("1\tcafé\n2\tnaïve ☃", s.sql(app, k.read), "the export's data is back")
 		})
 	}
 }

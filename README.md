@@ -43,7 +43,7 @@ ran, so going back to any earlier one is a click.
 
 <img src=".github/readme/deploys.png" alt="Three cards. A deploy's live log from queued to succeeded in 49 seconds. A start-first rolling update from v47 to v48 with 0 dropped requests. A deployments list with a Redeploy button on each earlier success." width="100%">
 
-## PostgreSQL, MySQL, MariaDB and Redis, beside your app
+## PostgreSQL, MySQL, MariaDB, MongoDB and Redis, beside your app
 
 Start a database from a template and Echowa generates its passwords, gives it
 a volume that survives redeploys, and checks its health every minute. Link it
@@ -117,8 +117,8 @@ server you understand completely, with the numbers to show it's healthy.
 - Pulls pre-built images from GHCR or any registry
 - Zero-downtime, healthcheck-gated rollouts on Docker Swarm
 - Automatic TLS through Traefik and Let's Encrypt
-- PostgreSQL, MySQL, MariaDB and Redis from templates
-- Backups of PostgreSQL, MySQL, MariaDB and Redis to S3, with restores and exports
+- PostgreSQL, MySQL, MariaDB, MongoDB and Redis from templates
+- Backups of PostgreSQL, MySQL, MariaDB, MongoDB and Redis to S3, with restores and exports
 - Host, app and database metrics, with a year of history
 - Alerts to Slack, Discord, Teams, ntfy or email
 - Live logs and live deploy output in the browser

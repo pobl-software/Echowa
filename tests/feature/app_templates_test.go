@@ -67,7 +67,7 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 	_, page := b.visit("/apps/create")
 
 	list := page.Props["templates"].([]any)
-	s.Require().Len(list, 4)
+	s.Require().Len(list, 5)
 	postgres := list[0].(map[string]any)
 	s.Equal("postgres", postgres["slug"])
 	s.Equal("PostgreSQL", postgres["name"])
@@ -97,7 +97,22 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 		map[string]any{"key": "MARIADB_PASSWORD", "source": "generated"},
 		map[string]any{"key": "MARIADB_ROOT_PASSWORD", "source": "generated"},
 	}, mariadb["env"])
-	s.Equal("redis", list[3].(map[string]any)["slug"])
+	mongodb := list[3].(map[string]any)
+	s.Equal("mongodb", mongodb["slug"])
+	s.Equal("9.0", mongodb["default_tag"])
+	s.Equal(float64(27017), mongodb["port"])
+	s.Equal([]any{"/data/db"}, mongodb["volumes"])
+	s.Equal([]any{
+		map[string]any{"key": "MONGO_INITDB_ROOT_USERNAME", "source": "fixed"},
+		map[string]any{"key": "MONGO_INITDB_ROOT_PASSWORD", "source": "generated"},
+		map[string]any{"key": "MONGO_INITDB_DATABASE", "source": "app_name"},
+		map[string]any{"key": "MONGO_USER", "source": "fixed"},
+		map[string]any{"key": "MONGO_PASSWORD", "source": "generated"},
+	}, mongodb["env"])
+	s.Equal("always", mongodb["slow_queries"])
+	s.Equal(false, mongodb["slow_queries_reset"], "only a restart clears its totals")
+	s.Equal(true, postgres["slow_queries_reset"])
+	s.Equal("redis", list[4].(map[string]any)["slug"])
 }
 
 func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() {
@@ -108,6 +123,7 @@ func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() 
 		{"postgres", "POSTGRES_PASSWORD", "/var/lib/postgresql", false},
 		{"mysql", "MYSQL_PASSWORD", "/var/lib/mysql", false},
 		{"mariadb", "MARIADB_PASSWORD", "/var/lib/mysql", false},
+		{"mongodb", "MONGO_PASSWORD", "/data/db", true},
 		{"redis", "REDIS_PASSWORD", "/data", true},
 	} {
 		s.Run(tt.slug, func() {
@@ -188,11 +204,11 @@ func (s *AppTemplatesTestSuite) TestStoreRefusesAnUnknownTemplate() {
 	b.visit("/apps/create")
 
 	form := templateForm("postgres", "db")
-	form["template"] = "mongodb"
+	form["template"] = "cassandra"
 	b.submit(nethttp.MethodPost, "/apps", "/apps/create", form).AssertHeader("Location", "/apps/create")
 
 	_, page := b.visit("/apps/create")
-	s.Equal("There's no template called mongodb.", page.Props["errors"].(map[string]any)["template"])
+	s.Equal("There's no template called cassandra.", page.Props["errors"].(map[string]any)["template"])
 	s.assertNoApps()
 }
 

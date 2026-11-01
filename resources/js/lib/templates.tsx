@@ -1,14 +1,14 @@
 import { BoxIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
-import { siMariadb, siRedis } from 'simple-icons';
+import { siMariadb, siMongodb, siRedis } from 'simple-icons';
 
 import { cn } from '@/lib/utils';
 
 export type AppIcon = ComponentType<{ className?: string }>;
 
 // Each database's own logo in its own colours: PostgreSQL and MySQL from
-// Devicon (MIT, see NOTICE), MariaDB and Redis from Simple Icons, which
-// has Redis's 2024 logo. The one place raw colours are allowed: a brand's colour is part of
+// Devicon (MIT, see NOTICE), MariaDB, MongoDB and Redis from Simple Icons,
+// which has Redis's 2024 logo. The one place raw colours are allowed: a brand's colour is part of
 // the mark, so it wins over the caller's text colour.
 
 // PostgreSQL's elephant: a black outline, the blue body and a white rim,
@@ -76,6 +76,19 @@ function MariadbIcon({ className }: { className?: string }) {
     );
 }
 
+function MongodbIcon({ className }: { className?: string }) {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+            className={cn('size-4', className, 'text-[#47A248]')}
+        >
+            <path d={siMongodb.path} />
+        </svg>
+    );
+}
+
 function RedisIcon({ className }: { className?: string }) {
     return (
         <svg
@@ -93,6 +106,7 @@ const icons: Record<string, AppIcon> = {
     postgres: PostgresIcon,
     mysql: MysqlIcon,
     mariadb: MariadbIcon,
+    mongodb: MongodbIcon,
     redis: RedisIcon,
 };
 

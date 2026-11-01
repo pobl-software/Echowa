@@ -37,6 +37,9 @@ type Backup struct {
 	Gzip bool
 	// Atomic means Restore applies all of a dump or none of it.
 	Atomic bool
+	// Parts are what a dump is made of, in words: "tables", "collections".
+	// A restore that isn't Atomic says some may be left half done.
+	Parts string
 	// Compatible says whether a dump from server version from restores
 	// into server version to, both as ServerVersion reads them.
 	Compatible func(from, to string) bool
@@ -151,6 +154,7 @@ var postgresBackup = &Backup{
 		`--clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error`},
 	Extension:  "dump",
 	Atomic:     true,
+	Parts:      "tables",
 	Compatible: sameOrNewer(1),
 	Exports: []Export{
 		{
@@ -180,6 +184,7 @@ var mysqlBackup = &Backup{
 		`-e "SELECT 1 - @@skip_networking"`},
 	Dump:       mysqlDump,
 	Restore:    []string{"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root "$MYSQL_DATABASE"`},
+	Parts:      "tables",
 	Extension:  "sql.gz",
 	Gzip:       true,
 	Compatible: sameOrNewer(2),
@@ -202,6 +207,7 @@ var mariadbBackup = &Backup{
 		`-e "SELECT 1 - @@skip_networking"`},
 	Dump:       mariadbDump,
 	Restore:    []string{"sh", "-c", `export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -u root "$MARIADB_DATABASE"`},
+	Parts:      "tables",
 	Extension:  "sql.gz",
 	Gzip:       true,
 	Compatible: sameOrNewer(2),
@@ -250,6 +256,7 @@ var redisBackup = &Backup{
 	// answers LOADING.
 	Ready:      []string{"sh", "-c", `[ "$(` + redisCLI + ` ping)" = PONG ] && echo 1 || echo 0`},
 	Dump:       redisDump,
+	Parts:      "keys",
 	Restorable: []string{"sh", "-c", `[ "$(` + redisCLI + ` --raw CONFIG GET enable-debug-command | sed -n 2p)" = local ] && echo 1 || echo 0`},
 	Restore:    []string{"sh", "-c", redisRestore},
 	Unchanged:  3,
@@ -260,5 +267,45 @@ var redisBackup = &Backup{
 		Format: "rdb", Label: "RDB snapshot",
 		Hint: "For redis-server with appendonly off, as dump.rdb in its dir, or redis-check-rdb.",
 		Dump: redisDump, Extension: "rdb",
+	}},
+}
+
+// mongoTool runs mongodump or mongorestore as root. The password goes in a
+// config file on descriptor 3, which sh feeds from a here-document through
+// a pipe, so it's neither an argument nor on disk, and stdin stays free
+// for a restore.
+func mongoTool(command string) []string {
+	return []string{"sh", "-c", "exec " + command +
+		` --config /dev/fd/3 -u "$MONGO_INITDB_ROOT_USERNAME" --authenticationDatabase admin 3<<EOF
+password: $MONGO_INITDB_ROOT_PASSWORD
+EOF`}
+}
+
+// mongoDump is the app's database as one archive, which Echowa gzips: the
+// same file as mongodump --archive --gzip writes.
+var mongoDump = mongoTool(`mongodump --quiet --archive --db "$MONGO_INITDB_DATABASE"`)
+
+var mongoBackup = &Backup{
+	Database: "MONGO_INITDB_DATABASE",
+	Version:  []string{"mongod", "--version"},
+	Ready:    mongosh(`print(db.adminCommand({getCmdLineOpts: 1}).parsed.net.bindIp === "127.0.0.1" ? 0 : 1)`),
+	Dump:     mongoDump,
+	// Into the app's database, whichever the dump came from. Each
+	// collection in the dump is dropped first; others are left. The
+	// server's own databases are skipped, so a whole server's dump can't
+	// replace its users.
+	Restore: mongoTool(`mongorestore --archive --drop --stopOnError ` +
+		`--nsExclude 'admin.*' --nsExclude 'config.*' --nsExclude 'local.*' ` +
+		`--nsFrom '$db$.$coll$' --nsTo "$MONGO_INITDB_DATABASE"'.$coll$'`),
+	Parts:     "collections",
+	Extension: "archive.gz",
+	Gzip:      true,
+	// A feature compatibility version is a major and minor release, and a
+	// server older than the one dumped may not know a newer one's options.
+	Compatible: sameOrNewer(2),
+	Exports: []Export{{
+		Format: "archive", Label: "Archive",
+		Hint: "For mongorestore --gzip --archive=<file>, with --nsFrom and --nsTo to restore into another database.",
+		Dump: mongoDump, Extension: "archive.gz", Gzip: true,
 	}},
 }

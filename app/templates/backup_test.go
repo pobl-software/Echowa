@@ -15,6 +15,7 @@ func TestServerVersionReadsWhatTheVersionCommandsPrint(t *testing.T) {
 		"postgres (PostgreSQL) 18beta1\n":                                                                          "18",
 		"/usr/sbin/mysqld  Ver 9.7.0 for Linux on aarch64 (MySQL Community Server)":                                "9.7.0",
 		"mariadbd  Ver 12.3.3-MariaDB-ubu2404 for debian-linux-gnu on aarch64 (mariadb.org binary distribution)\n": "12.3.3",
+		"db version v9.0.4\nBuild Info: {\n    \"version\": \"9.0.4\",\n":                                          "9.0.4",
 		"Redis server v=8.10.3 sha=00000000:1 malloc=jemalloc-5.3.0 bits=64 build=2e99d4bb317442f\n":               "8.10.3",
 	} {
 		got, err := ServerVersion([]byte(out))
@@ -52,6 +53,10 @@ func TestBackupsRestoreIntoTheSameOrANewerServerOnly(t *testing.T) {
 		{"redis", "7.4.12", "8.10.3", true},
 		{"redis", "8.10.3", "8.8.1", false},
 		{"redis", "8.0.2", "7.4.12", false},
+		{"mongodb", "9.0.4", "9.0.1", true},
+		{"mongodb", "8.0.16", "9.0.4", true},
+		{"mongodb", "8.3.13", "8.0.16", false},
+		{"mongodb", "9.0.4", "8.3.13", false},
 		{"postgres", "", "18.0", false},
 		{"postgres", "18.0", "eighteen", false},
 	}
@@ -75,6 +80,7 @@ func TestBackupCommandsKeepSecretsOutOfTheirArguments(t *testing.T) {
 					"the database is named in the template's env")
 			}
 			assert.NotEmpty(t, b.Extension)
+			assert.NotEmpty(t, b.Parts, "a restore says what it may leave half done")
 			assert.NotNil(t, b.Compatible)
 			dumps := [][]string{b.Dump}
 			for _, e := range b.Exports {

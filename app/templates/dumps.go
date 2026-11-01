@@ -3,11 +3,14 @@ package templates
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -83,12 +86,14 @@ var (
 	mysqlSwitch  = regexp.MustCompile(`(?m)^(-- Current Database: |CREATE DATABASE |USE )`)
 	pgPlainStart = []byte("-- PostgreSQL database dump")
 	rdbMagic     = []byte("REDIS")
+	// mongoMagic starts mongodump --archive's output: 0x8199e26d,
+	// little-endian.
+	mongoMagic = []byte{0x6d, 0xe2, 0x99, 0x81}
 )
 
 // ReadDumpHead reads which template's dump head starts, and what it says.
-// It knows PostgreSQL's custom format, mysqldump's and mariadb-dump's SQL,
-// gzipped or not,
-// and Redis's RDB snapshots. An error says, in words for the page, why the
+// It knows PostgreSQL's custom format, mysqldump's and mariadb-dump's SQL
+// and mongodump's archives, gzipped or not, and Redis's RDB snapshots. An error says, in words for the page, why the
 // file can't be restored.
 func ReadDumpHead(head []byte) (DumpHead, error) {
 	if bytes.HasPrefix(head, pgdmp) {
@@ -107,6 +112,8 @@ func ReadDumpHead(head []byte) (DumpHead, error) {
 	}
 	start := text[:min(len(text), 1024)]
 	switch {
+	case bytes.HasPrefix(start, mongoMagic):
+		return readMongoArchive(text, gzipped)
 	case mysqlDumpStart.Match(start):
 		return readMySQLDump(text, gzipped)
 	case bytes.Contains(start, pgPlainStart):
@@ -116,7 +123,7 @@ func ReadDumpHead(head []byte) (DumpHead, error) {
 		return DumpHead{}, errors.New("This is a gzipped Redis snapshot. Restore takes the .rdb as Export and backups make it, so gunzip it first.")
 	}
 
-	return DumpHead{}, errors.New("Echowa can't tell what this file is. Restore takes the .dump, .sql.gz or .rdb " +
+	return DumpHead{}, errors.New("Echowa can't tell what this file is. Restore takes the .dump, .sql.gz, .rdb or .archive.gz " +
 		"that Export or a backup's download made.")
 }
 
@@ -168,6 +175,135 @@ func readMySQLDump(text []byte, gzipped bool) (DumpHead, error) {
 	}
 
 	return head, nil
+}
+
+// mongoSystemDatabases hold a server's users, sessions and replication
+// state, never an app's data.
+var mongoSystemDatabases = map[string]bool{"admin": true, "config": true, "local": true}
+
+// readMongoArchive reads the prelude of mongodump --archive's output: a
+// header document with the server's version, then a document for each
+// collection, naming its database, up to a terminator. A dump of a whole
+// server, or of more than one database, is refused: Restore puts every
+// collection in the app's database, and admin's users with them.
+func readMongoArchive(head []byte, gzipped bool) (DumpHead, error) {
+	r := &bsonReader{b: head[len(mongoMagic):]}
+	header := r.doc()
+	if r.err != nil {
+		return DumpHead{}, r.err
+	}
+	version, err := ServerVersion([]byte(header["server_version"]))
+	if err != nil {
+		return DumpHead{}, errors.New("This mongodump archive doesn't say which server it came from.")
+	}
+
+	// A database with many collections and indexes has more prelude than
+	// the head holds, so what was read is enough. Restore skips admin,
+	// which mongodump writes last, whatever the head said.
+	databases := []string{}
+	for !r.terminator() {
+		db := r.doc()["db"]
+		if r.err != nil {
+			break
+		}
+		if !slices.Contains(databases, db) {
+			databases = append(databases, db)
+		}
+	}
+	if r.err != nil && (r.err != errHeaderCut || len(databases) == 0) {
+		return DumpHead{}, r.err
+	}
+	if len(databases) > 1 || slices.ContainsFunc(databases, func(db string) bool { return mongoSystemDatabases[db] }) {
+		return DumpHead{}, fmt.Errorf("This archive holds the databases %s, as mongodump without --db makes, "+
+			"so it wouldn't restore into this app's database. Dump the one database with --db.", strings.Join(databases, ", "))
+	}
+
+	dump := DumpHead{Template: "mongodb", ServerVersion: version, Gzip: gzipped}
+	if len(databases) == 1 {
+		dump.Database = databases[0]
+	}
+
+	return dump, nil
+}
+
+// bsonReader reads the top-level strings of a run of BSON documents. Its
+// first error sticks, and every read after it returns nothing.
+type bsonReader struct {
+	b   []byte
+	err error
+}
+
+// bsonSizes are the lengths of the values of BSON's fixed-size types.
+var bsonSizes = map[byte]int{0x01: 8, 0x07: 12, 0x08: 1, 0x09: 8, 0x0a: 0, 0x10: 4, 0x11: 8, 0x12: 8, 0x13: 16}
+
+// length reads a little-endian int32 at the start of b.
+func length(b []byte) int {
+	return int(int32(binary.LittleEndian.Uint32(b)))
+}
+
+// terminator reads the -1 that ends the prelude, or says there's another
+// document.
+func (r *bsonReader) terminator() bool {
+	if r.err == nil && len(r.b) < 4 {
+		r.err = errHeaderCut
+	}
+	if r.err != nil {
+		return true
+	}
+	if length(r.b) != -1 {
+		return false
+	}
+	r.b = r.b[4:]
+
+	return true
+}
+
+// doc reads one document, and returns its string fields. Its length says
+// where it ends, so a type it doesn't know ends the fields early, not the
+// read.
+func (r *bsonReader) doc() map[string]string {
+	if r.err == nil && len(r.b) < 4 {
+		r.err = errHeaderCut
+	}
+	if r.err != nil {
+		return nil
+	}
+	n := length(r.b)
+	if n < 5 {
+		r.err = errors.New("This mongodump archive's header can't be read.")
+		return nil
+	}
+	if n > len(r.b) {
+		r.err = errHeaderCut
+		return nil
+	}
+	body := r.b[4 : n-1]
+	r.b = r.b[n:]
+
+	fields := map[string]string{}
+	for len(body) > 0 {
+		kind := body[0]
+		name, rest, ok := bytes.Cut(body[1:], []byte{0})
+		if !ok {
+			break
+		}
+		size, fixed := bsonSizes[kind]
+		switch {
+		case kind == 0x02 && len(rest) >= 4 && length(rest) >= 1 && length(rest) <= len(rest)-4:
+			fields[string(name)] = string(rest[4 : 4+length(rest)-1])
+			size = 4 + length(rest)
+		case (kind == 0x03 || kind == 0x04) && len(rest) >= 4 && length(rest) >= 5:
+			size = length(rest)
+		case !fixed:
+			return fields
+		}
+		if size > len(rest) {
+			return fields
+		}
+		body = rest[size:]
+	}
+
+	return fields
 }
 
 // PostgreSQL's archive versions (pg_backup_archiver.h): 1.10 added the

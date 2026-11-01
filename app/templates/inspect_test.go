@@ -38,12 +38,12 @@ func TestRedisCommandStatsAreRankedByTotalTime(t *testing.T) {
 }
 
 func TestMySQLHealthTakesItsSizeFromDu(t *testing.T) {
-	status, err := parseMySQLHealth([]byte("213488\n{\"connections\": 0.0, \"commits\": 618}\n"))
+	status, err := parseSizedHealthJSON([]byte("213488\n{\"connections\": 0.0, \"commits\": 618}\n"))
 	require.NoError(t, err)
 	assert.Equal(t, 213488.0*1024, *status.SizeBytes)
 	assert.Equal(t, 618.0, *status.Commits)
 
-	status, err = parseMySQLHealth([]byte("\n{\"connections\": 1}\n"))
+	status, err = parseSizedHealthJSON([]byte("\n{\"connections\": 1}\n"))
 	require.NoError(t, err)
 	assert.Nil(t, status.SizeBytes, "du failing leaves the size unknown")
 }
@@ -58,4 +58,25 @@ func TestSlowQueriesAreRankedByTotalTime(t *testing.T) {
 	report, err = parseSlowQueryJSON([]byte(`{"since": null, "dropped": null, "queries": null}`))
 	require.NoError(t, err)
 	assert.Equal(t, []SlowQuery{}, report.Queries, "an empty list, not null")
+}
+
+// What the template's checks printed from the mongo 9.0 image, after an
+// app wrote to two collections and made a view.
+func TestMongoChecksPrintWhatTheParsersRead(t *testing.T) {
+	status, err := mongoInspect.ParseHealth(readTestdata(t, "mongodb-9.0.4-health.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, 205248.0*1024, *status.SizeBytes)
+	assert.Equal(t, 1.0, *status.Connections, "not the check's own connection")
+	assert.Equal(t, 8192.0, *status.MaxConnections)
+	assert.Equal(t, 313.0, *status.CacheHits)
+	assert.Equal(t, 30.0, *status.CacheMisses)
+	assert.Equal(t, 47.0, *status.Commits)
+
+	report, err := mongoInspect.ParseSlowQueries(readTestdata(t, "mongodb-9.0.4-top.json"))
+	require.NoError(t, err)
+	require.Len(t, report.Queries, 5)
+	assert.Equal(t, SlowQuery{Query: "insert shop.users", Calls: 1, TotalMs: 13.423, MeanMs: 13.423}, report.Queries[0])
+	for _, q := range report.Queries {
+		assert.NotContains(t, q.Query, "admin.", "Echowa's own commands are left out")
+	}
 }
