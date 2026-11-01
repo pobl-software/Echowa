@@ -32,6 +32,16 @@ func TestTemplatesPassTheAppRules(t *testing.T) {
 			assert.True(t, rules.IsRepository(tmpl.Repository), "repository %q", tmpl.Repository)
 			assert.True(t, rules.IsTag(tmpl.DefaultTag), "tag %q", tmpl.DefaultTag)
 			assert.NotEqual(t, "latest", tmpl.DefaultTag, "pin a major version")
+			for _, image := range tmpl.Images {
+				assert.NotEmpty(t, image.Name)
+				assert.True(t, rules.IsRepository(image.Repository), "repository %q", image.Repository)
+				assert.NotEqual(t, tmpl.Repository, image.Repository, "the template's own image comes first anyway")
+				assert.True(t, rules.IsTag(image.DefaultTag), "tag %q", image.DefaultTag)
+				assert.NotEqual(t, "latest", image.DefaultTag, "pin a major version")
+				for _, arch := range image.Arches {
+					assert.Contains(t, []string{"amd64", "arm64"}, arch, "a release's architectures")
+				}
+			}
 			assert.True(t, rules.IsPort(tmpl.Port), "port")
 			assert.NotEmpty(t, tmpl.Healthcheck, "a template's deploy is gated on its healthcheck")
 			assert.LessOrEqual(t, len(tmpl.Healthcheck), 1000, "the form's healthcheck limit")

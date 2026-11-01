@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	nethttp "net/http"
+	"runtime"
 	"testing"
 	"time"
 
@@ -72,6 +73,11 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 	s.Equal("postgres", postgres["slug"])
 	s.Equal("PostgreSQL", postgres["name"])
 	s.Equal("18", postgres["default_tag"])
+	s.Equal([]any{
+		map[string]any{"name": "PostgreSQL", "repository": "postgres", "default_tag": "18", "available": true},
+		map[string]any{"name": "pgvector", "repository": "pgvector/pgvector", "default_tag": "pg18", "available": true},
+		map[string]any{"name": "PostGIS", "repository": "postgis/postgis", "default_tag": "18-3.6", "available": runtime.GOARCH == "amd64"},
+	}, postgres["images"], "the template's own image first, and PostGIS only where it's published")
 	s.Equal(float64(5432), postgres["port"])
 	s.Equal(false, postgres["http"])
 	s.Equal([]any{"/var/lib/postgresql"}, postgres["volumes"])
@@ -112,7 +118,9 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 	s.Equal("always", mongodb["slow_queries"])
 	s.Equal(false, mongodb["slow_queries_reset"], "only a restart clears its totals")
 	s.Equal(true, postgres["slow_queries_reset"])
-	s.Equal("redis", list[4].(map[string]any)["slug"])
+	redis := list[4].(map[string]any)
+	s.Equal("redis", redis["slug"])
+	s.Len(redis["images"], 1, "a template with no other images offers its own")
 }
 
 func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() {
@@ -183,6 +191,27 @@ func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() 
 			s.Equal(tmpl.Args(templates.Options{}), deploys[len(deploys)-1].Args, "the deploy builds a template app's args")
 		})
 	}
+}
+
+// An image picked from the template's list deploys with the template's
+// env, volumes and checks, as its own image does.
+func (s *AppTemplatesTestSuite) TestStoreFromATemplateDeploysTheImagePicked() {
+	b := signedIn(s.T(), &s.TestCase)
+	b.visit("/apps/create?template=postgres")
+	form := templateForm("postgres", "vectors")
+	form["repository"], form["default_tag"] = "pgvector/pgvector", "pg18"
+
+	b.submit(nethttp.MethodPost, "/apps", "/apps/create?template=postgres", form)
+
+	app := s.loadApp("vectors")
+	s.Equal("postgres", *app.Template)
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+	s.Contains(s.docker.Pulls(), "pgvector/pgvector:pg18")
+	deploys := s.docker.Deploys()
+	spec := deploys[len(deploys)-1]
+	s.Equal(docker.FakeDigest("pgvector/pgvector:pg18"), spec.Image)
+	s.Contains(spec.Env, "POSTGRES_PASSWORD")
+	s.Equal([]docker.Volume{{Name: "echowa-vectors-data", Target: "/var/lib/postgresql"}}, spec.Volumes)
 }
 
 func (s *AppTemplatesTestSuite) TestEachAppGetsItsOwnPassword() {

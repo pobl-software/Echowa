@@ -565,6 +565,9 @@ export interface TemplateOption {
     description: string;
     repository: string;
     default_tag: string;
+    // The images the form offers, the template's own first. More than one
+    // shows a choice.
+    images: TemplateImage[];
     port: number;
     // False: no domain; other apps reach it at echowa-<name>:<port>.
     http: boolean;
@@ -582,6 +585,15 @@ export interface TemplateOption {
     slow_queries_reset: boolean;
     // The app has a Backups section (ADR 0034).
     backups: boolean;
+}
+
+// controllers.TemplateImageOption: an image a template can run.
+export interface TemplateImage {
+    name: string;
+    repository: string;
+    default_tag: string;
+    // False when it isn't published for this server's architecture.
+    available: boolean;
 }
 
 // services.LinkedDatabase: a template app a custom app is linked to (ADR

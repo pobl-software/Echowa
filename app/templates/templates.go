@@ -24,7 +24,11 @@ type Template struct {
 	// DefaultTag is a major version, never "latest": a database's files
 	// don't survive an unplanned major upgrade.
 	DefaultTag string
-	Port       int
+	// Images are other images the New app page offers in Repository's
+	// place. Each is built on Repository's image and runs exactly as it
+	// does: the same entrypoint, env, data directory and tools.
+	Images []Image
+	Port   int
 	// HTTP apps can have a domain. The rest are reached by other apps at
 	// echowa-<name>:<port> on the overlay network.
 	HTTP        bool
@@ -76,6 +80,21 @@ type TLS struct {
 	// Bundle writes the certificate and key to one file, server.pem, as
 	// well, for a server that reads them together.
 	Bundle bool
+}
+
+// Image is an image a template can run instead of its Repository.
+type Image struct {
+	Name       string // e.g. "PostGIS"
+	Repository string
+	DefaultTag string
+	// Arches are the server architectures it's published for, as GOARCH
+	// names. Empty means every one Echowa runs on.
+	Arches []string
+}
+
+// RunsOn says whether the image is published for a server of arch.
+func (i Image) RunsOn(arch string) bool {
+	return len(i.Arches) == 0 || slices.Contains(i.Arches, arch)
 }
 
 // Env is one env var a template sets.
@@ -246,7 +265,12 @@ var all = []Template{
 		Description: "A PostgreSQL server with one database and a generated password.",
 		Repository:  "postgres",
 		DefaultTag:  "18",
-		Port:        5432,
+		Images: []Image{
+			{Name: "pgvector", Repository: "pgvector/pgvector", DefaultTag: "pg18"},
+			// PostGIS publishes no arm64 images.
+			{Name: "PostGIS", Repository: "postgis/postgis", DefaultTag: "18-3.6", Arches: []string{"amd64"}},
+		},
+		Port: 5432,
 		// Over TCP, so the server the entrypoint runs while it initialises,
 		// which only listens on the socket, doesn't count as ready.
 		Healthcheck: `pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"`,

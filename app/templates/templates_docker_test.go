@@ -7,7 +7,8 @@
 //
 //	go test -tags docker ./app/templates/...
 //
-// It pulls postgres:18, mysql:9.7, mariadb:12.3, mongo:9.0 and redis:8, and
+// It pulls postgres:18 and the template's other images, mysql:9.7,
+// mariadb:12.3, mongo:9.0 and redis:8, and
 // needs the docker CLI to exec into the tasks. Each is also backed up and restored, as ADRs 0034
 // and 0044 do.
 package templates
@@ -20,6 +21,7 @@ import (
 	"io"
 	"maps"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,8 +35,22 @@ import (
 	"goravel/app/docker"
 )
 
+// Each of the template's images, on servers it's published for, runs as
+// postgres itself does.
 func TestPostgresTemplate(t *testing.T) {
-	run := deployTemplate(t, "postgres", false)
+	tmpl, _ := Find("postgres")
+	images := []Image{{Name: tmpl.Name, Repository: tmpl.Repository, DefaultTag: tmpl.DefaultTag}}
+	for _, image := range append(images, tmpl.Images...) {
+		t.Run(image.Name, func(t *testing.T) {
+			if !image.RunsOn(runtime.GOARCH) {
+				t.Skipf("%s isn't published for %s", image.Repository, runtime.GOARCH)
+			}
+			testPostgres(t, deployImage(t, "postgres", image.Repository+":"+image.DefaultTag, false))
+		})
+	}
+}
+
+func testPostgres(t *testing.T, run *templateRun) {
 	user := run.seed.Env["POSTGRES_USER"]
 	psql := func(password, sql string) (string, error) {
 		// From another container, as an app connects. The image trusts
@@ -416,6 +432,14 @@ type templateRun struct {
 // tls, it deploys as external access does: the app's certificate in the
 // env and the template's TLS arguments.
 func deployTemplate(t *testing.T, slug string, tls bool) *templateRun {
+	tmpl, ok := Find(slug)
+	require.True(t, ok)
+
+	return deployImage(t, slug, tmpl.Repository+":"+tmpl.DefaultTag, tls)
+}
+
+// deployImage is deployTemplate with another of the template's images.
+func deployImage(t *testing.T, slug, ref string, tls bool) *templateRun {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 
@@ -436,7 +460,7 @@ func deployTemplate(t *testing.T, slug string, tls bool) *templateRun {
 	app := fmt.Sprintf("it-%s-%d", slug, time.Now().UnixNano()%1_000_000)
 	seed, err := tmpl.Seed(app)
 	require.NoError(t, err)
-	image, err := engine.PullImage(ctx, tmpl.Repository+":"+tmpl.DefaultTag, nil)
+	image, err := engine.PullImage(ctx, ref, nil)
 	require.NoError(t, err)
 
 	spec := docker.ServiceSpec{
