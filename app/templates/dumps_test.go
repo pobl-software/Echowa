@@ -5,6 +5,8 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -136,29 +138,107 @@ func TestReadDumpHeadReadsMySQLDumps(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, want, head)
 
+	// mariadb-dump of a MySQL server: the server decides.
+	head, err = ReadDumpHead([]byte("-- MariaDB dump 10.20-12.3.3-MariaDB, for debian-linux-gnu (aarch64)\n--\n-- Host: db    Database: mysqldb\n-- Server version\t9.7.4\n"))
+	require.NoError(t, err)
+	assert.Equal(t, DumpHead{Template: "mysql", Database: "mysqldb", ServerVersion: "9.7.4"}, head)
+}
+
+// The head is mariadb-dump's from the mariadb:12.3 image, which starts
+// with the line that turns the client's sandbox mode on.
+func TestReadDumpHeadReadsMariaDBDumps(t *testing.T) {
+	const mariadbHead = "/*M!999999\\- enable the sandbox mode */ \n" +
+		"-- MariaDB dump 10.20-12.3.3-MariaDB, for debian-linux-gnu (aarch64)\n" +
+		"--\n" +
+		"-- Host: localhost    Database: shop\n" +
+		"-- ------------------------------------------------------\n" +
+		"-- Server version\t12.3.3-MariaDB-ubu2404\n\n" +
+		"/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n"
+	want := DumpHead{Template: "mariadb", Database: "shop", ServerVersion: "12.3.3", Gzip: true}
+
+	head, err := ReadDumpHead(gzipped(t, mariadbHead))
+	require.NoError(t, err)
+	assert.Equal(t, want, head)
+	assert.NoError(t, head.ReadableBy("12.3.3"))
+
+	// An older MariaDB, before the sandbox line.
 	head, err = ReadDumpHead([]byte("-- MariaDB dump 10.19  Distrib 10.11.6-MariaDB\n-- Server version\t10.11.6-MariaDB-0+deb12u1\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "10.11.6", head.ServerVersion)
+	assert.Equal(t, DumpHead{Template: "mariadb", ServerVersion: "10.11.6"}, head)
+}
+
+// The snapshots are redis-cli --rdb - from the redis:8 and redis:7.4
+// images, with a few keys in databases 0 and 3, ending with the 40 byte
+// mark of a diskless transfer as every backup does.
+func TestReadDumpHeadReadsRedisSnapshots(t *testing.T) {
+	for file, want := range map[string]DumpHead{
+		"redis-8.10.3.rdb": {Template: "redis", ServerVersion: "8.10.3", Made: time.Date(2026, 10, 31, 22, 32, 30, 0, time.UTC)},
+		"redis-7.4.12.rdb": {Template: "redis", ServerVersion: "7.4.12", Made: time.Date(2026, 10, 31, 22, 32, 37, 0, time.UTC)},
+	} {
+		rdb := readTestdata(t, file)
+		head, err := ReadDumpHead(rdb)
+		require.NoError(t, err, file)
+		assert.Equal(t, want, head, file)
+		assert.NoError(t, head.ReadableBy("8.10.3"), "the server version check covers Redis")
+
+		// Only the start of an upload has arrived when it's first read.
+		head, err = ReadDumpHead(rdb[:40])
+		require.NoError(t, err, file)
+		assert.Equal(t, want.ServerVersion, head.ServerVersion, file)
+	}
+}
+
+// mongodump --archive of one database and of the whole server, from the
+// mongo 9.0 image, as the template's Dump runs it and without --db.
+func TestReadDumpHeadReadsMongoArchives(t *testing.T) {
+	archive := readTestdata(t, "mongodb-9.0.4-shop.archive")
+	want := DumpHead{Template: "mongodb", Database: "shop", ServerVersion: "9.0.4"}
+	head, err := ReadDumpHead(archive)
+	require.NoError(t, err)
+	assert.Equal(t, want, head)
+	assert.NoError(t, head.ReadableBy("9.0.4"))
+
+	want.Gzip = true
+	head, err = ReadDumpHead(gzipped(t, string(archive)))
+	require.NoError(t, err)
+	assert.Equal(t, want, head, "as Echowa and mongodump --gzip write it")
+
+	// The header and the first collection, as if a long prelude went on.
+	head, err = ReadDumpHead(archive[:500])
+	require.NoError(t, err)
+	assert.Equal(t, "shop", head.Database, "the head ends inside the prelude")
+
+	_, err = ReadDumpHead(archive[:60])
+	assert.ErrorContains(t, err, "ends before its header does")
+
+	_, err = ReadDumpHead(readTestdata(t, "mongodb-9.0.4-whole-server.archive"))
+	assert.ErrorContains(t, err, "holds the databases shop, admin")
 }
 
 func TestReadDumpHeadSaysWhyItCantRestoreAFile(t *testing.T) {
 	pg := fromHex(t, postgres18Head)
+	rdb := readTestdata(t, "redis-8.10.3.rdb")
 	tar := append([]byte{}, pg...)
 	tar[10] = 3
 	for name, c := range map[string]struct {
 		head []byte
 		want string
 	}{
-		"plain SQL":      {gzipped(t, "--\n-- PostgreSQL database dump\n--\n\n\\restrict abc\n"), "This is plain SQL from pg_dump."},
-		"another format": {tar, "isn't in the custom format"},
-		"a cut header":   {pg[:60], "ends before its header does"},
-		"an old archive": {[]byte("PGDMP\x01\x09\x00"), "version 1.9"},
-		"no version":     {[]byte("-- MySQL dump 10.13\n-- Host: localhost    Database: shop\n"), "doesn't say which server"},
-		"anything else":  {[]byte("PK\x03\x04 a zip file"), "can't tell what this file is"},
-		"empty":          {nil, "can't tell what this file is"},
-		"a broken gzip":  {[]byte{0x1f, 0x8b, 0x00}, "gzipped, but it can't be read"},
-		"phpMyAdmin's":   {[]byte("-- phpMyAdmin SQL Dump\n-- version 5.2.1\n"), "can't tell what this file is"},
-		"a cut version":  {pg[:80], "ends before its header does"},
+		"plain SQL":          {gzipped(t, "--\n-- PostgreSQL database dump\n--\n\n\\restrict abc\n"), "This is plain SQL from pg_dump."},
+		"another format":     {tar, "isn't in the custom format"},
+		"a cut header":       {pg[:60], "ends before its header does"},
+		"an old archive":     {[]byte("PGDMP\x01\x09\x00"), "version 1.9"},
+		"no version":         {[]byte("-- MySQL dump 10.13\n-- Host: localhost    Database: shop\n"), "doesn't say which server"},
+		"anything else":      {[]byte("PK\x03\x04 a zip file"), "can't tell what this file is"},
+		"empty":              {nil, "can't tell what this file is"},
+		"a broken gzip":      {[]byte{0x1f, 0x8b, 0x00}, "gzipped, but it can't be read"},
+		"phpMyAdmin's":       {[]byte("-- phpMyAdmin SQL Dump\n-- version 5.2.1\n"), "can't tell what this file is"},
+		"a cut version":      {pg[:80], "ends before its header does"},
+		"a cut snapshot":     {rdb[:20], "ends before its header does"},
+		"a snapshot's magic": {rdb[:5], "ends before its header does"},
+		"a bad RDB format":   {[]byte("REDISxxxx\xfa"), "format version can't be read"},
+		"no redis-ver":       {append([]byte("REDIS0015\xfa\x0aredis-bits\xc0\x40"), 0xfe, 0x00), "doesn't say which server made it"},
+		"a gzipped snapshot": {gzipped(t, string(rdb)), "gunzip it first"},
 		// The start of mysqldump --databases and --all-databases, from MySQL 9.7.4.
 		"--databases": {gzipped(t, mysqlHead+"\n--\n-- Current Database: `mysqldb`\n--\n\nCREATE DATABASE /*!32312 IF NOT EXISTS*/ `mysqldb`;\n\nUSE `mysqldb`;\n"),
 			"switches to them"},
@@ -170,4 +250,12 @@ func TestReadDumpHeadSaysWhyItCantRestoreAFile(t *testing.T) {
 			assert.Contains(t, err.Error(), c.want, name)
 		}
 	}
+}
+
+func readTestdata(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	require.NoError(t, err)
+
+	return b
 }

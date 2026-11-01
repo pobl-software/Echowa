@@ -24,7 +24,11 @@ type Template struct {
 	// DefaultTag is a major version, never "latest": a database's files
 	// don't survive an unplanned major upgrade.
 	DefaultTag string
-	Port       int
+	// Images are other images the New app page offers in Repository's
+	// place. Each is built on Repository's image and runs exactly as it
+	// does: the same entrypoint, env, data directory and tools.
+	Images []Image
+	Port   int
 	// HTTP apps can have a domain. The rest are reached by other apps at
 	// echowa-<name>:<port> on the overlay network.
 	HTTP        bool
@@ -37,8 +41,11 @@ type Template struct {
 	// CMD lacks something, such as Redis's password. Otherwise the image's
 	// CMD runs until an option adds flags.
 	ReplaceCMD bool
-	Env        []Env
-	Volumes    []Volume
+	// Setup runs as root before Server, on every start, to write files the
+	// image reads. A template with one needs ReplaceCMD.
+	Setup   string
+	Env     []Env
+	Volumes []Volume
 	// Connect builds the URL another app connects with, from the service's
 	// host and port and the app's env.
 	Connect func(host string, port int, env map[string]string) string
@@ -52,7 +59,7 @@ type Template struct {
 	// template that has none.
 	Inspect *Inspect
 	// Backup dumps and restores the database (ADR 0034). Nil for a
-	// template Echowa doesn't back up, such as Redis.
+	// template Echowa doesn't back up.
 	Backup *Backup
 	// Pooler is the connection pooler the app can run beside the server
 	// (ADR 0035). Nil for a template without one.
@@ -70,6 +77,24 @@ type TLS struct {
 	Port int
 	// Client says how to connect with the app's CA certificate.
 	Client string
+	// Bundle writes the certificate and key to one file, server.pem, as
+	// well, for a server that reads them together.
+	Bundle bool
+}
+
+// Image is an image a template can run instead of its Repository.
+type Image struct {
+	Name       string // e.g. "PostGIS"
+	Repository string
+	DefaultTag string
+	// Arches are the server architectures it's published for, as GOARCH
+	// names. Empty means every one Echowa runs on.
+	Arches []string
+}
+
+// RunsOn says whether the image is published for a server of arch.
+func (i Image) RunsOn(arch string) bool {
+	return len(i.Arches) == 0 || slices.Contains(i.Arches, arch)
 }
 
 // Env is one env var a template sets.
@@ -240,7 +265,12 @@ var all = []Template{
 		Description: "A PostgreSQL server with one database and a generated password.",
 		Repository:  "postgres",
 		DefaultTag:  "18",
-		Port:        5432,
+		Images: []Image{
+			{Name: "pgvector", Repository: "pgvector/pgvector", DefaultTag: "pg18"},
+			// PostGIS publishes no arm64 images.
+			{Name: "PostGIS", Repository: "postgis/postgis", DefaultTag: "18-3.6", Arches: []string{"amd64"}},
+		},
+		Port: 5432,
 		// Over TCP, so the server the entrypoint runs while it initialises,
 		// which only listens on the socket, doesn't count as ready.
 		Healthcheck: `pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"`,
@@ -315,6 +345,102 @@ var all = []Template{
 		Backup:  mysqlBackup,
 	},
 	{
+		Slug:        "mariadb",
+		Name:        "MariaDB",
+		Description: "A MariaDB server with one database and generated passwords.",
+		Repository:  "mariadb",
+		// The LTS release. MariaDB won't start on files a later version has
+		// upgraded either.
+		DefaultTag: "12.3",
+		Port:       3306,
+		// As MySQL's: over TCP, past the entrypoint's server without
+		// networking. The image has only the mariadb names, no mysql ones.
+		Healthcheck: `MYSQL_PWD="$MARIADB_PASSWORD" mariadb -h 127.0.0.1 -u "$MARIADB_USER" -e 'SELECT 1' "$MARIADB_DATABASE" >/dev/null`,
+		Server:      "docker-entrypoint.sh mariadbd",
+		Env: []Env{
+			// The image refuses "root", and MySQL's user is "app" too.
+			{Key: "MARIADB_USER", Value: Fixed("app")},
+			{Key: "MARIADB_DATABASE", Value: AppName},
+			{Key: "MARIADB_PASSWORD", Value: Generated},
+			{Key: "MARIADB_ROOT_PASSWORD", Value: Generated},
+		},
+		Volumes: []Volume{{Name: "data", Target: "/var/lib/mysql"}},
+		// mysql://, which MariaDB's drivers and ORMs take, where few know
+		// mariadb://.
+		Connect: func(host string, port int, env map[string]string) string {
+			u := url.URL{
+				Scheme: "mysql",
+				User:   url.UserPassword(env["MARIADB_USER"], env["MARIADB_PASSWORD"]),
+				Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+				Path:   "/" + env["MARIADB_DATABASE"],
+			}
+			return u.String()
+		},
+		// The mariadb client checks the host name whenever it's given a CA,
+		// and the certificate names only echowa-<app>. Without one, since
+		// 11.4, it verifies the server with the user's password instead.
+		TLS: &TLS{
+			Owner:  "mysql",
+			Flags:  "--ssl-cert=" + tlsDir + "/server.crt --ssl-key=" + tlsDir + "/server.key",
+			Client: "Set SSL mode to VERIFY_CA and the CA certificate as the CA file. The mariadb client takes no CA file: with a password, it verifies the server by that.",
+		},
+		Inspect: mariadbInspect,
+		Backup:  mariadbBackup,
+	},
+	{
+		Slug:        "mongodb",
+		Name:        "MongoDB",
+		Description: "A MongoDB server with one database and generated passwords.",
+		Repository:  "mongo",
+		// Not "9": a minor release raises the feature compatibility version,
+		// which MongoDB won't start an older release on.
+		DefaultTag: "9.0",
+		Port:       27017,
+		// Signed in, so the root user exists, and past the server the
+		// entrypoint runs while it initialises, which listens on 127.0.0.1
+		// only.
+		Healthcheck: `mongosh --quiet --norc --eval '` + mongoAuth +
+			`quit(db.adminCommand({getCmdLineOpts: 1}).parsed.net.bindIp === "127.0.0.1" ? 1 : 0)'`,
+		Server:     "docker-entrypoint.sh mongod",
+		ReplaceCMD: true,
+		Setup:      mongoSetup,
+		Env: []Env{
+			{Key: "MONGO_INITDB_ROOT_USERNAME", Value: Fixed("root")},
+			{Key: "MONGO_INITDB_ROOT_PASSWORD", Value: Generated},
+			{Key: "MONGO_INITDB_DATABASE", Value: AppName},
+			// Not the image's: mongoAppUser makes this user, who owns the
+			// app's database and nothing else.
+			{Key: "MONGO_USER", Value: Fixed("app")},
+			{Key: "MONGO_PASSWORD", Value: Generated},
+		},
+		Volumes: []Volume{{Name: "data", Target: "/data/db"}},
+		// The user is in the app's database, so the path is also where it
+		// signs in.
+		Connect: func(host string, port int, env map[string]string) string {
+			u := url.URL{
+				Scheme: "mongodb",
+				User:   url.UserPassword(env["MONGO_USER"], env["MONGO_PASSWORD"]),
+				Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+				Path:   "/" + env["MONGO_INITDB_DATABASE"],
+			}
+			return u.String()
+		},
+		// Clients that don't ask for TLS still connect in the clear on the
+		// same port, as PostgreSQL's do. mongod asks for a client
+		// certificate and won't start without a CA to check one against
+		// unless told not to.
+		TLS: &TLS{
+			Owner: "mongodb",
+			Flags: "--tlsMode preferTLS --tlsCertificateKeyFile " + tlsDir + "/server.pem " +
+				"--tlsAllowConnectionsWithoutCertificates --setParameter tlsUseSystemCA=true",
+			Bundle: true,
+			Client: "Connect with TLS and the CA certificate, without checking the host name, which the certificate doesn't have: " +
+				"tls=true&tlsCAFile=<file>&tlsAllowInvalidHostnames=true in the URL, or --tls --tlsCAFile <file> --tlsAllowInvalidHostnames for mongosh.",
+		},
+		Inspect: mongoInspect,
+		Backup:  mongoBackup,
+	},
+	{
 		Slug:        "redis",
 		Name:        "Redis",
 		Description: "A Redis server that saves to disk, with a generated password.",
@@ -324,7 +450,9 @@ var all = []Template{
 		Healthcheck: redisCLI + ` ping | grep -q PONG`,
 		// The image takes its password only as an argument. sh reads it from
 		// the encrypted env var, and the image's entrypoint still drops root.
-		Server:     `docker-entrypoint.sh redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"`,
+		// A restore loads its snapshot with DEBUG, from inside the container
+		// only (ADR 0044).
+		Server:     `docker-entrypoint.sh redis-server --appendonly yes --requirepass "$REDIS_PASSWORD" --enable-debug-command local`,
 		ReplaceCMD: true,
 		Env: []Env{
 			{Key: "REDIS_PASSWORD", Value: Generated},
@@ -348,5 +476,6 @@ var all = []Template{
 			Client: "Connect with TLS and the CA certificate: redis-cli --tls --cacert <file>, or a rediss:// URL.",
 		},
 		Inspect: redisInspect,
+		Backup:  redisBackup,
 	},
 }

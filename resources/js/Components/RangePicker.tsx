@@ -1,5 +1,5 @@
 import { router } from '@inertiajs/react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import { Tabs, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import { formatStep } from '@/lib/format';
@@ -43,16 +43,19 @@ export function useSeriesRange(series: SeriesWindow, props: string[] = ['series'
 }
 
 // Tabs for the ranges, and what the charts show: "Last 24 hours · 5 min averages".
+// children, such as the deploys switch, go at the end of the row.
 export function RangePicker({
     ranges,
     range,
     step,
     onPick,
+    children,
 }: {
     ranges: string[];
     range: string;
     step: number;
     onPick: (range: string) => void;
+    children?: ReactNode;
 }) {
     return (
         <div className="flex flex-wrap items-center gap-3">
@@ -68,6 +71,7 @@ export function RangePicker({
             <span className="text-sm text-muted-foreground">
                 Last {rangeLabels[range] ?? range} · {formatStep(step)} averages
             </span>
+            {children && <div className="ml-auto">{children}</div>}
         </div>
     );
 }

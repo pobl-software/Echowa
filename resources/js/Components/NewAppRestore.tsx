@@ -5,12 +5,13 @@ import { type FormEvent, useState } from 'react';
 import { Panel } from '@/Components/Panel';
 import { TextField } from '@/Components/TextField';
 import { Alert, AlertDescription } from '@/Components/ui/alert';
-import { Button } from '@/Components/ui/button';
+import { Button, buttonVariants } from '@/Components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/Components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/Components/ui/table';
 import { formatBytes } from '@/lib/format';
 import { formatDateTime, timeAgo } from '@/lib/time';
-import type { BucketBackup, NewAppPreview, StorageChoice } from '@/types/models';
+import { cn } from '@/lib/utils';
+import type { BucketBackup, NewAppPreview, StorageChoice, TemplateOption } from '@/types/models';
 
 // RestoreSource is what a restore reads: a backup in an app's history, or a
 // manifest found in a location's folder.
@@ -121,10 +122,10 @@ export function NewAppRestoreForm({
     );
 }
 
-// FromBackup is the New app page's From a backup: a location, an app's
-// folder in it, a backup, then the new app. It needs nothing but the
-// bucket, so it works after losing a server.
-export function FromBackup({ locations }: { locations: StorageChoice[] }) {
+// FromBackup is a template's From a backup on the New app page: a
+// location, an app's folder in it, a backup, then the new app. It needs
+// nothing but the bucket, so it works after losing a server.
+export function FromBackup({ locations, template }: { locations: StorageChoice[]; template: TemplateOption }) {
     const [location, setLocation] = useState<number | null>(null);
     const [folders, setFolders] = useState<string[] | null>(null);
     const [folder, setFolder] = useState<string | null>(null);
@@ -138,8 +139,8 @@ export function FromBackup({ locations }: { locations: StorageChoice[] }) {
             <Panel title="From a backup">
                 <p className="text-sm text-muted-foreground">
                     Backups are read from an S3 storage location. Add the one your backups are in on{' '}
-                    <Link href="/settings" className="font-medium text-foreground underline underline-offset-4">
-                        Settings
+                    <Link href="/settings/storage" className="font-medium text-foreground underline underline-offset-4">
+                        Settings, S3 storage
                     </Link>
                     , with the same bucket and prefix, then come back here.
                 </p>
@@ -201,6 +202,7 @@ export function FromBackup({ locations }: { locations: StorageChoice[] }) {
     };
 
     const preview = picked?.preview ?? null;
+    const otherTemplate = preview !== null && preview.template !== template.slug;
 
     return (
         <>
@@ -312,7 +314,23 @@ export function FromBackup({ locations }: { locations: StorageChoice[] }) {
                     title={preview ? `Restore into a new ${preview.template_name} app` : 'Reading the backup…'}
                     description={preview ? `From ${preview.name} in ${preview.location}.` : undefined}
                 >
-                    {preview && (
+                    {preview && otherTemplate && (
+                        <div className="grid gap-3">
+                            <Refusal
+                                reason={`This is a ${preview.template_name} backup, so it restores into a ${preview.template_name} app, not ${template.name}.`}
+                            />
+                            <Link
+                                href={`/apps/create?template=${preview.template}&from=backup`}
+                                replace
+                                preserveScroll
+                                preserveState
+                                className={cn(buttonVariants({ variant: 'outline' }), 'justify-self-start')}
+                            >
+                                Restore it as {preview.template_name}
+                            </Link>
+                        </div>
+                    )}
+                    {preview && !otherTemplate && (
                         <div className="grid gap-4">
                             <NewAppFacts preview={preview} />
                             <NewAppRestoreForm
@@ -342,8 +360,12 @@ function NewAppFacts({ preview }: { preview: NewAppPreview }) {
             </dd>
             <dt className="text-muted-foreground">Size</dt>
             <dd className="tabular-nums">{formatBytes(preview.size_bytes)}</dd>
-            <dt className="text-muted-foreground">Database</dt>
-            <dd className="font-mono text-xs leading-5 break-all">{preview.database}</dd>
+            {!preview.whole_server && (
+                <>
+                    <dt className="text-muted-foreground">Database</dt>
+                    <dd className="font-mono text-xs leading-5 break-all">{preview.database}</dd>
+                </>
+            )}
             <dt className="text-muted-foreground">{preview.template_name}</dt>
             <dd className="font-mono text-xs leading-5">{preview.server_version}</dd>
         </dl>

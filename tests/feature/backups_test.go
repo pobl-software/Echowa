@@ -370,26 +370,21 @@ func (s *BackupsTestSuite) TestRecoveryMarksEarlierBackupsInterruptedAndAbortsTh
 	s.Equal(models.BackupRunning, ours.Status, "this process's own backups are left alone")
 }
 
-func (s *BackupsTestSuite) TestRedisAndCustomAppsHaveNoBackups() {
-	redis := s.templateApp("cache", "redis")
+func (s *BackupsTestSuite) TestCustomAppsHaveNoBackups() {
 	custom := createTestApp(s.T(), "blog", nil)
 	rec := &models.Backup{
-		AppID: redis.ID, StorageLocationID: s.loc.ID, Trigger: models.BackupByHand, Status: models.BackupSucceeded,
+		AppID: custom.ID, StorageLocationID: s.loc.ID, Trigger: models.BackupByHand, Status: models.BackupSucceeded,
 		Key: "k", StartedAt: carbon.NewDateTime(carbon.Now()),
 	}
 	s.Require().NoError(facades.Orm().Query().Create(rec))
 	b := signedIn(s.T(), &s.TestCase)
 
-	for _, app := range []*models.App{redis, custom} {
-		_, page := b.visit(fmt.Sprintf("/apps/%d", app.ID))
-		s.Nil(page.Props["backups"], app.Name)
-		b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backups", app.ID), fmt.Sprintf("/apps/%d", app.ID),
-			map[string]any{"location": s.loc.ID}).AssertNotFound()
-		b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d", app.ID, rec.ID), nil, false, nil).AssertNotFound()
-		b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d/download", app.ID, rec.ID), nil, false, nil).AssertNotFound()
-	}
-	_, page := b.visit(fmt.Sprintf("/apps/%d", redis.ID))
-	s.Equal(false, page.Props["template"].(map[string]any)["backups"])
+	_, page := b.visit(fmt.Sprintf("/apps/%d", custom.ID))
+	s.Nil(page.Props["backups"])
+	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backups", custom.ID), fmt.Sprintf("/apps/%d", custom.ID),
+		map[string]any{"location": s.loc.ID}).AssertNotFound()
+	b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d", custom.ID, rec.ID), nil, false, nil).AssertNotFound()
+	b.request(nethttp.MethodGet, fmt.Sprintf("/apps/%d/backups/%d/download", custom.ID, rec.ID), nil, false, nil).AssertNotFound()
 	s.Zero(s.dumpCount())
 }
 
@@ -503,26 +498,26 @@ func (s *BackupsTestSuite) TestALocationWithBackupsKeepsItsBucket() {
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret)
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 	row := page.Props["storageLocations"].([]any)[0].(map[string]any)
 	s.Equal(float64(1), row["backups"])
 	s.NotContains(row, "secret_key")
 
 	url := fmt.Sprintf("/settings/storage/%d", s.loc.ID)
-	b.submit(nethttp.MethodPut, url, "/settings", storageForm(map[string]any{"bucket": "another-bucket", "secret_key": ""}))
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodPut, url, "/settings/storage", storageForm(map[string]any{"bucket": "another-bucket", "secret_key": ""}))
+	_, page = b.visit("/settings/storage")
 	s.Contains(page.Props["errors"].(map[string]any)["bucket"], "can't change")
 	var loc models.StorageLocation
 	s.Require().NoError(facades.Orm().Query().Find(&loc, s.loc.ID))
 	s.Equal("echowa-backups", loc.Bucket)
 
-	b.submit(nethttp.MethodPut, url, "/settings", storageForm(map[string]any{"name": "Renamed", "secret_key": ""})).
-		AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodPut, url, "/settings/storage", storageForm(map[string]any{"name": "Renamed", "secret_key": ""})).
+		AssertHeader("Location", "/settings/storage")
 	s.Require().NoError(facades.Orm().Query().Find(&loc, s.loc.ID))
 	s.Equal("Renamed", loc.Name, "the rest can change")
 
-	b.submit(nethttp.MethodDelete, url, "/settings", nil)
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodDelete, url, "/settings/storage", nil)
+	_, page = b.visit("/settings/storage")
 	s.Equal("Deleted Renamed and Echowa's records of its 1 backup. They're still in the bucket.", page.Flash["success"])
 	count, err := facades.Orm().Query().Model(&models.Backup{}).Count()
 	s.Require().NoError(err)

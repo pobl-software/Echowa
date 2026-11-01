@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"goravel/app/host"
 )
 
 // docker installs Docker Engine from Docker's apt repository, unless it's
@@ -78,7 +80,7 @@ func (s *steps) installDocker() error {
 	if err != nil {
 		return err
 	}
-	repo, suite, _ := dockerRepo(parseOSRelease(string(osRelease)))
+	repo, suite, _ := dockerRepo(host.ParseOSRelease(osRelease))
 	key, err := download("https://download.docker.com/linux/" + repo + "/gpg")
 	if err != nil {
 		return fmt.Errorf("Docker's apt key: %w", err)

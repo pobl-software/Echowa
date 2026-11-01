@@ -28,7 +28,8 @@ func (r *AuthenticatedSessionController) Create(ctx http.Context) http.Response 
 	return inertia.Render(ctx, "Auth/Login", gonertia.Props{})
 }
 
-// Store signs the user in. Rate limited by the "login" limiter.
+// Store signs the user in, or, with two-factor authentication on, asks for
+// a code next. Rate limited by the "login" limiter.
 func (r *AuthenticatedSessionController) Store(ctx http.Context) http.Response {
 	validator, err := rules.Validate(ctx, map[string]any{
 		"email":    "required|string|email",
@@ -51,7 +52,11 @@ func (r *AuthenticatedSessionController) Store(ctx http.Context) http.Response {
 		return inertia.Back(ctx)
 	}
 
-	if err := services.Login(ctx, user, ctx.Request().InputBool("remember")); err != nil {
+	if services.TwoFactorOn(user) {
+		services.BeginTwoFactorLogin(ctx, user)
+		return inertia.Redirect(ctx, "/two-factor-challenge")
+	}
+	if err := services.Login(ctx, user); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 

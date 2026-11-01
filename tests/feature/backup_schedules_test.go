@@ -71,8 +71,8 @@ func (s *BackupsTestSuite) TestOffSchedulesAndAppsWithoutBackupsNeverRun() {
 	off := s.addSchedule(s.app, "* * * * *", "UTC", 7)
 	_, err := facades.Orm().Query().Model(off).Update("enabled", false)
 	s.Require().NoError(err)
-	cache := s.templateApp("cache", "redis")
-	s.addSchedule(cache, "* * * * *", "UTC", 7)
+	blog := createTestApp(s.T(), "blog", nil)
+	s.addSchedule(blog, "* * * * *", "UTC", 7)
 
 	s.runDueBackups("2027-01-05 10:00")
 
@@ -275,8 +275,8 @@ func (s *BackupsTestSuite) TestTheScheduleForm() {
 	s.Equal(rec.ID, kept.ID, "deleting a schedule keeps its backups")
 	s.Nil(kept.BackupScheduleID)
 
-	cache := s.templateApp("cache", "redis")
-	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backup-schedules", cache.ID), page, map[string]any{
+	blog := createTestApp(s.T(), "blog", nil)
+	b.submit(nethttp.MethodPost, fmt.Sprintf("/apps/%d/backup-schedules", blog.ID), page, map[string]any{
 		"storage_location_id": s.loc.ID, "schedule": "0 3 * * *", "timezone": "UTC", "keep": 7,
 	}).AssertNotFound()
 }
@@ -284,11 +284,11 @@ func (s *BackupsTestSuite) TestTheScheduleForm() {
 func (s *BackupsTestSuite) TestALocationASchedulesUsesCantBeDeleted() {
 	s.addSchedule(s.app, "0 3 * * *", "UTC", 7)
 	b := signedIn(s.T(), &s.TestCase)
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 	s.Equal(float64(1), page.Props["storageLocations"].([]any)[0].(map[string]any)["schedules"])
 
-	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/storage/%d", s.loc.ID), "/settings", nil)
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/storage/%d", s.loc.ID), "/settings/storage", nil)
+	_, page = b.visit("/settings/storage")
 	s.Equal("R2 is where the backup schedules of shop-db go. Change or delete them first.", page.Flash["error"])
 	n, err := facades.Orm().Query().Model(&models.StorageLocation{}).Count()
 	s.Require().NoError(err)

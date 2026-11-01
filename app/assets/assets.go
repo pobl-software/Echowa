@@ -19,6 +19,8 @@ const (
 	BuildDir     = "public/build"
 	Manifest     = "public/build/manifest.json"
 	HotFile      = "public/hot"
+	// For browsers that ask for /favicon.ico; pages link the SVG.
+	Favicon = "public/favicon.ico"
 	// Echowa's licence and every third-party notice, from `make licenses`.
 	Licenses = "dist/licenses.txt"
 )

@@ -540,7 +540,7 @@ export default function AppsShow({
                                 slowQueries={slowQueries}
                             />
                         ) : (
-                            <AppMetrics ranges={ranges} series={series} live={metrics} />
+                            <AppMetrics appId={app.id} ranges={ranges} series={series} live={metrics} />
                         ))}
 
                     {section === 'alerts' && <AppAlerts app={app} alerts={alerts} />}
@@ -562,8 +562,8 @@ export default function AppsShow({
                                     {backups?.last_succeeded && (
                                         <>
                                             {' '}
-                                            Its backups stay in the bucket. New app, From a backup restores one into a
-                                            new app.
+                                            Its backups stay in the bucket. New app, From a backup under its template
+                                            restores one into a new app.
                                         </>
                                     )}
                                 </p>

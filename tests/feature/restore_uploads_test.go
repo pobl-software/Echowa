@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/goravel/framework/support/carbon"
+
 	"goravel/app/facades"
 	"goravel/app/models"
 	"goravel/app/services"
@@ -190,6 +192,69 @@ func (s *BackupsTestSuite) TestAnUploadedMySQLDumpIsRestoredDecompressed() {
 	s.Equal([]string{mysqlDumpText, mysqlDumpText}, s.restoredSoFar())
 }
 
+// mariadb-dump's head from the mariadb:12.3 image, sandbox line and all.
+const mariadbDumpText = "/*M!999999\\- enable the sandbox mode */ \n-- MariaDB dump 10.20-12.3.3-MariaDB, for debian-linux-gnu (aarch64)\n--\n" +
+	"-- Host: localhost    Database: orders\n-- ------------------------------------------------------\n" +
+	"-- Server version\t12.3.3-MariaDB-ubu2404\n\nDROP TABLE IF EXISTS `t`;\n"
+
+func (s *BackupsTestSuite) TestAnUploadedMariaDBDumpRestoresIntoAMariaDBAppOnly() {
+	orders := s.templateApp("orders", "mariadb")
+	mysqlOrders := s.templateApp("mysql-orders", "mysql")
+	s.scriptRestore("mariadbd  Ver 12.3.3-MariaDB-ubu2404 for debian-linux-gnu on aarch64 (mariadb.org binary distribution)\n", "", 0, nil)
+	b := signedIn(s.T(), &s.TestCase)
+
+	id := s.upload(b, mysqlOrders, "orders.sql.gz", gzipText(mariadbDumpText))
+	body := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", mysqlOrders.ID, id), nethttp.StatusUnprocessableEntity)
+	s.Equal("This is a dump of a MariaDB database, and mysql-orders is MySQL.", body["error"])
+	id = s.upload(b, orders, "orders.sql.gz", gzipText(mysqlDumpText))
+	body = s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", orders.ID, id), nethttp.StatusUnprocessableEntity)
+	s.Equal("This is a dump of a MySQL database, and orders is MariaDB.", body["error"])
+
+	id = s.upload(b, orders, "orders.sql.gz", gzipText(mariadbDumpText))
+	preview := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", orders.ID, id), nethttp.StatusOK)
+	s.Equal("MariaDB", preview["template"])
+	s.Equal("orders", preview["database"])
+	s.Equal("12.3.3", preview["server_version"])
+	s.Equal(false, preview["atomic"])
+	s.Empty(preview["refusal"])
+
+	s.restore(b, orders, map[string]any{"upload": id, "safety": false, "confirm": "orders"})
+	services.WaitForRestores()
+	rec := s.restores(orders.ID)[0]
+	s.Equal(models.RestoreSucceeded, rec.Status, "message: %v", rec.Message)
+	s.Equal([]string{mariadbDumpText}, s.restoredSoFar(), "Echowa gunzips the dump into mariadb")
+}
+
+// A mongodump archive from the mongo 9.0 image restores gunzipped, as
+// mongodump --gzip and Echowa's own backups write it, into a MongoDB app
+// whatever its database's name.
+func (s *BackupsTestSuite) TestAnUploadedMongoArchiveRestoresIntoAMongoApp() {
+	archive, err := os.ReadFile("../../app/templates/testdata/mongodb-9.0.4-shop.archive")
+	s.Require().NoError(err)
+	orders := s.templateApp("orders", "mongodb")
+	s.scriptRestore("db version v9.0.4\n", "", 0, nil)
+	b := signedIn(s.T(), &s.TestCase)
+
+	id := s.upload(b, s.app, "shop.archive.gz", gzipText(string(archive)))
+	body := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", s.app.ID, id), nethttp.StatusUnprocessableEntity)
+	s.Equal("This is a dump of a MongoDB database, and shop-db is PostgreSQL.", body["error"])
+
+	id = s.upload(b, orders, "shop.archive.gz", gzipText(string(archive)))
+	preview := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", orders.ID, id), nethttp.StatusOK)
+	s.Equal("MongoDB", preview["template"])
+	s.Equal("collections", preview["parts"])
+	s.Equal("shop", preview["database"])
+	s.Equal("9.0.4", preview["server_version"])
+	s.Equal(false, preview["atomic"])
+	s.Empty(preview["refusal"])
+
+	s.restore(b, orders, map[string]any{"upload": id, "safety": false, "confirm": "orders"})
+	services.WaitForRestores()
+	rec := s.restores(orders.ID)[0]
+	s.Equal(models.RestoreSucceeded, rec.Status, "message: %v", rec.Message)
+	s.Equal([]string{string(archive)}, s.restoredSoFar(), "Echowa gunzips the archive into mongorestore")
+}
+
 func (s *BackupsTestSuite) TestAnUploadThatCantRestoreIntoTheAppIsRefused() {
 	orders := s.templateApp("orders", "mysql")
 	s.scriptRestore("postgres (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)\n", "", 0, nil)
@@ -257,21 +322,18 @@ func (s *BackupsTestSuite) TestAnUploadsStatusKeepsTheSessionAlive() {
 	b.visit(fmt.Sprintf("/apps/%d?tab=backups", s.app.ID))
 	id := s.startUpload(b, s.app, "shop.dump", 10)
 	s.putChunk(b, s.app, id, 0, []byte("PGDMP"), nethttp.StatusOK)
-	session := filepath.Join(facades.Config().GetString("session.files"), b.cookieValue(facades.Config().GetString("session.cookie")))
-	idle := func(d time.Duration) {
-		then := time.Now().Add(-d)
-		s.Require().NoError(os.Chtimes(session, then, then))
-	}
+	start := carbon.Now()
+	s.T().Cleanup(carbon.ClearTestNow)
+	at := func(d time.Duration) { carbon.SetTestNow(start.Copy().AddDuration(d.String())) }
 
-	idle(100 * time.Minute)
+	at(100 * time.Minute)
 	s.putChunk(b, s.app, id, 5, []byte("12"), nethttp.StatusOK)
 	s.Equal(float64(7), s.getJSON(b, fmt.Sprintf("/apps/%d/restores/uploads/%s", s.app.ID, id), nethttp.StatusOK)["received"])
-	written, err := os.Stat(session)
-	s.Require().NoError(err)
-	s.WithinDuration(time.Now(), written.ModTime(), time.Minute, "the status saved the session")
 
-	idle(121 * time.Minute)
-	s.putChunk(b, s.app, id, 7, []byte("345"), nethttp.StatusUnauthorized)
+	at(219 * time.Minute)
+	s.putChunk(b, s.app, id, 7, []byte("3"), nethttp.StatusOK)
+	at(221*time.Minute + time.Second)
+	s.putChunk(b, s.app, id, 8, []byte("45"), nethttp.StatusUnauthorized)
 }
 
 func (s *BackupsTestSuite) TestUploadsNeedASignedInUser() {

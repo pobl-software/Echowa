@@ -20,6 +20,9 @@
 #                                    then serve with ECHOWA_SKIP_BUILD=1)
 #   deploy/dev-vm.sh stop            stop Echowa in the machine
 #   deploy/dev-vm.sh artisan <cmd>   run an artisan command against its database
+#   deploy/dev-vm.sh sandboxed <cmd> run an artisan command as echowa.service
+#                                    would: an unprivileged user under the
+#                                    unit's hardening, with a database of its own
 #   deploy/dev-vm.sh test-docker     run the Docker, S3 and restore integration tests
 #                                    in it
 #   deploy/dev-vm.sh docker-conns    print Echowa's open connections to dockerd
@@ -139,6 +142,23 @@ run_bin() {
 		"./$BIN" "$@"
 }
 
+# sandboxed runs an artisan command under every hardening property of
+# app/setup/files/echowa.service, as nobody: air runs Echowa as the dev
+# user with no sandbox, so a read that works there can still fail in
+# production. Not DynamicUser: D-Bus refuses a dynamic user ("Transport
+# endpoint is not connected"), which echowa, a real user, never is. The
+# database is a fresh one in its private /tmp.
+sandboxed() {
+	local props=() line
+	while IFS= read -r line; do
+		props+=(-p "$line")
+	done < <(sed -n '/^# Hardening/,/^\[Install\]/p' app/setup/files/echowa.service | grep -E '^[A-Za-z]+=')
+	in_vm_quiet sudo systemd-run --pipe --wait --collect --quiet \
+		-p User=nobody -p Group=nogroup -p WorkingDirectory="$PWD" "${props[@]}" \
+		-E DB_DATABASE=/tmp/echowa.sqlite \
+		"$PWD/$BIN" artisan "$@"
+}
+
 # Stopping the orb client doesn't stop the process inside the machine, so
 # stop it explicitly. Goravel waits for running deploys before exiting.
 stop_server() {
@@ -188,11 +208,18 @@ artisan)
 	build
 	run_bin in_vm artisan "$@"
 	;;
+sandboxed)
+	shift
+	require_vm
+	build
+	sandboxed "$@"
+	;;
 test-docker)
 	require_vm
 	for pkg in docker templates backups; do
 		GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o "tmp/$pkg.test" "./app/$pkg"
-		in_vm "./tmp/$pkg.test" -test.count=1 -test.v
+		# From the package's folder, as go test runs it, so testdata/ resolves.
+		(cd "app/$pkg" && in_vm "../../tmp/$pkg.test" -test.count=1 -test.v)
 	done
 	# Echowa's own restore, from its deploy through the dev S3 server.
 	GOOS=linux GOARCH=$(go env GOARCH) CGO_ENABLED=0 go test -c -tags docker -o tmp/feature.test ./tests/feature
@@ -206,7 +233,7 @@ destroy)
 	[[ $answer == [yY] ]] && orb delete -f "$VM"
 	;;
 *)
-	sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 	;;
 esac

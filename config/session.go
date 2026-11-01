@@ -30,11 +30,11 @@ func init() {
 
 		// Session Lifetime
 		//
-		// Here you may specify the number of minutes that you wish the session
-		// to be allowed to remain idle before it expires. If you want them
-		// to immediately expire when the browser is closed, then you may
-		// indicate that via the expire_on_close configuration option.
-		"lifetime": config.Env("SESSION_LIFETIME", 120),
+		// The longest a session can last without being saved, in minutes:
+		// the longest of services.SessionTimeouts. The admin's own timeout,
+		// usually shorter, is SignOutIdleSessions' to enforce (ADR 0043), so
+		// this isn't read from the env.
+		"lifetime": 30 * 24 * 60,
 
 		"expire_on_close": config.Env("SESSION_EXPIRE_ON_CLOSE", false),
 

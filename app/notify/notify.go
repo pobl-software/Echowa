@@ -84,7 +84,7 @@ func Sample(name, url string) Message {
 		Fields:   []Field{{Label: "Server", Value: host}, {Label: "Sent", Value: time.Now().UTC().Format("2 Jan 2006 15:04 UTC")}},
 	}
 	if url != "" {
-		m.URL = strings.TrimSuffix(url, "/") + "/settings"
+		m.URL = strings.TrimSuffix(url, "/") + "/settings/notifications"
 	}
 
 	return m

@@ -76,6 +76,84 @@ export interface AppSummary {
     links: number[];
 }
 
+// services.ServerFacts. A fact the host won't give is empty.
+export interface ServerFacts {
+    hostname: string;
+    os: string;
+    kernel: string;
+    // RFC 3339, with a zone.
+    booted_at: string | null;
+    version: string;
+    // A newer release's version, or empty.
+    update: string;
+    // Whether the release channel has been checked; a dev build never is.
+    update_checked: boolean;
+}
+
+// services.Maintenance: what the server itself needs doing (ADR 0041).
+// Sent after the page. A null field wasn't measured: never show it as fine.
+export interface Maintenance {
+    restart: MaintenanceRestart | null;
+    updates: MaintenanceUpdates | null;
+    // Whether unattended-upgrades installs security updates by itself.
+    auto_updates: boolean | null;
+    // A package install that stopped part way.
+    interrupted: boolean | null;
+    support: MaintenanceSupport | null;
+    // systemd's failed units.
+    failed_units: string[] | null;
+    // Whether the clock is right: in sync, or close to a reference when
+    // nothing syncs it.
+    clock_synced: boolean | null;
+    // Seconds ahead of the reference, when it was compared with one.
+    clock_offset: number | null;
+    // When it was read, RFC 3339: the dashboard shows the last read.
+    read_at: string;
+}
+
+export interface MaintenanceRestart {
+    required: boolean;
+    // When a package asked for a restart, RFC 3339, and which did.
+    since: string | null;
+    packages: string[];
+    running_kernel: string;
+    // A newer kernel than the running one, installed in /boot, or empty.
+    new_kernel: string;
+}
+
+// What apt would install, by package name.
+export interface MaintenanceUpdates {
+    security: string[];
+    other: string[];
+    // The ones, of either, whose upgrade restarts dockerd.
+    docker: string[];
+    // When apt last fetched its lists, RFC 3339; stale after 2 days.
+    lists_updated: string | null;
+    lists_stale: boolean;
+}
+
+export interface MaintenanceSupport {
+    // "Ubuntu 24.04.3 LTS".
+    release: string;
+    // RFC 3339, midnight UTC.
+    ends: string;
+    // Within 90 days of ends, or past it.
+    ending: boolean;
+}
+
+// services.Activity: a deployment, backup, restore or scheduled task run.
+export interface Activity {
+    kind: 'deployment' | 'backup' | 'restore' | 'task';
+    id: number;
+    app_id: number;
+    status: string;
+    trigger: string;
+    // A task's name, and a deployment's ref.
+    name: string;
+    ref: string;
+    created_at: string;
+}
+
 // models.Registry. The token is never sent.
 export interface Registry {
     id: number;
@@ -203,6 +281,19 @@ export interface FiringAlert {
     path: string;
 }
 
+// services.AlarmSummary: one time an alert went off.
+export interface AlarmSummary {
+    id: number;
+    title: string;
+    summary: string;
+    // info, warning, critical, or resolved for a condition that cleared.
+    severity: AlertSeverity | 'resolved';
+    // The page it's about, or empty.
+    path: string;
+    read: boolean;
+    created_at: string | null;
+}
+
 // services.NotificationSummary.
 export interface NotificationSummary {
     id: number;
@@ -328,8 +419,10 @@ export interface BackupFailure {
 // services.BackupsSection: a template app's Backups section, and its
 // Overview's line and alerts.
 export interface BackupsSection {
-    // The one database a backup covers.
+    // The one database a backup covers, or empty when it covers the whole
+    // server, as Redis's does.
     database: string;
+    whole_server: boolean;
     // The one the app last backed up to comes first.
     locations: StorageChoice[];
     schedules: BackupSchedule[];
@@ -409,8 +502,12 @@ export interface RestorePreview {
     // The template's, for a restore into a new app.
     default_tag: string;
     // PostgreSQL's restore applies all of a backup or none of it; MySQL's
-    // doesn't.
+    // and Redis's don't.
     atomic: boolean;
+    // Redis's replaces every database in the server, and has no database name.
+    whole_server: boolean;
+    // What the backup is made of: 'tables', 'collections'.
+    parts: string;
     // Why it can't go ahead, and what to know before it does.
     refusal: string;
     warning: string;
@@ -430,6 +527,7 @@ export interface NewAppPreview {
     size_bytes: number;
     started_at: string;
     atomic: boolean;
+    whole_server: boolean;
     default_tag: string;
 }
 
@@ -467,6 +565,9 @@ export interface TemplateOption {
     description: string;
     repository: string;
     default_tag: string;
+    // The images the form offers, the template's own first. More than one
+    // shows a choice.
+    images: TemplateImage[];
     port: number;
     // False: no domain; other apps reach it at echowa-<name>:<port>.
     http: boolean;
@@ -480,8 +581,19 @@ export interface TemplateOption {
     // 'switch' when it lists its slow queries once they're switched on,
     // 'always' when it lists them anyway, empty when it can't (ADR 0027).
     slow_queries: '' | 'switch' | 'always';
+    // The totals can be cleared without a restart.
+    slow_queries_reset: boolean;
     // The app has a Backups section (ADR 0034).
     backups: boolean;
+}
+
+// controllers.TemplateImageOption: an image a template can run.
+export interface TemplateImage {
+    name: string;
+    repository: string;
+    default_tag: string;
+    // False when it isn't published for this server's architecture.
+    available: boolean;
 }
 
 // services.LinkedDatabase: a template app a custom app is linked to (ADR
@@ -709,6 +821,44 @@ export interface PruneSettings {
     min_age: string;
     running: PruneRun | null;
     last: PruneRun | null;
+}
+
+// controllers.SettingsController.Index: what Settings' overview says about
+// each section.
+export interface SettingsOverview {
+    update: UpdateSettings;
+    // apps counts the apps that pull through one.
+    registries: { count: number; apps: number };
+    // databases counts the apps whose template Echowa backs up.
+    storage: { locations: number; backups: number; databases: number };
+    // failing names the enabled providers whose newest send failed.
+    notifications: { providers: number; enabled: number; failing: string[] };
+    alerts: { rules: number; enabled: number; firing: number; suggestions: number };
+    prune: PruneSettings;
+    // sessionTimeout is in words ("2 hours").
+    security: { twoFactor: TwoFactorStatus; sessionTimeout: string };
+}
+
+// controllers.twoFactorProps (ADR 0042). The secret is never a prop.
+export interface TwoFactorStatus {
+    enabled: boolean;
+    confirmed_at: string | null;
+}
+
+// controllers.sessionTimeoutProps (ADR 0043): how long a session lasts
+// with no activity, and the choices, shortest (the default) first.
+export interface SessionTimeout {
+    minutes: number;
+    label: string;
+    choices: { minutes: number; label: string }[];
+}
+
+// services.TwoFactorSetup, from POST /settings/security/two-factor/setup.
+// qr.path draws the dark modules on a qr.size square grid.
+export interface TwoFactorSetup {
+    secret: string;
+    uri: string;
+    qr: { size: number; path: string };
 }
 
 // update.Status: the last update the root updater ran (ADR 0021).

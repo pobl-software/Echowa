@@ -1,0 +1,63 @@
+NOTE: This is only a simulation!
+      apt-get needs root privileges for real execution.
+      Keep also in mind that locking is deactivated,
+      so don't depend on the relevance to the real current situation!
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following NEW packages will be installed:
+  busybox-initramfs cpio dracut-install gettext-base grub-common
+  grub-gfxpayload-lists grub-pc grub-pc-bin grub2-common initramfs-tools
+  initramfs-tools-bin initramfs-tools-core klibc-utils libefiboot1t64
+  libefivar1t64 libfreetype6 libklibc libpng16-16t64
+  linux-image-6.8.0-147-generic linux-modules-6.8.0-147-generic os-prober zstd
+The following packages will be upgraded:
+  linux-image-virtual
+1 upgraded, 22 newly installed, 0 to remove and 0 not upgraded.
+Inst cpio (2.15+dfsg-1ubuntu2.1 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst gettext-base (0.21-14ubuntu2 Ubuntu:24.04/noble [amd64])
+Inst libpng16-16t64 (1.6.43-5ubuntu0.7 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst busybox-initramfs (1:1.36.1-6ubuntu3.1 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst dracut-install (060+5-1ubuntu3.4 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst libefivar1t64 (38-3.1build1 Ubuntu:24.04/noble [amd64])
+Inst libefiboot1t64 (38-3.1build1 Ubuntu:24.04/noble [amd64])
+Inst libfreetype6 (2.13.2+dfsg-1ubuntu0.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst grub-common (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Inst grub2-common (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Inst grub-pc-bin (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Inst grub-pc (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64]) []
+Inst grub-gfxpayload-lists (0.7build2 Ubuntu:24.04/noble [amd64])
+Inst initramfs-tools-bin (0.142ubuntu25.8 Ubuntu:24.04/noble-updates [amd64])
+Inst libklibc (2.0.13-4ubuntu0.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst klibc-utils (2.0.13-4ubuntu0.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst initramfs-tools-core (0.142ubuntu25.8 Ubuntu:24.04/noble-updates [all])
+Inst initramfs-tools (0.142ubuntu25.8 Ubuntu:24.04/noble-updates [all])
+Inst linux-modules-6.8.0-147-generic (6.8.0-147.147 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst linux-image-6.8.0-147-generic (6.8.0-147.147 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst linux-image-virtual [6.8.0-31.31] (6.8.0-147.147 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Inst os-prober (1.81ubuntu4 Ubuntu:24.04/noble [amd64])
+Inst zstd (1.5.5+dfsg2-2build1.1 Ubuntu:24.04/noble-updates [amd64])
+Conf cpio (2.15+dfsg-1ubuntu2.1 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf gettext-base (0.21-14ubuntu2 Ubuntu:24.04/noble [amd64])
+Conf libpng16-16t64 (1.6.43-5ubuntu0.7 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf busybox-initramfs (1:1.36.1-6ubuntu3.1 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf dracut-install (060+5-1ubuntu3.4 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf libefivar1t64 (38-3.1build1 Ubuntu:24.04/noble [amd64])
+Conf libefiboot1t64 (38-3.1build1 Ubuntu:24.04/noble [amd64])
+Conf libfreetype6 (2.13.2+dfsg-1ubuntu0.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf grub-common (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Conf grub2-common (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Conf grub-pc-bin (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Conf grub-pc (2.12-1ubuntu7.3 Ubuntu:24.04/noble-updates [amd64])
+Conf grub-gfxpayload-lists (0.7build2 Ubuntu:24.04/noble [amd64])
+Conf initramfs-tools-bin (0.142ubuntu25.8 Ubuntu:24.04/noble-updates [amd64])
+Conf libklibc (2.0.13-4ubuntu0.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf klibc-utils (2.0.13-4ubuntu0.2 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf initramfs-tools-core (0.142ubuntu25.8 Ubuntu:24.04/noble-updates [all])
+Conf initramfs-tools (0.142ubuntu25.8 Ubuntu:24.04/noble-updates [all])
+Conf linux-modules-6.8.0-147-generic (6.8.0-147.147 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf linux-image-6.8.0-147-generic (6.8.0-147.147 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf linux-image-virtual (6.8.0-147.147 Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security [amd64])
+Conf os-prober (1.81ubuntu4 Ubuntu:24.04/noble [amd64])
+Conf zstd (1.5.5+dfsg2-2build1.1 Ubuntu:24.04/noble-updates [amd64])

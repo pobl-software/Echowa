@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -50,16 +51,19 @@ func registryOptions(ctx http.Context) ([]RegistryOption, error) {
 // TemplateOption is a template on the New app page. Env vars are keys and
 // where their values come from, never values (ADR 0025).
 type TemplateOption struct {
-	Slug        string              `json:"slug"`
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Repository  string              `json:"repository"`
-	DefaultTag  string              `json:"default_tag"`
-	Port        int                 `json:"port"`
-	HTTP        bool                `json:"http"`
-	Healthcheck string              `json:"healthcheck_cmd"`
-	Env         []TemplateEnvOption `json:"env"`
-	Volumes     []string            `json:"volumes"`
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Repository  string `json:"repository"`
+	DefaultTag  string `json:"default_tag"`
+	// Images the form offers, Repository's first. More than one shows a
+	// choice.
+	Images      []TemplateImageOption `json:"images"`
+	Port        int                   `json:"port"`
+	HTTP        bool                  `json:"http"`
+	Healthcheck string                `json:"healthcheck_cmd"`
+	Env         []TemplateEnvOption   `json:"env"`
+	Volumes     []string              `json:"volumes"`
 	// How to connect with TLS while external access is on; empty when the
 	// template doesn't serve TLS.
 	TLSClient string `json:"tls_client"`
@@ -67,8 +71,18 @@ type TemplateOption struct {
 	// they're switched on, "always" when it lists them anyway, and empty
 	// when it can't (ADR 0027).
 	SlowQueries string `json:"slow_queries"`
+	// SlowQueriesReset says the totals can be cleared without a restart.
+	SlowQueriesReset bool `json:"slow_queries_reset"`
 	// Backups says the app has a Backups section (ADR 0034).
 	Backups bool `json:"backups"`
+}
+
+type TemplateImageOption struct {
+	Name       string `json:"name"`
+	Repository string `json:"repository"`
+	DefaultTag string `json:"default_tag"`
+	// False when it isn't published for this server's architecture.
+	Available bool `json:"available"`
 }
 
 type TemplateEnvOption struct {
@@ -90,6 +104,13 @@ func templateOption(t templates.Template) TemplateOption {
 		Slug: t.Slug, Name: t.Name, Description: t.Description, Repository: t.Repository,
 		DefaultTag: t.DefaultTag, Port: t.Port, HTTP: t.HTTP, Healthcheck: t.Healthcheck,
 		Env: []TemplateEnvOption{}, Volumes: []string{}, Backups: t.Backup != nil,
+		Images: []TemplateImageOption{{Name: t.Name, Repository: t.Repository, DefaultTag: t.DefaultTag, Available: true}},
+	}
+	for _, image := range t.Images {
+		option.Images = append(option.Images, TemplateImageOption{
+			Name: image.Name, Repository: image.Repository, DefaultTag: image.DefaultTag,
+			Available: image.RunsOn(runtime.GOARCH),
+		})
 	}
 	for _, e := range t.Env {
 		option.Env = append(option.Env, TemplateEnvOption{Key: e.Key, Source: e.Value.Source()})
@@ -105,6 +126,7 @@ func templateOption(t templates.Template) TemplateOption {
 		if t.Inspect.SlowQueryFlags != "" {
 			option.SlowQueries = "switch"
 		}
+		option.SlowQueriesReset = t.Inspect.ResetSlowQueries != nil
 	}
 
 	return option

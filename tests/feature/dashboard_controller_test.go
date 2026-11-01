@@ -5,12 +5,18 @@ import (
 	"errors"
 	"fmt"
 	nethttp "net/http"
+	"os"
 	"testing"
+	"time"
 
+	"github.com/goravel/framework/facades"
+	"github.com/goravel/framework/support/carbon"
 	"github.com/stretchr/testify/suite"
 
 	"goravel/app/docker"
+	"goravel/app/metrics"
 	"goravel/app/models"
+	"goravel/app/release"
 	"goravel/app/services"
 	"goravel/app/templates"
 	"goravel/tests"
@@ -94,7 +100,7 @@ func (s *DashboardControllerTestSuite) TestDockerBanner() {
 	s.Nil(page.Props["dockerProblem"], "no banner when Docker is a Swarm manager")
 
 	s.docker.CheckErr = fmt.Errorf("%w (node state %q)", docker.ErrNotSwarm, "inactive")
-	_, page = b.visit("/registries")
+	_, page = b.visit("/settings/registries")
 	s.Contains(page.Props["dockerProblem"], "docker swarm init")
 
 	s.docker.CheckErr = fmt.Errorf("%w: dial unix /var/run/docker.sock: connect: no such file", docker.ErrDaemonUnreachable)
@@ -131,4 +137,120 @@ func (s *DashboardControllerTestSuite) TestEachAppListsTheDatabasesLinkedToIt() 
 	s.Equal("postgres", apps["db"]["template"])
 	s.Equal([]any{}, apps["db"]["links"])
 	s.Len(apps, 3, "the database is still listed, for the stats and its row")
+}
+
+func (s *DashboardControllerTestSuite) TestServerFactsSayWhatsRunningAndWhatsNewer() {
+	version, fetch := release.Version, services.FetchLatestRelease
+	s.T().Cleanup(func() {
+		release.Version, services.FetchLatestRelease = version, fetch
+		services.ResetUpdateCheck()
+	})
+	release.Version = "v1.2.0"
+	services.ResetUpdateCheck()
+	// The first page starts a look at the channel in the background, which
+	// answers when the test says so.
+	answer := make(chan struct{})
+	services.FetchLatestRelease = func(ctx context.Context) (services.LatestRelease, error) {
+		select {
+		case <-answer:
+			return services.LatestRelease{Version: "v1.3.0"}, nil
+		case <-ctx.Done():
+			return services.LatestRelease{}, ctx.Err()
+		}
+	}
+	b := signedIn(s.T(), &s.TestCase)
+
+	_, page := b.visit("/dashboard")
+	server := page.Props["server"].(map[string]any)
+	hostname, _ := os.Hostname()
+	s.Equal(hostname, server["hostname"])
+	s.Equal("v1.2.0", server["version"])
+	s.Equal("", server["update"])
+	s.Equal(false, server["update_checked"], "no answer from the channel yet")
+
+	close(answer)
+	s.Eventually(func() bool { return services.UpdateCheckState().CheckedAt != nil }, 5*time.Second, 10*time.Millisecond)
+	services.WaitForNotifications()
+	_, page = b.visit("/dashboard")
+	server = page.Props["server"].(map[string]any)
+	s.Equal("v1.3.0", server["update"])
+	s.Equal(true, server["update_checked"])
+
+	services.FetchLatestRelease = func(context.Context) (services.LatestRelease, error) {
+		return services.LatestRelease{}, errors.New("channel down")
+	}
+	services.CheckForUpdate(context.Background())
+	_, page = b.visit("/dashboard")
+	server = page.Props["server"].(map[string]any)
+	s.Equal("v1.3.0", server["update"], "a release already seen stays")
+	s.Equal(false, server["update_checked"], "a failed look isn't up to date")
+}
+
+func (s *DashboardControllerTestSuite) TestRecentActivityLeavesOutWhatGoesFineAllTheTime() {
+	app := createTestApp(s.T(), "blog", nil)
+	loc := models.StorageLocation{Name: "R2", Endpoint: "https://r2.example.com", Region: "auto", Bucket: "b", AccessKeyID: "k", SecretKey: models.Secret("s")}
+	s.Require().NoError(facades.Orm().Query().Create(&loc))
+	task := models.ScheduledTask{AppID: app.ID, Name: "Scheduler", Schedule: "* * * * *", Timezone: "UTC", Command: "true", TimeoutMinutes: 1, Enabled: true}
+	s.Require().NoError(facades.Orm().Query().Create(&task))
+
+	at := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	started := carbon.NewDateTime(carbon.Now())
+	created := func(table string, id uint, minutes int) {
+		_, err := facades.Orm().Query().Exec("UPDATE "+table+" SET created_at = ? WHERE id = ?", at.Add(time.Duration(minutes)*time.Minute).Format(time.DateTime), id)
+		s.Require().NoError(err)
+	}
+	deploy, err := services.CreateDeployment(context.Background(), app, models.TriggerManual, "v1")
+	s.Require().NoError(err)
+	created("deployments", deploy.ID, 1)
+	for i, status := range []models.BackupStatus{models.BackupSucceeded, models.BackupSkipped} {
+		backup := models.Backup{AppID: app.ID, StorageLocationID: loc.ID, Trigger: models.BackupOnSchedule, Status: status, StartedAt: started}
+		s.Require().NoError(facades.Orm().Query().Create(&backup))
+		created("backups", backup.ID, 2+i)
+	}
+	for i, run := range []models.ScheduledTaskRun{
+		{ScheduledTaskID: task.ID, Trigger: models.RunOnSchedule, Status: models.RunSucceeded, StartedAt: started},
+		{ScheduledTaskID: task.ID, Trigger: models.RunOnSchedule, Status: models.RunFailed, StartedAt: started},
+		{ScheduledTaskID: task.ID, Trigger: models.RunByHand, Status: models.RunSucceeded, StartedAt: started},
+	} {
+		s.Require().NoError(facades.Orm().Query().Create(&run))
+		created("scheduled_task_runs", run.ID, 4+i)
+	}
+
+	_, page := signedIn(s.T(), &s.TestCase).visit("/dashboard")
+
+	var got []string
+	for _, row := range page.Props["activity"].([]any) {
+		a := row.(map[string]any)
+		s.EqualValues(app.ID, a["app_id"])
+		got = append(got, fmt.Sprintf("%s %s %s", a["kind"], a["status"], a["trigger"]))
+	}
+	s.Equal([]string{
+		"task succeeded manual",
+		"task failed schedule",
+		"backup succeeded schedule",
+		"deployment queued manual",
+	}, got, "newest first, without scheduled runs that succeeded or backups that were skipped")
+}
+
+func (s *DashboardControllerTestSuite) TestEachAppsCPUOverTheLastHour() {
+	blog := createTestApp(s.T(), "blog", nil)
+	shop := createTestApp(s.T(), "shop", nil)
+	db, err := services.MetricsDB()
+	s.Require().NoError(err)
+	for _, table := range metrics.Tables {
+		_, err := db.Exec("DELETE FROM " + table.Name)
+		s.Require().NoError(err)
+	}
+	minute := time.Now().Truncate(time.Minute).Add(-time.Minute).Unix()
+	_, err = db.Exec(`INSERT INTO app_samples (app_id, ts, readings, tasks_avg, tasks_max, cpu_percent_avg, cpu_percent_max)
+		VALUES (?, ?, 4, 1, 1, 3, 9)`, blog.ID, minute)
+	s.Require().NoError(err)
+
+	_, page := signedIn(s.T(), &s.TestCase).visit("/dashboard")
+
+	cpu := page.Props["cpu"].(map[string]any)
+	s.Equal("1h", cpu["range"])
+	apps := cpu["apps"].(map[string]any)
+	s.Equal([]any{map[string]any{"t": float64(minute), "avg": 3.0, "max": 9.0}}, apps[fmt.Sprint(blog.ID)])
+	s.NotContains(apps, fmt.Sprint(shop.ID), "nothing stored for it")
 }

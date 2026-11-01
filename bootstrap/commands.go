@@ -9,8 +9,10 @@ import (
 func Commands() []console.Command {
 	return []console.Command{
 		&commands.UserCreate{},
+		&commands.UserDisableTwoFactor{},
 		&commands.SetupLink{},
 		&commands.Backup{},
 		&commands.MetricsSample{},
+		&commands.HostMaintenance{},
 	}
 }

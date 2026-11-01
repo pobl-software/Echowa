@@ -60,9 +60,9 @@ func FindUserByEmail(email string) (*models.User, error) {
 }
 
 // SaveUser creates the user with this email, or resets the name and password
-// of the existing one. A reset also signs every browser out: it clears the
-// "remember me" token and deletes the session files. After a compromise,
-// a reset has to lock the intruder out at once.
+// of the existing one. A reset also signs every browser out: it deletes the
+// session files. After a compromise, a reset has to lock the intruder out
+// at once.
 func SaveUser(name, email, password string) (user *models.User, created bool, err error) {
 	email = NormalizeEmail(email)
 	if err := ValidateEmail(email); err != nil {
@@ -86,7 +86,7 @@ func SaveUser(name, email, password string) (user *models.User, created bool, er
 	}
 
 	_, err = facades.Orm().Query().Model(user).Update(map[string]any{
-		"name": name, "password": hashed, "remember_token": nil,
+		"name": name, "password": hashed,
 	})
 	if err != nil {
 		return user, false, err

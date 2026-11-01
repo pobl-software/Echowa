@@ -66,14 +66,43 @@ export function AppForm({ registries, template }: AppFormProps) {
                     </FieldDescription>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
-                    <TextField
-                        id="repository"
-                        label="Image repository"
-                        placeholder="ghcr.io/owner/app"
-                        value={form.data.repository}
-                        onChange={(e) => form.setData('repository', e.target.value)}
-                        error={form.errors.repository}
-                    />
+                    {template && template.images.length > 1 ? (
+                        <Field data-invalid={!!form.errors.repository || undefined}>
+                            <FieldLabel htmlFor="repository">Image</FieldLabel>
+                            <NativeSelect
+                                id="repository"
+                                value={form.data.repository}
+                                onChange={(e) => {
+                                    const image = template.images.find((i) => i.repository === e.target.value);
+                                    if (image) {
+                                        form.setData({
+                                            ...form.data,
+                                            repository: image.repository,
+                                            default_tag: image.default_tag,
+                                        });
+                                    }
+                                }}
+                                aria-invalid={!!form.errors.repository || undefined}
+                            >
+                                {template.images.map((image) => (
+                                    <option key={image.repository} value={image.repository} disabled={!image.available}>
+                                        {image.name} ({image.repository})
+                                        {!image.available && ', not published for this server'}
+                                    </option>
+                                ))}
+                            </NativeSelect>
+                            {form.errors.repository && <FieldError>{form.errors.repository}</FieldError>}
+                        </Field>
+                    ) : (
+                        <TextField
+                            id="repository"
+                            label="Image repository"
+                            placeholder="ghcr.io/owner/app"
+                            value={form.data.repository}
+                            onChange={(e) => form.setData('repository', e.target.value)}
+                            error={form.errors.repository}
+                        />
+                    )}
                     <TextField
                         id="default_tag"
                         label="Default tag"
@@ -100,7 +129,7 @@ export function AppForm({ registries, template }: AppFormProps) {
                     {form.errors.registry_id && <FieldError>{form.errors.registry_id}</FieldError>}
                     {registries.length === 0 && (
                         <FieldDescription>
-                            Private image? <Link href="/registries/create">Add a registry</Link> first.
+                            Private image? <Link href="/settings/registries/create">Add a registry</Link> first.
                         </FieldDescription>
                     )}
                 </Field>

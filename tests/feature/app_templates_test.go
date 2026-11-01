@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	nethttp "net/http"
+	"runtime"
 	"testing"
 	"time"
 
@@ -67,11 +68,16 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 	_, page := b.visit("/apps/create")
 
 	list := page.Props["templates"].([]any)
-	s.Require().Len(list, 3)
+	s.Require().Len(list, 5)
 	postgres := list[0].(map[string]any)
 	s.Equal("postgres", postgres["slug"])
 	s.Equal("PostgreSQL", postgres["name"])
 	s.Equal("18", postgres["default_tag"])
+	s.Equal([]any{
+		map[string]any{"name": "PostgreSQL", "repository": "postgres", "default_tag": "18", "available": true},
+		map[string]any{"name": "pgvector", "repository": "pgvector/pgvector", "default_tag": "pg18", "available": true},
+		map[string]any{"name": "PostGIS", "repository": "postgis/postgis", "default_tag": "18-3.6", "available": runtime.GOARCH == "amd64"},
+	}, postgres["images"], "the template's own image first, and PostGIS only where it's published")
 	s.Equal(float64(5432), postgres["port"])
 	s.Equal(false, postgres["http"])
 	s.Equal([]any{"/var/lib/postgresql"}, postgres["volumes"])
@@ -88,7 +94,33 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 		map[string]any{"key": "MYSQL_PASSWORD", "source": "generated"},
 		map[string]any{"key": "MYSQL_ROOT_PASSWORD", "source": "generated"},
 	}, mysql["env"], "a fixed value is a source too, never the value")
-	s.Equal("redis", list[2].(map[string]any)["slug"])
+	mariadb := list[2].(map[string]any)
+	s.Equal("mariadb", mariadb["slug"])
+	s.Equal("12.3", mariadb["default_tag"])
+	s.Equal([]any{
+		map[string]any{"key": "MARIADB_USER", "source": "fixed"},
+		map[string]any{"key": "MARIADB_DATABASE", "source": "app_name"},
+		map[string]any{"key": "MARIADB_PASSWORD", "source": "generated"},
+		map[string]any{"key": "MARIADB_ROOT_PASSWORD", "source": "generated"},
+	}, mariadb["env"])
+	mongodb := list[3].(map[string]any)
+	s.Equal("mongodb", mongodb["slug"])
+	s.Equal("9.0", mongodb["default_tag"])
+	s.Equal(float64(27017), mongodb["port"])
+	s.Equal([]any{"/data/db"}, mongodb["volumes"])
+	s.Equal([]any{
+		map[string]any{"key": "MONGO_INITDB_ROOT_USERNAME", "source": "fixed"},
+		map[string]any{"key": "MONGO_INITDB_ROOT_PASSWORD", "source": "generated"},
+		map[string]any{"key": "MONGO_INITDB_DATABASE", "source": "app_name"},
+		map[string]any{"key": "MONGO_USER", "source": "fixed"},
+		map[string]any{"key": "MONGO_PASSWORD", "source": "generated"},
+	}, mongodb["env"])
+	s.Equal("always", mongodb["slow_queries"])
+	s.Equal(false, mongodb["slow_queries_reset"], "only a restart clears its totals")
+	s.Equal(true, postgres["slow_queries_reset"])
+	redis := list[4].(map[string]any)
+	s.Equal("redis", redis["slug"])
+	s.Len(redis["images"], 1, "a template with no other images offers its own")
 }
 
 func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() {
@@ -98,6 +130,8 @@ func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() 
 	}{
 		{"postgres", "POSTGRES_PASSWORD", "/var/lib/postgresql", false},
 		{"mysql", "MYSQL_PASSWORD", "/var/lib/mysql", false},
+		{"mariadb", "MARIADB_PASSWORD", "/var/lib/mysql", false},
+		{"mongodb", "MONGO_PASSWORD", "/data/db", true},
 		{"redis", "REDIS_PASSWORD", "/data", true},
 	} {
 		s.Run(tt.slug, func() {
@@ -159,6 +193,27 @@ func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() 
 	}
 }
 
+// An image picked from the template's list deploys with the template's
+// env, volumes and checks, as its own image does.
+func (s *AppTemplatesTestSuite) TestStoreFromATemplateDeploysTheImagePicked() {
+	b := signedIn(s.T(), &s.TestCase)
+	b.visit("/apps/create?template=postgres")
+	form := templateForm("postgres", "vectors")
+	form["repository"], form["default_tag"] = "pgvector/pgvector", "pg18"
+
+	b.submit(nethttp.MethodPost, "/apps", "/apps/create?template=postgres", form)
+
+	app := s.loadApp("vectors")
+	s.Equal("postgres", *app.Template)
+	s.Require().NoError(deploy.RunQueued(context.Background(), app.ID))
+	s.Contains(s.docker.Pulls(), "pgvector/pgvector:pg18")
+	deploys := s.docker.Deploys()
+	spec := deploys[len(deploys)-1]
+	s.Equal(docker.FakeDigest("pgvector/pgvector:pg18"), spec.Image)
+	s.Contains(spec.Env, "POSTGRES_PASSWORD")
+	s.Equal([]docker.Volume{{Name: "echowa-vectors-data", Target: "/var/lib/postgresql"}}, spec.Volumes)
+}
+
 func (s *AppTemplatesTestSuite) TestEachAppGetsItsOwnPassword() {
 	b := signedIn(s.T(), &s.TestCase)
 	b.visit("/apps/create?template=postgres")
@@ -178,11 +233,11 @@ func (s *AppTemplatesTestSuite) TestStoreRefusesAnUnknownTemplate() {
 	b.visit("/apps/create")
 
 	form := templateForm("postgres", "db")
-	form["template"] = "mongodb"
+	form["template"] = "cassandra"
 	b.submit(nethttp.MethodPost, "/apps", "/apps/create", form).AssertHeader("Location", "/apps/create")
 
 	_, page := b.visit("/apps/create")
-	s.Equal("There's no template called mongodb.", page.Props["errors"].(map[string]any)["template"])
+	s.Equal("There's no template called cassandra.", page.Props["errors"].(map[string]any)["template"])
 	s.assertNoApps()
 }
 

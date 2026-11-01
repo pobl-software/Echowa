@@ -32,6 +32,16 @@ func TestTemplatesPassTheAppRules(t *testing.T) {
 			assert.True(t, rules.IsRepository(tmpl.Repository), "repository %q", tmpl.Repository)
 			assert.True(t, rules.IsTag(tmpl.DefaultTag), "tag %q", tmpl.DefaultTag)
 			assert.NotEqual(t, "latest", tmpl.DefaultTag, "pin a major version")
+			for _, image := range tmpl.Images {
+				assert.NotEmpty(t, image.Name)
+				assert.True(t, rules.IsRepository(image.Repository), "repository %q", image.Repository)
+				assert.NotEqual(t, tmpl.Repository, image.Repository, "the template's own image comes first anyway")
+				assert.True(t, rules.IsTag(image.DefaultTag), "tag %q", image.DefaultTag)
+				assert.NotEqual(t, "latest", image.DefaultTag, "pin a major version")
+				for _, arch := range image.Arches {
+					assert.Contains(t, []string{"amd64", "arm64"}, arch, "a release's architectures")
+				}
+			}
 			assert.True(t, rules.IsPort(tmpl.Port), "port")
 			assert.NotEmpty(t, tmpl.Healthcheck, "a template's deploy is gated on its healthcheck")
 			assert.LessOrEqual(t, len(tmpl.Healthcheck), 1000, "the form's healthcheck limit")
@@ -76,7 +86,7 @@ func TestFind(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "PostgreSQL", postgres.Name)
 
-	_, ok = Find("mongodb")
+	_, ok = Find("cassandra")
 	assert.False(t, ok)
 }
 
@@ -123,6 +133,10 @@ func TestConnectURLs(t *testing.T) {
 
 	mysql, _ := Find("mysql")
 	assert.Equal(t, "mysql://MYSQL_USER:MYSQL_PASSWORD@echowa-db:3306/MYSQL_DATABASE", mysql.ConnectPreview("echowa-db", 3306))
+
+	mariadb, _ := Find("mariadb")
+	assert.Equal(t, "mysql://MARIADB_USER:MARIADB_PASSWORD@echowa-db:3306/MARIADB_DATABASE", mariadb.ConnectPreview("echowa-db", 3306),
+		"the scheme MariaDB's drivers take")
 
 	redis, _ := Find("redis")
 	assert.Equal(t, "redis://:REDIS_PASSWORD@echowa-cache:6379", redis.ConnectPreview("echowa-cache", 6379))

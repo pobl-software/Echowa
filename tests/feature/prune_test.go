@@ -108,20 +108,20 @@ func (s *PruneTestSuite) TestPruneNowRunsInTheBackgroundOneAtATime() {
 		return docker.PruneReport{Removed: []string{"ghcr.io/owner/blog:old"}}, nil
 	}
 	b := signedIn(s.T(), &s.TestCase)
-	_, page := b.visit("/settings")
-	page.AssertComponent("Settings/Index")
+	_, page := b.visit("/settings/pruning")
+	page.AssertComponent("Settings/Pruning")
 	prune := page.Props["prune"].(map[string]any)
 	s.EqualValues(5, prune["keep"])
 	s.Equal("3 days", prune["min_age"])
 	s.Nil(prune["running"])
 
-	b.submit(nethttp.MethodPost, "/settings/prune", "/settings", nil).AssertHeader("Location", "/settings")
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodPost, "/settings/prune", "/settings/pruning", nil).AssertHeader("Location", "/settings/pruning")
+	_, page = b.visit("/settings/pruning")
 	s.Equal("Pruning images.", page.Flash["success"])
 	s.NotNil(page.Props["prune"].(map[string]any)["running"], "the page polls while this is set")
 
-	b.submit(nethttp.MethodPost, "/settings/prune", "/settings", nil)
-	_, page = b.visit("/settings")
+	b.submit(nethttp.MethodPost, "/settings/prune", "/settings/pruning", nil)
+	_, page = b.visit("/settings/pruning")
 	s.Equal("A prune is already running.", page.Flash["info"])
 
 	close(release)
@@ -129,7 +129,7 @@ func (s *PruneTestSuite) TestPruneNowRunsInTheBackgroundOneAtATime() {
 		current, _ := services.PruneState()
 		return current == nil
 	}, 2*time.Second, 10*time.Millisecond)
-	_, page = b.visit("/settings")
+	_, page = b.visit("/settings/pruning")
 	last := page.Props["prune"].(map[string]any)["last"].(map[string]any)
 	s.Equal("manual", last["trigger"])
 	s.Equal([]any{"ghcr.io/owner/blog:old"}, last["removed"])
@@ -138,6 +138,6 @@ func (s *PruneTestSuite) TestPruneNowRunsInTheBackgroundOneAtATime() {
 
 func (s *PruneTestSuite) TestGuestsCantPrune() {
 	b := newBrowser(s.T(), &s.TestCase)
-	b.request(nethttp.MethodGet, "/settings", nil, true, nil).AssertHeader("Location", "/login")
+	b.request(nethttp.MethodGet, "/settings/pruning", nil, true, nil).AssertHeader("Location", "/login")
 	s.Empty(s.docker.Prunes())
 }

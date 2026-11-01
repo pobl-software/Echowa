@@ -1,7 +1,9 @@
 import { usePoll } from '@inertiajs/react';
 import { ActivityIcon } from 'lucide-react';
 
+import { DeploysSwitch, useDeployMarkers } from '@/Components/DeployMarkers';
 import { MetricChart } from '@/Components/LazyMetricChart';
+import type { ChartMarker } from '@/Components/MetricChart';
 import { ChartCell, ChartGrid, Stats } from '@/Components/Panel';
 import { RangePicker, useSeriesRange } from '@/Components/RangePicker';
 import { formatBytes, formatPercent, formatRate } from '@/lib/format';
@@ -14,10 +16,21 @@ const formatTasks = (value: number) => (Number.isInteger(value) ? String(value) 
 // An app's Metrics section: its newest reading, live, and charts of its
 // tasks summed, for the range in ?range=. A template database has
 // DatabaseMetrics instead, which includes these charts.
-export function AppMetrics({ ranges, series, live }: { ranges: string[]; series: AppSeries; live: AppLive | null }) {
+export function AppMetrics({
+    appId,
+    ranges,
+    series,
+    live,
+}: {
+    appId: number;
+    ranges: string[];
+    series: AppSeries;
+    live: AppLive | null;
+}) {
     // Echowa reads every 15 seconds and stores a minute at a time.
     usePoll(15_000, { only: ['metrics', 'series'] });
     const { range, loading, pick } = useSeriesRange(series);
+    const deploys = useDeployMarkers(appId, series.deploys);
 
     return (
         <>
@@ -48,13 +61,15 @@ export function AppMetrics({ ranges, series, live }: { ranges: string[]; series:
                 <NoLiveFigures />
             )}
             <section className="space-y-4" aria-label="Charts">
-                <RangePicker ranges={ranges} range={range} step={series.step_seconds} onPick={pick} />
+                <RangePicker ranges={ranges} range={range} step={series.step_seconds} onPick={pick}>
+                    <DeploysSwitch {...deploys} />
+                </RangePicker>
                 <ChartGrid
                     title="Resources"
                     description="Its tasks summed, as Docker measures them."
                     className={cn('transition-opacity', loading && 'opacity-60')}
                 >
-                    <ResourceCharts series={series} live={live} />
+                    <ResourceCharts series={series} live={live} markers={deploys.markers} />
                 </ChartGrid>
             </section>
         </>
@@ -72,8 +87,16 @@ export function NoLiveFigures() {
 
 // ResourceCharts is an app's CPU, memory, network and disk I/O, as cells
 // for a ChartGrid.
-export function ResourceCharts({ series, live }: { series: AppSeries; live: AppLive | null }) {
-    const chart = { from: series.from, to: series.to, step: series.step_seconds, height: 'h-36' };
+export function ResourceCharts({
+    series,
+    live,
+    markers,
+}: {
+    series: AppSeries;
+    live: AppLive | null;
+    markers?: ChartMarker[];
+}) {
+    const chart = { from: series.from, to: series.to, step: series.step_seconds, height: 'h-36', markers };
 
     return (
         <>

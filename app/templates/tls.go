@@ -100,14 +100,19 @@ func serial() *big.Int {
 	return n
 }
 
-// tlsSetup writes the certificate from the env to files only owner can
-// read, ahead of the command that starts the server through the image's
-// entrypoint, so it still drops root. The key never touches a volume. The
-// umask stays in the subshell: the entrypoint inheriting it made
-// PostgreSQL's data directory unreadable to postgres.
-func tlsSetup(owner string) string {
+// tlsSetup writes the certificate from the env to files only the server's
+// owner can read, ahead of the command that starts the server through the
+// image's entrypoint, so it still drops root. The key never touches a
+// volume. The umask stays in the subshell: the entrypoint inheriting it
+// made PostgreSQL's data directory unreadable to postgres.
+func tlsSetup(t TLS) string {
+	bundle := ""
+	if t.Bundle {
+		bundle = "; cat " + tlsDir + "/server.crt " + tlsDir + "/server.key > " + tlsDir + "/server.pem"
+	}
+
 	return "set -e; (umask 077; mkdir -p " + tlsDir + "; " +
 		`printf '%s\n' "$` + EnvTLSCert + `" > ` + tlsDir + "/server.crt; " +
-		`printf '%s\n' "$` + EnvTLSKey + `" > ` + tlsDir + "/server.key); " +
-		"chown -R " + owner + " " + tlsDir + "; "
+		`printf '%s\n' "$` + EnvTLSKey + `" > ` + tlsDir + "/server.key" + bundle + "); " +
+		"chown -R " + t.Owner + " " + tlsDir + "; "
 }

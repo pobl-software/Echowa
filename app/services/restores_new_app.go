@@ -107,6 +107,8 @@ type NewAppPreview struct {
 	SizeBytes     int64     `json:"size_bytes"`
 	StartedAt     time.Time `json:"started_at"`
 	Atomic        bool      `json:"atomic"`
+	// WholeServer means the backup holds every database in the server.
+	WholeServer bool `json:"whole_server"`
 	// DefaultTag is the template's, which the new app runs unless the
 	// form says otherwise.
 	DefaultTag string `json:"default_tag"`
@@ -120,7 +122,7 @@ func PreviewNewApp(src *RestoreSource) NewAppPreview {
 	return NewAppPreview{
 		Name: path.Base(src.Key), Location: src.Location.Name, App: m.App, Template: m.Template, TemplateName: tmpl.Name,
 		Database: m.Database, ServerVersion: m.ServerVersion, SizeBytes: m.Size, StartedAt: m.StartedAt,
-		Atomic: tmpl.Backup.Atomic, DefaultTag: tmpl.DefaultTag,
+		Atomic: tmpl.Backup.Atomic, WholeServer: tmpl.Backup.WholeServer(), DefaultTag: tmpl.DefaultTag,
 	}
 }
 

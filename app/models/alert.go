@@ -75,6 +75,22 @@ const (
 	NotificationSuppressed NotificationStatus = "suppressed"
 )
 
+// Alarm is one time an alert went off: an event its rules matched, or a
+// condition firing, still firing or resolved. It's recorded whether or
+// not any provider was sent it.
+type Alarm struct {
+	orm.Model
+	AlertRuleID *uint  `json:"alert_rule_id"`
+	AppID       *uint  `json:"app_id"`
+	Trigger     string `json:"trigger"`
+	// Severity is notify.Severity's, resolved included.
+	Severity string           `json:"severity"`
+	Title    string           `json:"title"`
+	Summary  string           `json:"summary"`
+	Path     string           `json:"path"`
+	ReadAt   *carbon.DateTime `json:"read_at"`
+}
+
 // Notification is one message to one provider, sent or not.
 type Notification struct {
 	orm.Model

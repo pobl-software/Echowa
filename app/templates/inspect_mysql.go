@@ -1,12 +1,6 @@
 package templates
 
-import (
-	"bytes"
-	"fmt"
-	"strconv"
-
-	"goravel/app/metrics"
-)
+import "fmt"
 
 // mysqlQuiet keeps connections over the container's socket or from
 // 127.0.0.1, which are Echowa's and the healthcheck's, out of the slow
@@ -71,23 +65,8 @@ var mysqlInspect = &Inspect{
 	Health: []string{"sh", "-c",
 		`du -sk /var/lib/mysql | cut -f1; ` + mysqlClient + ` -e "$1$2"`,
 		"sh", mysqlQuiet, mysqlHealth},
-	ParseHealth:      parseMySQLHealth,
+	ParseHealth:      parseSizedHealthJSON,
 	SlowQueries:      mysql(mysqlSlowQueries),
 	ParseSlowQueries: parseSlowQueryJSON,
 	ResetSlowQueries: mysql("TRUNCATE TABLE performance_schema.events_statements_summary_by_digest"),
-}
-
-// parseMySQLHealth reads du's KiB on the first line, then the JSON.
-func parseMySQLHealth(out []byte) (metrics.DatabaseStatus, error) {
-	first, rest, _ := bytes.Cut(out, []byte("\n"))
-	status, err := parseHealthJSON(rest)
-	if err != nil {
-		return metrics.DatabaseStatus{}, err
-	}
-	if kib, err := strconv.ParseFloat(string(bytes.TrimSpace(first)), 64); err == nil {
-		size := kib * 1024
-		status.SizeBytes = &size
-	}
-
-	return status, nil
 }

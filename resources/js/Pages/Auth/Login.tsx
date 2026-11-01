@@ -4,12 +4,11 @@ import type { FormEvent } from 'react';
 import { TextField } from '@/Components/TextField';
 import { Button } from '@/Components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
-import { Checkbox } from '@/Components/ui/checkbox';
 import { FieldDescription, FieldGroup } from '@/Components/ui/field';
 import GuestLayout from '@/Layouts/GuestLayout';
 
 export default function Login() {
-    const form = useForm({ email: '', password: '', remember: false });
+    const form = useForm({ email: '', password: '' });
 
     const submit = (e: FormEvent) => {
         e.preventDefault();
@@ -45,17 +44,6 @@ export default function Login() {
                             onChange={(e) => form.setData('password', e.target.value)}
                             error={form.errors.password}
                         />
-                        {/* Base UI's checkbox isn't a native input, so the wrapping
-                            label makes it clickable but doesn't name it for screen
-                            readers: aria-labelledby does. */}
-                        <label className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                                aria-labelledby="remember-label"
-                                checked={form.data.remember}
-                                onCheckedChange={(checked) => form.setData('remember', checked)}
-                            />
-                            <span id="remember-label">Remember me</span>
-                        </label>
                         <Button type="submit" size="lg" disabled={form.processing}>
                             Log in
                         </Button>

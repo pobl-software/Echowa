@@ -30,5 +30,8 @@ func Migrations() []schema.Migration {
 		&migrations.M20261030140000CreateNotificationProvidersTable{},
 		&migrations.M20261030160000CreateAlertsTables{},
 		&migrations.M20261030200000AddClearSinceToAlertStates{},
+		&migrations.M20261031120000CreateAlarmsTable{},
+		&migrations.M20261031180000AddTwoFactorToUsers{},
+		&migrations.M20261031210000AddSessionTimeoutToUsers{},
 	}
 }

@@ -1,5 +1,5 @@
 import { Link, router, useForm } from '@inertiajs/react';
-import { BellIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { BellIcon, ChevronDownIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { type FormEvent, type ReactElement, type ReactNode, useState } from 'react';
 
 import { ConfirmDelete } from '@/Components/ConfirmDelete';
@@ -7,6 +7,7 @@ import { Panel } from '@/Components/Panel';
 import { StatusPill } from '@/Components/StatusBadge';
 import { Button, buttonVariants } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/Components/ui/collapsible';
 import {
     Dialog,
     DialogContent,
@@ -280,7 +281,7 @@ export function AlertRuleTable({ rules, triggers, providers, base, showCovers }:
                                     </>
                                 ) : (
                                     <Link
-                                        href="/settings#alerts"
+                                        href="/settings/alerts"
                                         className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
                                         aria-label={`Edit ${rule.label} on Settings`}
                                         title="Edit on Settings"
@@ -722,56 +723,76 @@ export function SuggestedAlerts({
         form.post(`${base}/suggested`, { preserveScroll: true });
     };
 
+    // Collapsed until asked for: they're a shortcut, not the alerts themselves.
     return (
-        <Panel title="Suggested alerts" description={description}>
-            <form onSubmit={submit} className="space-y-5">
-                <ul className="divide-y rounded-lg border">
-                    {suggestions.map((s) => {
-                        const checked = form.data.triggers.includes(s.id);
-                        return (
-                            <li key={s.id}>
-                                <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm">
-                                    <Checkbox
-                                        checked={checked}
-                                        onCheckedChange={(on) =>
-                                            form.setData(
-                                                'triggers',
-                                                on
-                                                    ? [...form.data.triggers, s.id]
-                                                    : form.data.triggers.filter((id) => id !== s.id),
-                                            )
-                                        }
-                                    />
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block font-medium">{s.description}</span>
-                                        {settings && (
-                                            <span className="block truncate text-xs text-muted-foreground">
-                                                {s.server ? 'The server' : s.only || 'Every app'}
-                                            </span>
-                                        )}
-                                    </span>
-                                    <SeverityPill severity={s.severity} />
-                                </label>
-                            </li>
-                        );
-                    })}
-                </ul>
-                <Field>
-                    <FieldLabel>Send them to</FieldLabel>
-                    <ProviderChoice
-                        providers={providers}
-                        value={form.data.providers}
-                        onChange={(value) => form.setData('providers', value)}
-                    />
-                    {form.errors.providers && <FieldError>{form.errors.providers}</FieldError>}
-                    {form.errors.triggers && <FieldError>{form.errors.triggers}</FieldError>}
-                </Field>
-                <Button type="submit" disabled={count === 0 || form.data.providers.length === 0 || form.processing}>
-                    <PlusIcon />
-                    {count === 1 ? 'Add 1 alert' : `Add ${count} alerts`}
-                </Button>
-            </form>
-        </Panel>
+        <Collapsible render={<section className="overflow-hidden rounded-xl border bg-card text-card-foreground" />}>
+            <CollapsibleTrigger className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:px-5">
+                <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                        Suggested alerts
+                        <span className="sr-only">:</span>
+                        <span className="rounded-full bg-muted px-1.5 text-xs font-normal text-muted-foreground tabular-nums">
+                            {suggestions.length}
+                        </span>
+                    </span>
+                    <span className="mt-0.5 block text-sm text-muted-foreground">{description}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1 pt-0.5 text-sm text-muted-foreground group-hover:text-foreground">
+                    <span className="hidden group-data-[panel-open]:inline">Hide</span>
+                    <span className="group-data-[panel-open]:hidden">Show</span>
+                    <ChevronDownIcon className="size-4 transition-transform group-data-[panel-open]:rotate-180" />
+                </span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="border-t p-4 sm:p-5">
+                <form onSubmit={submit} className="space-y-5">
+                    <ul className="divide-y rounded-lg border">
+                        {suggestions.map((s) => {
+                            const checked = form.data.triggers.includes(s.id);
+                            return (
+                                <li key={s.id}>
+                                    <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm">
+                                        <Checkbox
+                                            checked={checked}
+                                            onCheckedChange={(on) =>
+                                                form.setData(
+                                                    'triggers',
+                                                    on
+                                                        ? [...form.data.triggers, s.id]
+                                                        : form.data.triggers.filter((id) => id !== s.id),
+                                                )
+                                            }
+                                        />
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block font-medium">{s.description}</span>
+                                            {settings && (
+                                                <span className="block truncate text-xs text-muted-foreground">
+                                                    {s.server ? 'The server' : s.only || 'Every app'}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <SeverityPill severity={s.severity} />
+                                    </label>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                    <Field>
+                        <FieldLabel>Send them to</FieldLabel>
+                        <ProviderChoice
+                            providers={providers}
+                            value={form.data.providers}
+                            onChange={(value) => form.setData('providers', value)}
+                        />
+                        {form.errors.providers && <FieldError>{form.errors.providers}</FieldError>}
+                        {form.errors.triggers && <FieldError>{form.errors.triggers}</FieldError>}
+                    </Field>
+                    <Button type="submit" disabled={count === 0 || form.data.providers.length === 0 || form.processing}>
+                        <PlusIcon />
+                        {count === 1 ? 'Add 1 alert' : `Add ${count} alerts`}
+                    </Button>
+                </form>
+            </CollapsibleContent>
+        </Collapsible>
     );
 }
 
@@ -809,16 +830,6 @@ export function SettingsAlertRules({ alerts, providers }: { alerts: SettingsAler
     return (
         <div id="alerts" className="space-y-6">
             {alerts.firing.length > 0 && <FiringAlerts firing={alerts.firing} subjects />}
-            {ready && alerts.suggestions.length > 0 && (
-                <SuggestedAlerts
-                    key={alerts.suggestions.map((s) => s.id).join()}
-                    suggestions={alerts.suggestions}
-                    providers={providers}
-                    base={base}
-                    settings
-                    description="With these on, every app is covered, including ones you add later. An app can still have alerts of its own."
-                />
-            )}
             <Panel
                 flush={alerts.rules.length > 0}
                 title="Alerts"
@@ -841,17 +852,33 @@ export function SettingsAlertRules({ alerts, providers }: { alerts: SettingsAler
                 ) : (
                     <NoAlerts
                         action={
-                            ready && (
+                            ready ? (
                                 <AddAlertButton base={base} triggers={alerts.triggers} providers={providers} settings />
+                            ) : (
+                                <Link href="/settings/notifications" className={buttonVariants()}>
+                                    Add a provider
+                                </Link>
                             )
                         }
                     >
-                        {ready
-                            ? 'No server or every-app alerts yet.'
-                            : 'Add a notification provider above first: an alert needs somewhere to go.'}
+                        {!ready
+                            ? 'Add a notification provider first: an alert needs somewhere to go.'
+                            : alerts.suggestions.length > 0
+                              ? 'No server or every-app alerts yet. Add your own, or start from the suggested ones below.'
+                              : 'No server or every-app alerts yet.'}
                     </NoAlerts>
                 )}
             </Panel>
+            {ready && alerts.suggestions.length > 0 && (
+                <SuggestedAlerts
+                    key={alerts.suggestions.map((s) => s.id).join()}
+                    suggestions={alerts.suggestions}
+                    providers={providers}
+                    base={base}
+                    settings
+                    description="With these on, every app is covered, including ones you add later. An app can still have alerts of its own."
+                />
+            )}
         </div>
     );
 }

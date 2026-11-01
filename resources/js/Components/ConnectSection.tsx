@@ -1,7 +1,8 @@
-import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon, PlugIcon } from 'lucide-react';
+import { EyeIcon, EyeOffIcon, PlugIcon } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { ConfigSection } from '@/Components/ConfigPanel';
+import { CopyButton } from '@/Components/CopyButton';
 import { Button } from '@/Components/ui/button';
 import { toast } from '@/Components/ui/toast';
 import { postJson } from '@/lib/http';
@@ -69,31 +70,13 @@ export function ConnectDetails({
     url: (secrets: Secrets) => string | null;
 }) {
     const [shown, setShown] = useState<Secrets | null>(null);
-    const [copied, setCopied] = useState<string | null>(null);
 
     const toggle = async () => {
         setShown(shown ? null : await secrets.get());
     };
 
-    const copy = async (label: string, value: string | null | undefined) => {
-        if (value == null) {
-            return;
-        }
-        // Browsers only allow the clipboard over HTTPS or on localhost, and
-        // a server is often reached over plain HTTP on port 8192. They can
-        // also refuse it outright, so either way the value is shown instead.
-        try {
-            await navigator.clipboard.writeText(value);
-            setCopied(label);
-            setTimeout(() => setCopied((current) => (current === label ? null : current)), 2000);
-        } catch {
-            setShown(await secrets.get());
-            toast.add({
-                type: 'info',
-                title: 'Copy it from the page',
-                description: 'The browser didn’t allow copying, so it’s shown.',
-            });
-        }
+    const reveal = async () => {
+        setShown(await secrets.get());
     };
     const fetched = async () => {
         const got = await secrets.get();
@@ -103,27 +86,22 @@ export function ConnectDetails({
     return (
         <>
             <dl className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg border bg-muted/40 py-2 pr-2 pl-3 text-sm">
-                <Row label="Internal Hostname" copied={copied} onCopy={() => copy('Internal Hostname', connect.host)}>
+                <Row label="Internal Hostname" copy={connect.host}>
                     {connect.host}
                 </Row>
                 <Row label="Port">{connect.port}</Row>
-                <Row label="Username" copied={copied} onCopy={() => copy('Username', connect.user)}>
+                <Row label="Username" copy={connect.user}>
                     {connect.user}
                 </Row>
                 <Row
                     label="Password"
-                    copied={copied}
                     busy={secrets.busy}
-                    onCopy={async () => copy('Password', (await fetched())?.password)}
+                    copy={async () => (await fetched())?.password}
+                    onRefused={reveal}
                 >
                     {shown ? shown.password : <span className="text-muted-foreground">{masked}</span>}
                 </Row>
-                <Row
-                    label="URL"
-                    copied={copied}
-                    busy={secrets.busy}
-                    onCopy={async () => copy('URL', (await fetched())?.url)}
-                >
+                <Row label="URL" busy={secrets.busy} copy={async () => (await fetched())?.url} onRefused={reveal}>
                     {(shown && url(shown)) ?? connect.preview}
                 </Row>
             </dl>
@@ -146,15 +124,15 @@ export function ConnectDetails({
 // Row is a label, a value and, for one worth copying, a copy button.
 function Row({
     label,
-    copied,
     busy,
-    onCopy,
+    copy,
+    onRefused,
     children,
 }: {
     label: string;
-    copied?: string | null;
     busy?: boolean;
-    onCopy?: () => void;
+    copy?: string | (() => Promise<string | null | undefined>);
+    onRefused?: () => Promise<void>;
     children: ReactNode;
 }) {
     return (
@@ -162,17 +140,8 @@ function Row({
             <dt className="text-muted-foreground">{label}</dt>
             <dd className="font-mono break-all select-all">{children}</dd>
             <div className="size-6">
-                {onCopy && (
-                    <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={onCopy}
-                        disabled={busy}
-                        aria-label={`Copy ${label.toLowerCase()}`}
-                        title={`Copy ${label.toLowerCase()}`}
-                    >
-                        {copied === label ? <CheckIcon className="text-success" /> : <CopyIcon />}
-                    </Button>
+                {copy != null && (
+                    <CopyButton label={label.toLowerCase()} value={copy} disabled={busy} onRefused={onRefused} />
                 )}
             </div>
         </>

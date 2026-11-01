@@ -6,6 +6,11 @@ export interface SharedProps {
     };
     // Why Docker can't be managed right now, or null. Signed-in pages only.
     dockerProblem: string | null;
+    // Whether the server needs a restart, security updates, a finished
+    // install or a newer release (ADR 0041): the rail's dot.
+    serverAttention: boolean;
+    // How many alarms are unread: the rail's dot on Alarms.
+    unreadAlarms: number;
     [key: string]: unknown;
 }
 

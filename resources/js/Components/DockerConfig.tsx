@@ -151,7 +151,7 @@ export function DockerConfig({
                                 <>Echowa signs in to {registry.host} before it pulls.</>
                             ) : registries.length === 0 ? (
                                 <>
-                                    Private image? <Link href="/registries/create">Add a registry</Link> first.
+                                    Private image? <Link href="/settings/registries/create">Add a registry</Link> first.
                                 </>
                             ) : (
                                 'Pulled without signing in.'

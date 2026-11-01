@@ -228,6 +228,10 @@ type RestorePreview struct {
 	DefaultTag string `json:"default_tag"`
 	// Atomic means the restore applies all of the backup or none of it.
 	Atomic bool `json:"atomic"`
+	// WholeServer means it replaces every database in the server.
+	WholeServer bool `json:"whole_server"`
+	// Parts are what the backup is made of: "tables", "collections".
+	Parts string `json:"parts"`
 	// Refusal says why the restore can't go ahead, and Warning what to
 	// know before it does.
 	Refusal string `json:"refusal"`
@@ -245,6 +249,7 @@ func PreviewRestore(ctx context.Context, app *models.App, src *RestoreSource) (*
 	preview := &RestorePreview{
 		Name: m.Object, Uploaded: src.Upload != nil, Database: m.Database, ServerVersion: m.ServerVersion,
 		SizeBytes: m.Size, AppDatabase: env[b.Database], Template: templateName(m.Template), Atomic: b.Atomic,
+		WholeServer: b.WholeServer(), Parts: b.Parts,
 	}
 	if src.Location != nil {
 		preview.Location = src.Location.Name
@@ -294,6 +299,16 @@ func checkVersion(ctx context.Context, app *models.App, b *templates.Backup, src
 	if src.Head != nil {
 		if err := src.Head.ReadableBy(version); err != nil {
 			return version, "", refuse("%s", err)
+		}
+	}
+	if b.Restorable != nil {
+		out, err := Docker().Exec(ctx, app.ServiceName(), b.Restorable)
+		if err != nil {
+			return version, "", refuse("Couldn't check whether %s can take a restore: %s", app.Name, err)
+		}
+		if strings.TrimSpace(string(out)) != "1" {
+			return version, "", refuse("%s's server was started by an older release of Echowa, without what a restore needs. "+
+				"Redeploy %s, then restore.", app.Name, app.Name)
 		}
 	}
 	from, _, _ := strings.Cut(m.ServerVersion, ".")
@@ -383,11 +398,25 @@ func partly(app *models.App, b *templates.Backup, rec *models.Restore) string {
 		return " Nothing was restored."
 	case rec.NewApp:
 		return fmt.Sprintf(" %s may hold part of the backup. Delete it and restore into a new app again.", app.Name)
+	case b != nil && b.WholeServer() && rec.SafetyBackupID != nil:
+		return fmt.Sprintf(" %s may have lost its keys. The safety backup is #%d.", app.Name, *rec.SafetyBackupID)
+	case b != nil && b.WholeServer():
+		return fmt.Sprintf(" %s may have lost its keys, and there's no safety backup.", app.Name)
 	case rec.SafetyBackupID != nil:
-		return fmt.Sprintf(" Some tables may have been restored and others not. The safety backup is #%d.", *rec.SafetyBackupID)
+		return fmt.Sprintf(" Some %s may have been restored and others not. The safety backup is #%d.", parts(b), *rec.SafetyBackupID)
 	default:
-		return " Some tables may have been restored and others not, and there's no safety backup."
+		return fmt.Sprintf(" Some %s may have been restored and others not, and there's no safety backup.", parts(b))
 	}
+}
+
+// parts are what b's dumps are made of, for a template Echowa no longer
+// has too.
+func parts(b *templates.Backup) string {
+	if b == nil {
+		return "parts of the backup"
+	}
+
+	return b.Parts
 }
 
 // notRestored is what a restore into a new app that never began leaves.
@@ -430,7 +459,6 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 		}
 		rec.SafetyBackupID = &backup.ID
 	}
-	partly := func() string { return partly(app, b, rec) }
 
 	body, err := openDump(ctx, src)
 	if err != nil {
@@ -455,6 +483,18 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 	code, err := Docker().ExecStream(ctx, app.ServiceName(), b.Restore, stdin, output, output)
 	stopProgress()
 
+	// A restore that says it changed nothing, whatever stopped it, left
+	// the app as it was.
+	unchanged := b.Unchanged != 0 && code == b.Unchanged
+	partly := func() string {
+		switch {
+		case unchanged && rec.NewApp:
+			return notRestored(app)
+		case unchanged:
+			return " Nothing was restored."
+		}
+		return partly(app, b, rec)
+	}
 	result := restoreResult{status: models.RestoreFailed, output: output.String(), read: checked.n.Load()}
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -467,6 +507,8 @@ func restore(ctx context.Context, app *models.App, b *templates.Backup, src *Res
 		result.message = app.Name + " stopped running before the restore started." + partly()
 	case err != nil:
 		result.message = "The restore failed: " + err.Error() + "." + partly()
+	case unchanged:
+		result.message = "The restore refused the dump." + partly()
 	case code != 0:
 		result.message = fmt.Sprintf("The restore exited with status %d.", code) + partly()
 	case !checked.done.Load():

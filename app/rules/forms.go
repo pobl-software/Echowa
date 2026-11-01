@@ -570,6 +570,41 @@ func AlertMessages() validation.Option {
 	})
 }
 
+// TwoFactorCode returns the rules for a code from an authenticator app
+// (ADR 0042). Whether it's right is services.CheckTwoFactorCode's call.
+func TwoFactorCode() map[string]any {
+	return map[string]any{"code": "required|string|max:20"}
+}
+
+// TwoFactorMessages words the code's errors.
+func TwoFactorMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"code.required": "Enter the 6-digit code from your authenticator app.",
+	})
+}
+
+// SessionTimeout is Settings, Security's session timeout: minutes, one of
+// choices (services.SessionTimeouts, ADR 0043).
+func SessionTimeout(choices []int) map[string]any {
+	in := make([]string, len(choices))
+	for i, minutes := range choices {
+		in[i] = strconv.Itoa(minutes)
+	}
+	return map[string]any{"minutes": "required|int|in:" + strings.Join(in, ",")}
+}
+
+// SessionTimeoutMessages words the session timeout's errors.
+func SessionTimeoutMessages() validation.Option {
+	return frameworkvalidation.Messages(map[string]string{
+		"minutes.required": "Choose how long a session lasts.",
+		"minutes.in":       "Choose one of the listed times.",
+	})
+}
+
+// WrongTwoFactorCode is the error for a code that isn't right now, or was
+// used already.
+const WrongTwoFactorCode = "That code isn't right. Try the one your app shows now."
+
 // unique ignores the row being updated.
 func unique(table, column string, id uint) string {
 	if id == 0 {

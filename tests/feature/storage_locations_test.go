@@ -86,9 +86,9 @@ func (s *StorageLocationsTestSuite) TestSettingsListsLocationsWithoutTheSecret()
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret)
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 
-	page.AssertComponent("Settings/Index")
+	page.AssertComponent("Settings/Storage")
 	rows := page.Props["storageLocations"].([]any)
 	s.Require().Len(rows, 1)
 	row := rows[0].(map[string]any)
@@ -102,11 +102,11 @@ func (s *StorageLocationsTestSuite) TestSettingsListsLocationsWithoutTheSecret()
 func (s *StorageLocationsTestSuite) TestStoreNormalisesAndEncryptsTheSecret() {
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
-	b.submit(nethttp.MethodPost, "/settings/storage", "/settings", storageForm(map[string]any{
+	b.submit(nethttp.MethodPost, "/settings/storage", "/settings/storage", storageForm(map[string]any{
 		"name": " R2 ", "endpoint": "https://abc123.r2.cloudflarestorage.com/", "region": "AUTO", "prefix": "/server-1/",
-	})).AssertHeader("Location", "/settings")
+	})).AssertHeader("Location", "/settings/storage")
 
 	var loc models.StorageLocation
 	s.Require().NoError(facades.Orm().Query().Where("name", "R2").FirstOrFail(&loc))
@@ -118,21 +118,21 @@ func (s *StorageLocationsTestSuite) TestStoreNormalisesAndEncryptsTheSecret() {
 	s.Require().NoError(facades.DB().Table("storage_locations").Where("id", loc.ID).Value("secret_key", &stored))
 	s.NotContains(stored, storageSecret)
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 	s.Contains(page.Flash["success"], "Added R2")
 }
 
 func (s *StorageLocationsTestSuite) TestStoreValidates() {
 	s.createLocation()
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
-	b.submit(nethttp.MethodPost, "/settings/storage", "/settings", map[string]any{
+	b.submit(nethttp.MethodPost, "/settings/storage", "/settings/storage", map[string]any{
 		"name": "R2", "endpoint": "http://s3.example.com", "region": "us east", "bucket": "My_Bucket",
 		"prefix": "../up", "access_key_id": "", "secret_key": "",
-	}).AssertHeader("Location", "/settings")
+	}).AssertHeader("Location", "/settings/storage")
 
-	_, page := b.visit("/settings")
+	_, page := b.visit("/settings/storage")
 	errs := page.Props["errors"].(map[string]any)
 	for _, field := range []string{"name", "endpoint", "region", "bucket", "prefix", "access_key_id", "secret_key"} {
 		s.Contains(errs, field)
@@ -144,19 +144,19 @@ func (s *StorageLocationsTestSuite) TestUpdateWithABlankSecretKeepsIt() {
 	loc := s.createLocation()
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret, "replacement-secret")
-	b.visit("/settings")
+	b.visit("/settings/storage")
 	url := fmt.Sprintf("/settings/storage/%d", loc.ID)
 
-	b.submit(nethttp.MethodPut, url, "/settings", storageForm(map[string]any{
+	b.submit(nethttp.MethodPut, url, "/settings/storage", storageForm(map[string]any{
 		"name": "Backblaze", "secret_key": "", "path_style": true,
-	})).AssertHeader("Location", "/settings")
+	})).AssertHeader("Location", "/settings/storage")
 	updated := s.load(loc.ID)
 	s.Equal("Backblaze", updated.Name)
 	s.True(updated.PathStyle)
 	s.Equal(storageSecret, string(updated.SecretKey), "a blank secret keeps the stored one")
 
-	b.submit(nethttp.MethodPut, url, "/settings", storageForm(map[string]any{"secret_key": "replacement-secret"})).
-		AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodPut, url, "/settings/storage", storageForm(map[string]any{"secret_key": "replacement-secret"})).
+		AssertHeader("Location", "/settings/storage")
 	s.Equal("replacement-secret", string(s.load(loc.ID).SecretKey))
 }
 
@@ -164,10 +164,10 @@ func (s *StorageLocationsTestSuite) TestDestroyLeavesTheBucketAlone() {
 	loc := s.createLocation()
 	s.Require().NoError(s.storage.Put(s.T().Context(), "server-1/shop-db/backup.dump", strings.NewReader("dump")))
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
-	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/storage/%d", loc.ID), "/settings", nil).
-		AssertHeader("Location", "/settings")
+	b.submit(nethttp.MethodDelete, fmt.Sprintf("/settings/storage/%d", loc.ID), "/settings/storage", nil).
+		AssertHeader("Location", "/settings/storage")
 
 	count, err := facades.Orm().Query().Model(&models.StorageLocation{}).Count()
 	s.Require().NoError(err)
@@ -177,7 +177,7 @@ func (s *StorageLocationsTestSuite) TestDestroyLeavesTheBucketAlone() {
 
 func (s *StorageLocationsTestSuite) TestCheckRunsEveryStepOnTheFormsValues() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
 	result := s.check(b, storageForm(map[string]any{"bucket": "unsaved-bucket"}), nethttp.StatusOK)
 
@@ -191,7 +191,7 @@ func (s *StorageLocationsTestSuite) TestCheckRunsEveryStepOnTheFormsValues() {
 func (s *StorageLocationsTestSuite) TestCheckReportsTheFailingStep() {
 	s.storage.Err = &smithy.GenericAPIError{Code: "InvalidAccessKeyId"}
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
 	result := s.check(b, storageForm(nil), nethttp.StatusOK)
 
@@ -203,7 +203,7 @@ func (s *StorageLocationsTestSuite) TestCheckReportsTheFailingStep() {
 
 func (s *StorageLocationsTestSuite) TestCheckValidatesBeforeConnecting() {
 	b := signedIn(s.T(), &s.TestCase)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
 	result := s.check(b, storageForm(map[string]any{"endpoint": "http://10.0.0.5:9000", "secret_key": ""}), nethttp.StatusUnprocessableEntity)
 
@@ -218,7 +218,7 @@ func (s *StorageLocationsTestSuite) TestCheckOfASavedLocationUsesItsStoredSecret
 	loc := s.createLocation()
 	b := signedIn(s.T(), &s.TestCase)
 	b.forbid(storageSecret)
-	b.visit("/settings")
+	b.visit("/settings/storage")
 
 	s.check(b, storageForm(map[string]any{"id": loc.ID, "secret_key": ""}), nethttp.StatusOK)
 

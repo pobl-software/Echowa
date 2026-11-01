@@ -11,9 +11,12 @@ import (
 
 func TestServerVersionReadsWhatTheVersionCommandsPrint(t *testing.T) {
 	for out, want := range map[string]string{
-		"postgres (PostgreSQL) 18.0 (Debian 18.0-1.pgdg13+3)\n":                     "18.0",
-		"postgres (PostgreSQL) 18beta1\n":                                           "18",
-		"/usr/sbin/mysqld  Ver 9.7.0 for Linux on aarch64 (MySQL Community Server)": "9.7.0",
+		"postgres (PostgreSQL) 18.0 (Debian 18.0-1.pgdg13+3)\n":                                                    "18.0",
+		"postgres (PostgreSQL) 18beta1\n":                                                                          "18",
+		"/usr/sbin/mysqld  Ver 9.7.0 for Linux on aarch64 (MySQL Community Server)":                                "9.7.0",
+		"mariadbd  Ver 12.3.3-MariaDB-ubu2404 for debian-linux-gnu on aarch64 (mariadb.org binary distribution)\n": "12.3.3",
+		"db version v9.0.4\nBuild Info: {\n    \"version\": \"9.0.4\",\n":                                          "9.0.4",
+		"Redis server v=8.10.3 sha=00000000:1 malloc=jemalloc-5.3.0 bits=64 build=2e99d4bb317442f\n":               "8.10.3",
 	} {
 		got, err := ServerVersion([]byte(out))
 		require.NoError(t, err, out)
@@ -42,6 +45,18 @@ func TestBackupsRestoreIntoTheSameOrANewerServerOnly(t *testing.T) {
 		{"mysql", "9.7.0", "9.6.0", false},
 		{"mysql", "9.7.0", "8.4.6", false},
 		{"mysql", "9.10.0", "9.9.0", false},
+		{"mariadb", "12.3.3", "12.3.2", true},
+		{"mariadb", "11.8.9", "12.3.3", true},
+		{"mariadb", "12.3.3", "11.8.9", false},
+		{"mariadb", "12.3.3", "12.2.2", false},
+		{"redis", "8.10.3", "8.10.0", true},
+		{"redis", "7.4.12", "8.10.3", true},
+		{"redis", "8.10.3", "8.8.1", false},
+		{"redis", "8.0.2", "7.4.12", false},
+		{"mongodb", "9.0.4", "9.0.1", true},
+		{"mongodb", "8.0.16", "9.0.4", true},
+		{"mongodb", "8.3.13", "8.0.16", false},
+		{"mongodb", "9.0.4", "8.3.13", false},
 		{"postgres", "", "18.0", false},
 		{"postgres", "18.0", "eighteen", false},
 	}
@@ -60,25 +75,31 @@ func TestBackupCommandsKeepSecretsOutOfTheirArguments(t *testing.T) {
 		t.Run(tmpl.Slug, func(t *testing.T) {
 			b := tmpl.Backup
 			assert.NotEmpty(t, b.Version)
-			assert.True(t, slices.ContainsFunc(tmpl.Env, func(e Env) bool { return e.Key == b.Database }),
-				"the database is named in the template's env")
-			assert.NotEmpty(t, b.Extension)
-			assert.NotNil(t, b.Compatible)
-			cmds := [][]string{b.Dump, b.Restore}
-			for _, e := range b.Exports {
-				cmds = append(cmds, e.Dump)
+			if !b.WholeServer() {
+				assert.True(t, slices.ContainsFunc(tmpl.Env, func(e Env) bool { return e.Key == b.Database }),
+					"the database is named in the template's env")
 			}
-			for _, cmd := range cmds {
+			assert.NotEmpty(t, b.Extension)
+			assert.NotEmpty(t, b.Parts, "a restore says what it may leave half done")
+			assert.NotNil(t, b.Compatible)
+			dumps := [][]string{b.Dump}
+			for _, e := range b.Exports {
+				dumps = append(dumps, e.Dump)
+			}
+			for _, cmd := range append(dumps, b.Restore) {
 				require.Equal(t, []string{"sh", "-c"}, cmd[:2], "the env is read inside sh -c")
 				require.Len(t, cmd, 3)
-				assert.True(t, strings.HasPrefix(cmd[2], "exec ") || strings.Contains(cmd[2], "; exec "),
-					"sh execs the client, so stdin and signals reach it: %s", cmd[2])
 				assert.NotRegexp(t, `(^|\s)(-p|--password)`, cmd[2], "no password argument")
 			}
+			for _, cmd := range dumps {
+				assert.True(t, strings.HasPrefix(cmd[2], "exec ") || strings.Contains(cmd[2], "; exec "),
+					"sh execs the client, so its exit status is the dump's: %s", cmd[2])
+			}
+			restore := b.Restore[2]
+			assert.True(t, strings.HasPrefix(restore, "exec ") || strings.Contains(restore, "; exec ") || strings.HasPrefix(restore, "set -e\n"),
+				"sh execs the client, so stdin reaches it, or a script stops at its first failure: %s", restore)
 		})
 	}
-	redis, _ := Find("redis")
-	assert.Nil(t, redis.Backup, "Redis isn't backed up")
 }
 
 func TestEveryBackupOffersAnExport(t *testing.T) {

@@ -139,7 +139,13 @@ func (e *Engine) execIn(ctx context.Context, id string, cmd []string, stdin io.R
 		return 0, fmt.Errorf("exec in container %.12s: %w", id, err)
 	}
 	if input.err != nil {
-		return 0, fmt.Errorf("read the input of the exec in container %.12s: %w", id, input.err)
+		// The command saw its input end early, and its exit code says what
+		// it made of that, such as a restore that changed nothing.
+		code := 0
+		if inspected, err := e.api.ExecInspect(ctx, created.ID, client.ExecInspectOptions{}); err == nil {
+			code = inspected.ExitCode
+		}
+		return code, fmt.Errorf("read the input of the exec in container %.12s: %w", id, input.err)
 	}
 
 	inspected, err := e.api.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})

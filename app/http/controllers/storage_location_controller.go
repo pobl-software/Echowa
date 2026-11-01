@@ -32,7 +32,7 @@ func (r *StorageLocationController) Store(ctx http.Context) http.Response {
 	}
 	inertia.Flash(ctx, "success", "Added "+loc.Name+".")
 
-	return inertia.Redirect(ctx, "/settings")
+	return inertia.Redirect(ctx, "/settings/storage")
 }
 
 func (r *StorageLocationController) Update(ctx http.Context) http.Response {
@@ -60,7 +60,7 @@ func (r *StorageLocationController) Update(ctx http.Context) http.Response {
 	}
 	inertia.Flash(ctx, "success", "Saved "+loc.Name+".")
 
-	return inertia.Redirect(ctx, "/settings")
+	return inertia.Redirect(ctx, "/settings/storage")
 }
 
 func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
@@ -75,7 +75,7 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 	}
 	if len(apps) > 0 {
 		inertia.Flash(ctx, "error", fmt.Sprintf("%s is where the backup schedules of %s go. Change or delete them first.", loc.Name, joinNames(apps)))
-		return inertia.Redirect(ctx, "/settings")
+		return inertia.Redirect(ctx, "/settings/storage")
 	}
 
 	count, err := services.StorageLocationBackups(ctx.Context(), loc.ID)
@@ -91,7 +91,7 @@ func (r *StorageLocationController) Destroy(ctx http.Context) http.Response {
 		inertia.Flash(ctx, "success", "Deleted "+loc.Name+".")
 	}
 
-	return inertia.Redirect(ctx, "/settings")
+	return inertia.Redirect(ctx, "/settings/storage")
 }
 
 // Check tests the form's values, saved or not, and answers with each

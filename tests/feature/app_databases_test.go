@@ -109,7 +109,7 @@ func (s *AppDatabasesTestSuite) TestAddCreatesEachDatabaseLinksItAndDeploysIt() 
 	s.Equal("echowa-shop-postgres", row["host"])
 	s.Equal(float64(5432), row["port"])
 	s.Equal("not_deployed", row["status"].(map[string]any)["state"])
-	s.Len(page.Props["databaseChoices"].(map[string]any)["templates"], 3)
+	s.Len(page.Props["databaseChoices"].(map[string]any)["templates"], 5)
 	s.Empty(page.Props["databaseChoices"].(map[string]any)["existing"], "linked databases aren't offered again")
 }
 

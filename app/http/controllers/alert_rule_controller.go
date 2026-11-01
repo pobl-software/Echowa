@@ -32,7 +32,7 @@ type alertPlace struct {
 
 func (p alertPlace) url() string {
 	if p.app == nil {
-		return "/settings"
+		return "/settings/alerts"
 	}
 
 	return fmt.Sprintf("/apps/%d?tab=alerts", p.app.ID)

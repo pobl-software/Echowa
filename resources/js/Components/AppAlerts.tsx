@@ -21,12 +21,12 @@ export function AppAlerts({ app, alerts }: { app: { id: number; name: string }; 
             <Panel title="Alerts">
                 <NoAlerts
                     action={
-                        <Link href="/settings" className={buttonVariants()}>
-                            Go to Settings
+                        <Link href="/settings/notifications" className={buttonVariants()}>
+                            Add a provider
                         </Link>
                     }
                 >
-                    Add a notification provider on Settings first: Slack, Discord, Teams, ntfy or email. Then choose
+                    Add a notification provider in Settings first: Slack, Discord, Teams, ntfy or email. Then choose
                     which of {app.name}’s alerts go there.
                 </NoAlerts>
             </Panel>

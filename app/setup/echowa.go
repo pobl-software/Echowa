@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"goravel/app/host"
 	"goravel/app/release"
 	"goravel/app/update"
 )
@@ -59,7 +60,7 @@ func (s *steps) config() error {
 	switch {
 	case err == nil:
 		s.ui.ok("%s, kept", EnvFile)
-		if len(parseEnv(string(existing))["APP_KEY"]) != 32 {
+		if len(parseEnv(existing)["APP_KEY"]) != 32 {
 			return fmt.Errorf("APP_KEY in %s must be 32 characters", EnvFile)
 		}
 	case errors.Is(err, os.ErrNotExist):
@@ -88,7 +89,7 @@ func (s *steps) config() error {
 		return err
 	}
 
-	env := parseEnv(string(existing))
+	env := parseEnv(existing)
 	s.url, s.host, s.port = env["APP_URL"], env["APP_HOST"], env["APP_PORT"]
 	if s.host == "" || s.host == "0.0.0.0" || s.host == "::" {
 		s.host = "127.0.0.1"
@@ -207,28 +208,9 @@ func (s *steps) restoreDatabase(backup string) error {
 	return nil
 }
 
-// parseOSRelease reads /etc/os-release (or an env file): KEY=value lines,
-// values optionally quoted.
-func parseOSRelease(text string) map[string]string {
-	values := map[string]string{}
-	for line := range strings.SplitSeq(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		values[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"'`)
-	}
-
-	return values
-}
-
-// parseEnv reads /etc/echowa/env, which has the same shape.
-func parseEnv(text string) map[string]string {
-	return parseOSRelease(text)
+// parseEnv reads /etc/echowa/env, which has os-release's shape.
+func parseEnv(data []byte) map[string]string {
+	return host.ParseOSRelease(data)
 }
 
 // renderEnv sets values in the env template: each replaces its KEY= line,

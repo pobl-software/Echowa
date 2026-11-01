@@ -79,7 +79,7 @@ func (r *SetupController) Store(ctx http.Context) http.Response {
 		return inertia.ServerError(ctx, err)
 	}
 	session.Forget(setupTokenKey)
-	if err := services.Login(ctx, user, false); err != nil {
+	if err := services.Login(ctx, user); err != nil {
 		return inertia.ServerError(ctx, err)
 	}
 

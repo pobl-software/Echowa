@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	nethttp "net/http"
 
 	"github.com/goravel/framework/contracts/http"
@@ -34,7 +35,9 @@ func (m *HandleInertiaRequests) Share(ctx http.Context) gonertia.Props {
 		"auth": map[string]any{
 			"user": user,
 		},
-		"dockerProblem": nil,
+		"dockerProblem":   nil,
+		"serverAttention": false,
+		"unreadAlarms":    0,
 	}
 	if user != nil {
 		// A closure, so gonertia only asks Docker when a page renders, not
@@ -45,6 +48,19 @@ func (m *HandleInertiaRequests) Share(ctx http.Context) gonertia.Props {
 				return problem
 			}
 			return nil
+		}
+		// The rail's dot (ADR 0041). It reads files and the last apt run
+		// only, so a page never waits for apt; polls don't ask for it.
+		props["serverAttention"] = func(context.Context) any {
+			return services.HostAttention()
+		}
+		// The rail's dot on Alarms.
+		props["unreadAlarms"] = func(c context.Context) any {
+			n, err := services.UnreadAlarms(c)
+			if err != nil {
+				facades.Log().Error(fmt.Errorf("unread alarms: %w", err))
+			}
+			return n
 		}
 	}
 

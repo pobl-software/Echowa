@@ -2,6 +2,7 @@ package routes
 
 import (
 	"fmt"
+	"io/fs"
 	nethttp "net/http"
 	"runtime/debug"
 
@@ -15,6 +16,7 @@ import (
 	"goravel/app/http/controllers"
 	"goravel/app/http/controllers/auth"
 	"goravel/app/http/middleware"
+	"goravel/app/inertia"
 	"goravel/app/release"
 	"goravel/app/services"
 )
@@ -35,6 +37,13 @@ func Web() {
 
 	// Built frontend assets, from the binary in a release build.
 	facades.Route().StaticFS("build", assets.Build())
+	facades.Route().Get("/favicon.ico", func(ctx http.Context) http.Response {
+		icon, err := fs.ReadFile(assets.FS(), assets.Favicon)
+		if err != nil {
+			return inertia.NotFound(ctx)
+		}
+		return ctx.Response().Header("Cache-Control", "public, max-age=86400").Data(http.StatusOK, "image/x-icon", icon)
+	})
 
 	// Health check, outside the session stack. The version is only for
 	// this machine: echowa setup and the updater wait for the new one.
@@ -46,12 +55,12 @@ func Web() {
 		return ctx.Response().Header("Cache-Control", "no-store").Json(http.StatusOK, body)
 	})
 
-	// The "web" stack: session, remember-me login, CSRF, then Inertia. Every
+	// The "web" stack: session, idle timeout, CSRF, then Inertia. Every
 	// page and form goes in here. Webhooks (signed, not session-authenticated)
 	// live outside it. Order matters; see ADR 0008.
 	facades.Route().Middleware(
 		sessionmiddleware.StartSession(),
-		&middleware.AuthenticateFromRememberCookie{},
+		&middleware.SignOutIdleSessions{},
 		&middleware.VerifyCsrfToken{},
 		&middleware.HandleInertiaRequests{},
 	).Group(func(router route.Router) {
@@ -67,12 +76,19 @@ func Web() {
 			setup := auth.NewSetupController()
 			router.Get("/setup", setup.Create)
 			router.Middleware(frameworkmiddleware.Throttle("login")).Post("/setup", setup.Store)
+			challenge := auth.NewTwoFactorChallengeController()
+			router.Get("/two-factor-challenge", challenge.Create)
+			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Post("/two-factor-challenge", challenge.Store)
 		})
 
 		// Signed-in users only.
 		router.Middleware(&middleware.Authenticate{}).Group(func(router route.Router) {
 			router.Get("/dashboard", controllers.NewDashboardController().Index)
 			router.Get("/server", controllers.NewServerController().Show)
+			alarms := controllers.NewAlarmController()
+			router.Get("/alarms", alarms.Index)
+			router.Post("/alarms/read", alarms.ReadAll)
+			router.Post("/alarms/{alarm}/read", alarms.Read)
 			router.Post("/logout", auth.NewAuthenticatedSessionController().Destroy)
 
 			apps := controllers.NewAppController()
@@ -152,20 +168,32 @@ func Web() {
 			router.Get("/apps/{app}/deployments/{deployment}", deployments.Show)
 			router.Post("/apps/{app}/deployments/{deployment}/redeploy", deployments.Redeploy)
 
-			registries := controllers.NewRegistryController()
-			router.Get("/registries", registries.Index)
-			router.Get("/registries/create", registries.Create)
-			router.Post("/registries", registries.Store)
-			router.Get("/registries/{registry}/edit", registries.Edit)
-			router.Put("/registries/{registry}", registries.Update)
-			router.Delete("/registries/{registry}", registries.Destroy)
-			router.Post("/registries/{registry}/test", registries.Test)
-
+			// Settings: an overview, then a page per section.
 			settings := controllers.NewSettingsController()
 			router.Get("/settings", settings.Index)
-			router.Post("/settings/prune", settings.Prune)
+			router.Get("/settings/updates", settings.Updates)
 			router.Post("/settings/update/check", settings.CheckForUpdate)
 			router.Post("/settings/update", settings.Update)
+			router.Get("/settings/pruning", settings.Pruning)
+			router.Post("/settings/prune", settings.Prune)
+			router.Get("/settings/storage", settings.Storage)
+			router.Get("/settings/notifications", settings.Notifications)
+			router.Get("/settings/alerts", settings.Alerts)
+			security := controllers.NewSecurityController()
+			router.Get("/settings/security", security.Show)
+			router.Put("/settings/security/session-timeout", security.UpdateSessionTimeout)
+			router.Post("/settings/security/two-factor/setup", security.Setup)
+			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Post("/settings/security/two-factor", security.Confirm)
+			router.Middleware(frameworkmiddleware.Throttle("two-factor")).Delete("/settings/security/two-factor", security.Destroy)
+
+			registries := controllers.NewRegistryController()
+			router.Get("/settings/registries", registries.Index)
+			router.Get("/settings/registries/create", registries.Create)
+			router.Post("/settings/registries", registries.Store)
+			router.Get("/settings/registries/{registry}/edit", registries.Edit)
+			router.Put("/settings/registries/{registry}", registries.Update)
+			router.Delete("/settings/registries/{registry}", registries.Destroy)
+			router.Post("/settings/registries/{registry}/test", registries.Test)
 
 			storage := controllers.NewStorageLocationController()
 			router.Post("/settings/storage", storage.Store)
@@ -200,7 +228,5 @@ func Web() {
 	// Gin's built-in 404 runs after the global Timeout middleware has already
 	// written a 200 from its buffer, so unknown URLs came back as empty 200s.
 	// A fallback route sets the status itself.
-	facades.Route().Fallback(func(ctx http.Context) http.Response {
-		return ctx.Response().String(http.StatusNotFound, "404 page not found")
-	})
+	facades.Route().Fallback(inertia.NotFound)
 }

@@ -18,27 +18,28 @@ func app(template string) *models.App {
 }
 
 func TestEachTriggerFitsTheAppsItIsAbout(t *testing.T) {
-	custom, postgres, mysql, redis := app(""), app("postgres"), app("mysql"), app("redis")
+	custom, postgres, mysql, mariadb, mongodb, redis := app(""), app("postgres"), app("mysql"), app("mariadb"), app("mongodb"), app("redis")
 	for _, tc := range []struct {
 		trigger string
 		fits    []*models.App
 		doesnt  []*models.App
 	}{
-		{DeployFailed, []*models.App{custom, postgres, mysql, redis}, nil},
+		{DeployFailed, []*models.App{custom, postgres, mysql, mariadb, mongodb, redis}, nil},
 		{KilledForMemory, []*models.App{custom, redis}, nil},
-		{BackupFailed, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
-		{RestoreSucceeded, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
+		{BackupFailed, []*models.App{postgres, mysql, mariadb, mongodb, redis}, []*models.App{custom}},
+		{RestoreSucceeded, []*models.App{postgres, mysql, mariadb, redis}, []*models.App{custom}},
 		{TaskFailed, []*models.App{custom}, []*models.App{postgres, redis}},
 		{EchowaStarted, nil, []*models.App{custom, postgres}},
-		{Unhealthy, []*models.App{custom, postgres, mysql, redis}, nil},
-		{DBConnections, []*models.App{postgres, mysql, redis}, []*models.App{custom}},
-		{LongestTransaction, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
-		{TransactionIDAge, []*models.App{postgres}, []*models.App{custom, mysql, redis}},
+		{Unhealthy, []*models.App{custom, postgres, mysql, mariadb, redis}, nil},
+		{DBConnections, []*models.App{postgres, mysql, mariadb, mongodb, redis}, []*models.App{custom}},
+		{LongestTransaction, []*models.App{postgres, mysql, mariadb}, []*models.App{custom, mongodb, redis}},
+		{CacheHitRate, []*models.App{postgres, mysql, mariadb, mongodb}, []*models.App{custom, redis}},
+		{TransactionIDAge, []*models.App{postgres}, []*models.App{custom, mysql, mariadb, redis}},
 		{EvictedKeys, []*models.App{redis}, []*models.App{custom, postgres}},
 		{DiskUsed, nil, []*models.App{custom, postgres}},
 		{CertificateExpiry, []*models.App{custom}, []*models.App{postgres, redis}},
-		{PoolerDown, []*models.App{postgres}, []*models.App{custom, mysql, redis}},
-		{BackupAge, []*models.App{postgres, mysql}, []*models.App{custom, redis}},
+		{PoolerDown, []*models.App{postgres}, []*models.App{custom, mysql, mariadb, mongodb, redis}},
+		{BackupAge, []*models.App{postgres, mysql, mariadb, mongodb, redis}, []*models.App{custom}},
 		{UpdateAvailable, nil, []*models.App{custom, postgres}},
 	} {
 		trigger, ok := Find(tc.trigger)

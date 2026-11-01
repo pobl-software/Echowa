@@ -158,6 +158,11 @@ sudo echowa-artisan setup:link
 Forgot the password later? `sudo echowa-artisan user:create` resets it, and
 signs every browser out.
 
+Turn on two-factor authentication in Settings, Security: logging in then
+takes a code from an authenticator app as well. Lost the phone?
+`sudo echowa-artisan user:disable-two-factor` turns it off, and you can set
+it up again after logging in with the password.
+
 **Back up `APP_KEY` now.** It's in `/etc/echowa/env`. Registry tokens and
 env values are encrypted with it. A database without its key can't be
 decrypted, and a lost key can't be recovered. Keep it in a password manager,
@@ -290,16 +295,16 @@ Deployed apps keep running throughout; Echowa only manages them.
 ### Backing up template apps
 
 Echowa's own backup holds its database, not your apps' data. A
-PostgreSQL, MySQL or Redis app made from a template keeps its data in a
-Docker volume, `echowa-<app>-data`, which survives deploys but not
+PostgreSQL, MySQL, MariaDB, MongoDB or Redis app made from a template keeps
+its data in a Docker volume, `echowa-<app>-data`, which survives deploys but not
 deleting the app.
 
-**PostgreSQL and MySQL apps** have a **Backups** section that dumps the
-app's database (the one its connection URL names) to S3-compatible
-storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, Hetzner or your
-own. Other databases you made by hand in the same server aren't
-included. Redis apps have no Backups section; use the commands further
-down.
+**Template apps** have a **Backups** section that backs the app up to
+S3-compatible storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi,
+Hetzner or your own. For PostgreSQL, MySQL, MariaDB and MongoDB it dumps
+the app's database, the one its connection URL names; other databases you made by
+hand in the same server aren't included. For Redis it's a snapshot of
+the whole server, every logical database in it.
 
 1. **Add a storage location.** In **Settings, S3 storage**, click **Add
    location** and fill in the endpoint, region, bucket, an optional
@@ -318,16 +323,22 @@ down.
    from the bucket**, which lists the backups in the location's folder
    for this app, including ones another server made. You type the app's
    name to confirm. By default, Echowa first backs up the current data,
-   so you can go back. PostgreSQL restores all or nothing; MySQL restores
-   one table at a time and stops at the first error, which is when that
-   first backup matters. A backup never restores into an older server.
+   so you can go back. PostgreSQL restores all or nothing; MySQL and
+   MariaDB restore one table at a time, and MongoDB one collection at a
+   time, and stop at the first error, which is when that first backup
+   matters. A MongoDB restore leaves collections that aren't in the
+   backup as they are. A Redis restore replaces every key, and keys
+   written since the backup are gone. It checks the snapshot before
+   loading it, so a damaged one changes nothing. A Redis app deployed by
+   an older Echowa needs one redeploy before its first restore. A backup
+   never restores into an older server.
    **Into a new app** creates a new app on the tag you choose (the same
    major version or newer) and restores into it once it's running.
 
 Each backup is two objects in the bucket,
-`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL) and a
-`.json` manifest beside it with the app, template, server version, size
-and SHA-256. A restore checks the dump against its manifest as it reads
+`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL and MariaDB,
+`.archive.gz` for MongoDB, `.rdb` for Redis) and a `.json` manifest beside it with the app, template,
+server version, size and SHA-256. A restore checks the dump against its manifest as it reads
 it, and stops before the end if they differ. Echowa needs nothing else to find them again:
 after losing the server, install Echowa on a new one, add a location
 with the same bucket and folder, then **New app, From a backup**.
@@ -359,7 +370,9 @@ Set the bucket up so a leak or a mistake costs little:
 
 **Export** downloads the database straight to your browser, with nothing
 kept on the server or in S3: PostgreSQL's custom format (for
-`pg_restore` or pgAdmin) or plain SQL, and gzipped SQL for MySQL.
+`pg_restore` or pgAdmin) or plain SQL, gzipped SQL for MySQL and MariaDB,
+and a gzipped `mongodump` archive for MongoDB (for `mongorestore --gzip
+--archive=<file>`).
 Deploys of the app wait until the download ends, so for a big database
 on a slow connection, back up to S3 and download that instead.
 **Restore from a file** takes a file Export or a backup's download made
@@ -367,7 +380,7 @@ and restores it into the app, with the same checks as a restore from
 the bucket. The upload needs its size plus 1 GiB free beside Echowa's
 database (`/var/lib/echowa`), and is deleted when the restore ends.
 
-**When Echowa is down,** or for a Redis app, use these. Each command
+**When Echowa is down,** use these. Each command
 runs in the app's container. Find it with:
 
 ```bash
@@ -402,6 +415,35 @@ To restore it into the same app, or into a new MySQL app:
 sudo docker exec -i "$c" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root "$MYSQL_DATABASE"' < <app>-2026-10-26.sql
 ```
 
+**MariaDB.** The same with MariaDB's names. Its dump has no GTIDs unless
+asked, so there's no `--set-gtid-purged`:
+
+```bash
+sudo docker exec "$c" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-dump -u root --single-transaction --routines --triggers "$MARIADB_DATABASE"' > <app>-$(date -u +%F).sql
+```
+
+To restore it into the same app, or into a new MariaDB app:
+
+```bash
+sudo docker exec -i "$c" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -u root "$MARIADB_DATABASE"' < <app>-2026-10-26.sql
+```
+
+**MongoDB.** `mongodump` as root gives a copy of the app's database while
+it runs. The password goes in on a pipe, not as an argument:
+
+```bash
+sudo docker exec "$c" sh -c 'printf "password: %s\n" "$MONGO_INITDB_ROOT_PASSWORD" | mongodump --config /dev/stdin -u root --authenticationDatabase admin --db "$MONGO_INITDB_DATABASE" --archive --gzip' > <app>-$(date -u +%F).archive.gz
+```
+
+To restore it into the same app, or into a new MongoDB app (it goes into
+the app's database, whatever the dump's was called):
+
+```bash
+sudo docker exec -i "$c" sh -c 'mongorestore --config /dev/fd/3 -u root --authenticationDatabase admin --archive --gzip --drop --nsFrom "\$db\$.\$coll\$" --nsTo "$MONGO_INITDB_DATABASE.\$coll\$" 3<<EOF
+password: $MONGO_INITDB_ROOT_PASSWORD
+EOF' < <app>-2026-10-26.archive.gz
+```
+
 **Redis.** It saves every write to its append-only file in `/data`. For a
 copy, ask it for a snapshot:
 
@@ -425,7 +467,7 @@ As with Echowa's own backups, copy these off the server.
 
 A template database is reachable only by apps on the server until you
 turn on External access on its overview. Pick a port from 1024 up, other
-than the database's default (5432, 3306, 6379): say 4040. Echowa
+than the database's default (5432, 3306, 27017, 6379): say 4040. Echowa
 redeploys the database with that port published on the server's public
 IP, and pgAdmin, TablePlus or `psql` connect to `<server IP>:4040` with
 the user and password from the app's Environment tab.
@@ -446,12 +488,14 @@ verify the server with it:
 |---|---|
 | PostgreSQL | pgAdmin: SSL mode `verify-ca`, Root certificate the CA file. psql: `"host=<server IP> port=4040 user=<user> dbname=<db> sslmode=verify-ca sslrootcert=<app>-ca.crt"` |
 | MySQL | `mysql -h <server IP> -P 4040 -u app -p --ssl-mode=VERIFY_CA --ssl-ca=<app>-ca.crt <db>` |
+| MariaDB | `mariadb -h <server IP> -P 4040 -u app -p <db>`. With a CA file, the `mariadb` client also checks the host name, which the certificate doesn't have, so leave it out: with a password, the client verifies the server by that. A client with an SSL mode takes `VERIFY_CA` and the CA file, as for MySQL. |
+| MongoDB | `mongosh "mongodb://app:<password>@<server IP>:4040/<db>?tls=true&tlsCAFile=<app>-ca.crt&tlsAllowInvalidHostnames=true"`. Compass takes the same URL. The host name check is off because the certificate doesn't have it; the CA still verifies the server. |
 | Redis | `redis-cli -h <server IP> -p 4040 --tls --cacert <app>-ca.crt -a <password>`. The port only speaks TLS. |
 
 Use `verify-ca`, not `verify-full`: the certificate names the app's
 internal host, `echowa-<app>`, because Echowa doesn't know your server's
-public address. PostgreSQL and MySQL also accept clients that don't ask
-for TLS, so set the client to require it as above.
+public address. PostgreSQL, MySQL, MariaDB and MongoDB also accept clients
+that don't ask for TLS, so set the client to require it as above.
 
 Turning it off, or changing the port, redeploys the database too: a few
 seconds without it.

@@ -7,9 +7,10 @@
 //
 //	go test -tags docker ./app/templates/...
 //
-// It pulls postgres:18, mysql:9.7 and redis:8, and needs the docker CLI to
-// exec into the tasks. PostgreSQL and MySQL are also backed up and
-// restored, as ADR 0034 does.
+// It pulls postgres:18 and the template's other images, mysql:9.7,
+// mariadb:12.3, mongo:9.0 and redis:8, and
+// needs the docker CLI to exec into the tasks. Each is also backed up and restored, as ADRs 0034
+// and 0044 do.
 package templates
 
 import (
@@ -20,6 +21,7 @@ import (
 	"io"
 	"maps"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,8 +35,22 @@ import (
 	"goravel/app/docker"
 )
 
+// Each of the template's images, on servers it's published for, runs as
+// postgres itself does.
 func TestPostgresTemplate(t *testing.T) {
-	run := deployTemplate(t, "postgres", false)
+	tmpl, _ := Find("postgres")
+	images := []Image{{Name: tmpl.Name, Repository: tmpl.Repository, DefaultTag: tmpl.DefaultTag}}
+	for _, image := range append(images, tmpl.Images...) {
+		t.Run(image.Name, func(t *testing.T) {
+			if !image.RunsOn(runtime.GOARCH) {
+				t.Skipf("%s isn't published for %s", image.Repository, runtime.GOARCH)
+			}
+			testPostgres(t, deployImage(t, "postgres", image.Repository+":"+image.DefaultTag, false))
+		})
+	}
+}
+
+func testPostgres(t *testing.T, run *templateRun) {
 	user := run.seed.Env["POSTGRES_USER"]
 	psql := func(password, sql string) (string, error) {
 		// From another container, as an app connects. The image trusts
@@ -245,6 +261,72 @@ func TestMySQLTemplate(t *testing.T) {
 	assert.Equal(t, "42", strings.TrimSpace(out), "the table survived the redeploy")
 }
 
+func TestMariaDBTemplate(t *testing.T) {
+	run := deployTemplate(t, "mariadb", false)
+	env := run.seed.Env
+	mariadb := func(user, password, sql string) (string, error) {
+		return run.client("env", "MYSQL_PWD="+password, "mariadb", "-h", run.spec.Name, "-u", user, "-NBe", sql, env["MARIADB_DATABASE"])
+	}
+
+	_, err := mariadb(env["MARIADB_USER"], env["MARIADB_PASSWORD"], "CREATE TABLE kept (x int); INSERT INTO kept VALUES (42)")
+	require.NoError(t, err)
+	out, err := mariadb(env["MARIADB_USER"], "wrong", "SELECT 1")
+	assert.Error(t, err, "a wrong password is refused")
+	assert.Contains(t, out, "Access denied")
+	out, err = mariadb("root", env["MARIADB_ROOT_PASSWORD"], "SELECT COUNT(*) FROM kept")
+	require.NoError(t, err, "root signs in with its generated password: %s", out)
+
+	run.redeploy()
+	out, err = mariadb(env["MARIADB_USER"], env["MARIADB_PASSWORD"], "SELECT x FROM kept")
+	require.NoError(t, err)
+	assert.Equal(t, "42", strings.TrimSpace(out), "the table survived the redeploy")
+}
+
+func TestMongoDBTemplate(t *testing.T) {
+	run := deployTemplate(t, "mongodb", false)
+	env := run.seed.Env
+	mongosh := func(user, password, database, script string) (string, error) {
+		uri := fmt.Sprintf("mongodb://%s:%s@%s/%s", user, password, run.spec.Name, database)
+		return run.client("mongosh", "--quiet", "--norc", uri, "--eval", script)
+	}
+	app := func(script string) (string, error) {
+		return mongosh(env["MONGO_USER"], env["MONGO_PASSWORD"], env["MONGO_INITDB_DATABASE"], script)
+	}
+
+	out, err := app(`db.kept.insertOne({x: 42}); db.kept.countDocuments()`)
+	require.NoError(t, err, out)
+	assert.Equal(t, "1", strings.TrimSpace(out), "the app's user writes to its database")
+	out, err = run.client("mongosh", "--quiet", "--norc", "mongodb://"+run.spec.Name+"/"+env["MONGO_INITDB_DATABASE"], "--eval", "db.kept.countDocuments()")
+	assert.Error(t, err, "reading needs a password")
+	assert.Contains(t, out, "requires authentication")
+	out, err = mongosh(env["MONGO_USER"], "wrong", env["MONGO_INITDB_DATABASE"], "1")
+	assert.Error(t, err, "a wrong password is refused")
+	assert.Contains(t, out, "Authentication failed")
+	out, err = app(`db.getSiblingDB("other").x.insertOne({x: 1})`)
+	assert.Error(t, err, "the app's user owns its database and nothing else")
+	assert.Contains(t, out, "not authorized")
+	out, err = mongosh("root", env["MONGO_INITDB_ROOT_PASSWORD"], "admin", `db.getSiblingDB("`+env["MONGO_INITDB_DATABASE"]+`").kept.countDocuments()`)
+	require.NoError(t, err, "root signs in with its generated password: %s", out)
+
+	cmdline, err := run.exec("cat", "/proc/1/cmdline")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(cmdline, "mongod"), "sh and the entrypoint exec into the server: %q", cmdline)
+	status, err := run.exec("cat", "/proc/1/status")
+	require.NoError(t, err)
+	assert.NotRegexp(t, `(?m)^Uid:\s+0\s`, status, "the entrypoint still dropped root")
+	limits, err := run.exec("cat", "/proc/1/limits")
+	require.NoError(t, err)
+	assert.Regexp(t, `Max open files\s+64000\s`, limits, "WiredTiger has a file for each collection and index")
+	logs, err := run.exec("sh", "-c", `find / -xdev -name '*_log' -path '*mongosh*' 2>/dev/null | wc -l`)
+	require.NoError(t, err)
+	assert.Equal(t, "0", strings.TrimSpace(logs), "the healthchecks leave no mongosh logs")
+
+	run.redeploy()
+	out, err = app(`db.kept.findOne().x`)
+	require.NoError(t, err, out)
+	assert.Equal(t, "42", strings.TrimSpace(out), "the document survived the redeploy")
+}
+
 func TestRedisTemplate(t *testing.T) {
 	run := deployTemplate(t, "redis", false)
 	cli := func(args ...string) (string, error) {
@@ -293,6 +375,13 @@ func TestTemplatesServeTLSWithTheAppsCertificate(t *testing.T) {
 		{"mysql", func(run *templateRun, ca string) (string, error) {
 			return withCA(run, ca, fmt.Sprintf(`MYSQL_PWD="$SECRET" mysql --ssl-mode=VERIFY_IDENTITY --ssl-ca=/tmp/ca.crt -h %s -u app -NBe "SELECT VARIABLE_VALUE <> '' FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_cipher'"`, run.spec.Name))
 		}, "1"},
+		{"mariadb", func(run *templateRun, ca string) (string, error) {
+			return withCA(run, ca, fmt.Sprintf(`MYSQL_PWD="$SECRET" mariadb --ssl-verify-server-cert --ssl-ca=/tmp/ca.crt -h %s -u app -NBe "SELECT VARIABLE_VALUE <> '' FROM information_schema.SESSION_STATUS WHERE VARIABLE_NAME = 'Ssl_cipher'"`, run.spec.Name))
+		}, "1"},
+		{"mongodb", func(run *templateRun, ca string) (string, error) {
+			return withCA(run, ca, fmt.Sprintf(`mongosh --quiet --norc "mongodb://app:$SECRET@%s/%s?tls=true&tlsCAFile=/tmp/ca.crt&tlsAllowInvalidHostnames=true" --eval 'db.runCommand({connectionStatus: 1}).ok'`,
+				run.spec.Name, run.seed.Env["MONGO_INITDB_DATABASE"]))
+		}, "1"},
 		{"redis", func(run *templateRun, ca string) (string, error) {
 			return withCA(run, ca, fmt.Sprintf(`redis-cli -h %s -p 6380 --tls --cacert /tmp/ca.crt -a "$SECRET" --no-auth-warning ping`, run.spec.Name))
 		}, "PONG"},
@@ -304,13 +393,20 @@ func TestTemplatesServeTLSWithTheAppsCertificate(t *testing.T) {
 			assert.Equal(t, c.want, strings.TrimSpace(out), "connected over verified TLS")
 			out, err = run.exec("stat", "-c", "%a %U", tlsDir+"/server.key")
 			require.NoError(t, err, out)
-			assert.Equal(t, "600 "+c.slug, strings.TrimSpace(out), "only the server's user reads the key")
+			assert.Equal(t, "600 "+run.tmpl.TLS.Owner, strings.TrimSpace(out), "only the server's user reads the key")
 
 			other, err := IssueTLS("other", time.Now())
 			require.NoError(t, err)
 			out, err = c.connect(run, other[EnvTLSCA])
 			assert.Error(t, err, "another CA doesn't verify the server: %s", out)
 
+			if c.slug == "mongodb" {
+				out, err := run.client("mongosh", "--quiet", "--norc",
+					fmt.Sprintf("mongodb://app:%s@%s/%s", run.password(), run.spec.Name, run.seed.Env["MONGO_INITDB_DATABASE"]),
+					"--eval", "db.runCommand({connectionStatus: 1}).ok")
+				require.NoError(t, err, out)
+				assert.Equal(t, "1", strings.TrimSpace(out), "apps on the server still connect without TLS")
+			}
 			if c.slug == "redis" {
 				out, _ := run.client("redis-cli", "-h", run.spec.Name, "-p", "6380", "-a", run.password(), "--no-auth-warning", "ping")
 				assert.NotContains(t, out, "PONG", "the TLS port refuses plain connections")
@@ -328,6 +424,7 @@ type templateRun struct {
 	engine *docker.Engine
 	spec   docker.ServiceSpec
 	seed   Seed
+	tmpl   Template
 }
 
 // deployTemplate deploys the template as an app would be, minus the
@@ -335,6 +432,14 @@ type templateRun struct {
 // tls, it deploys as external access does: the app's certificate in the
 // env and the template's TLS arguments.
 func deployTemplate(t *testing.T, slug string, tls bool) *templateRun {
+	tmpl, ok := Find(slug)
+	require.True(t, ok)
+
+	return deployImage(t, slug, tmpl.Repository+":"+tmpl.DefaultTag, tls)
+}
+
+// deployImage is deployTemplate with another of the template's images.
+func deployImage(t *testing.T, slug, ref string, tls bool) *templateRun {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 
@@ -355,7 +460,7 @@ func deployTemplate(t *testing.T, slug string, tls bool) *templateRun {
 	app := fmt.Sprintf("it-%s-%d", slug, time.Now().UnixNano()%1_000_000)
 	seed, err := tmpl.Seed(app)
 	require.NoError(t, err)
-	image, err := engine.PullImage(ctx, tmpl.Repository+":"+tmpl.DefaultTag, nil)
+	image, err := engine.PullImage(ctx, ref, nil)
 	require.NoError(t, err)
 
 	spec := docker.ServiceSpec{
@@ -387,7 +492,7 @@ func deployTemplate(t *testing.T, slug string, tls bool) *templateRun {
 		}
 	})
 
-	run := &templateRun{t: t, ctx: ctx, engine: engine, spec: spec, seed: seed}
+	run := &templateRun{t: t, ctx: ctx, engine: engine, spec: spec, seed: seed, tmpl: tmpl}
 	run.deploy()
 
 	return run
@@ -432,7 +537,7 @@ func (r *templateRun) container() string {
 
 // password is the seed's generated password for the template's user.
 func (r *templateRun) password() string {
-	for _, key := range []string{"POSTGRES_PASSWORD", "MYSQL_PASSWORD", "REDIS_PASSWORD"} {
+	for _, key := range []string{"POSTGRES_PASSWORD", "MYSQL_PASSWORD", "MARIADB_PASSWORD", "MONGO_PASSWORD", "REDIS_PASSWORD"} {
 		if p, ok := r.seed.Env[key]; ok {
 			return p
 		}
@@ -507,6 +612,23 @@ var slowQueryProbes = map[string]struct {
 		},
 		want: "echowa_probe", own: "performance_schema",
 	},
+	// As MySQL's. Its health check reads information_schema instead.
+	"mariadb": {
+		run: func(r *templateRun) (string, error) {
+			return r.client("sh", "-c", fmt.Sprintf(`MYSQL_PWD='%s' mariadb -h %s -u %s %s -e "SELECT 4242 AS echowa_probe"`,
+				r.password(), r.spec.Name, r.seed.Env["MARIADB_USER"], r.seed.Env["MARIADB_DATABASE"]))
+		},
+		want: "echowa_probe", own: "information_schema",
+	},
+	// As an app does, over the network as its own user.
+	"mongodb": {
+		run: func(r *templateRun) (string, error) {
+			return r.client("mongosh", "--quiet", "--norc",
+				fmt.Sprintf("mongodb://app:%s@%s/%s", r.password(), r.spec.Name, r.seed.Env["MONGO_INITDB_DATABASE"]),
+				"--eval", "db.echowa_probe.insertOne({n: 4242}); db.echowa_probe.find({n: 4242}).toArray()")
+		},
+		want: "echowa_probe", own: "admin.",
+	},
 	"redis": {
 		run: func(r *templateRun) (string, error) {
 			return r.exec("sh", "-c", `REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SET echowa_probe 4242`)
@@ -559,6 +681,9 @@ func TestTemplatesListTheirSlowQueries(t *testing.T) {
 			assert.NotContains(t, joined, "4242", "values are replaced by placeholders")
 			assert.NotContains(t, joined, probe.own, "Echowa's own checks aren't listed")
 
+			if tmpl.Inspect.ResetSlowQueries == nil {
+				return
+			}
 			_, err = run.engine.Exec(run.ctx, run.spec.Name, tmpl.Inspect.ResetSlowQueries)
 			require.NoError(t, err)
 			report = read()
@@ -572,11 +697,38 @@ func TestTemplatesListTheirSlowQueries(t *testing.T) {
 	}
 }
 
+// keptQueries read and change the data a backup test restores, each
+// printing one value per line.
+type keptQueries struct {
+	// notes are rows 1 and 2's, count is kept_count's, and all is every
+	// row's.
+	notes, count, all string
+	// change changes row 1 and deletes row 2; after adds row 9999, and
+	// afterNote reads it.
+	change, after, afterNote string
+}
+
+var sqlKept = keptQueries{
+	notes:     "SELECT note FROM kept WHERE id <= 2 ORDER BY id",
+	count:     "SELECT n FROM kept_count",
+	all:       "SELECT COUNT(*) FROM kept",
+	change:    "UPDATE kept SET note = 'changed' WHERE id = 1; DELETE FROM kept WHERE id = 2",
+	after:     "INSERT INTO kept (id, note) VALUES (9999, 'after')",
+	afterNote: "SELECT note FROM kept WHERE id = 9999",
+}
+
+// mongoInApp runs a script as root in the app's database.
+func mongoInApp(r *templateRun, script string) (string, error) {
+	return r.exec("sh", "-c", `exec mongosh --quiet --norc --eval "$1$2"`, "sh",
+		mongoAuth+`db = db.getSiblingDB(process.env.MONGO_INITDB_DATABASE); `, script)
+}
+
 // backupProbes make and read the data a backup test restores: kept has
 // UTF-8 text, binary data and enough rows that a cut-off dump ends inside
 // a statement, and kept_count is a view.
 var backupProbes = map[string]struct {
 	sql    func(r *templateRun, statements string) (string, error)
+	kept   keptQueries
 	create string
 	// binary prints row 1's data as hex.
 	binary string
@@ -588,6 +740,7 @@ var backupProbes = map[string]struct {
 		sql: func(r *templateRun, statements string) (string, error) {
 			return r.exec("sh", "-c", `psql -X -q -A -t -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"`, "sh", statements)
 		},
+		kept: sqlKept,
 		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data bytea);
 			INSERT INTO kept VALUES (1, 'café', '\x00ff'), (2, 'naïve ☃', NULL);
 			INSERT INTO kept SELECT n, encode(sha256(n::text::bytea), 'hex'), sha256(n::text::bytea) FROM generate_series(3, 5000) n;
@@ -599,6 +752,7 @@ var backupProbes = map[string]struct {
 		sql: func(r *templateRun, statements string) (string, error) {
 			return r.exec("sh", "-c", `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root -N -B -e "$1" "$MYSQL_DATABASE"`, "sh", statements)
 		},
+		kept: sqlKept,
 		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data varbinary(32));
 			INSERT INTO kept VALUES (1, 'café', 0x00ff), (2, 'naïve ☃', NULL);
 			SET SESSION cte_max_recursion_depth = 10000;
@@ -607,11 +761,42 @@ var backupProbes = map[string]struct {
 			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
 		binary: "SELECT HEX(data) FROM kept WHERE id = 1",
 	},
+	"mariadb": {
+		sql: func(r *templateRun, statements string) (string, error) {
+			return r.exec("sh", "-c", `MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -u root -N -B -e "$1" "$MARIADB_DATABASE"`, "sh", statements)
+		},
+		kept: sqlKept,
+		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data varbinary(32));
+			INSERT INTO kept VALUES (1, 'café', 0x00ff), (2, 'naïve ☃', NULL);
+			SET SESSION max_recursive_iterations = 10000;
+			INSERT INTO kept WITH RECURSIVE s (n) AS (SELECT 3 UNION ALL SELECT n + 1 FROM s WHERE n < 5000)
+				SELECT n, SHA2(n, 256), UNHEX(SHA2(n, 256)) FROM s;
+			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
+		binary: "SELECT HEX(data) FROM kept WHERE id = 1",
+	},
+	"mongodb": {
+		sql: mongoInApp,
+		kept: keptQueries{
+			notes:     `db.kept.find({_id: {$lte: 2}}).sort({_id: 1}).forEach(d => print(d.note))`,
+			count:     `print(db.kept_count.findOne().n)`,
+			all:       `print(db.kept.countDocuments())`,
+			change:    `db.kept.updateOne({_id: 1}, {$set: {note: "changed"}}); db.kept.deleteOne({_id: 2})`,
+			after:     `db.kept.insertOne({_id: 9999, note: "after"})`,
+			afterNote: `print(db.kept.findOne({_id: 9999}).note)`,
+		},
+		create: `db.kept.insertMany([{_id: 1, note: "café", data: BinData(0, "AP8=")}, {_id: 2, note: "naïve ☃", data: null}]);
+			db.kept.insertMany(Array.from({length: 4998}, (_, i) => ({_id: i + 3, note: "n" + (i + 3), data: UUID()})));
+			db.kept.createIndex({note: 1});
+			db.createView("kept_count", "kept", [{$count: "n"}])`,
+		binary: `print(db.kept.findOne({_id: 1}).data.toString("hex"))`,
+	},
 }
 
 func TestTemplatesBackUpAndRestore(t *testing.T) {
 	for _, tmpl := range All() {
-		if tmpl.Backup == nil {
+		// A whole server's backup has no tables to probe:
+		// TestRedisBacksUpAndRestoresTheWholeServer covers it.
+		if tmpl.Backup == nil || tmpl.Backup.WholeServer() {
 			continue
 		}
 		t.Run(tmpl.Slug, func(t *testing.T) {
@@ -624,10 +809,11 @@ func TestTemplatesBackUpAndRestore(t *testing.T) {
 				require.NoError(t, err, out)
 				return strings.TrimSpace(out)
 			}
+			kept := probe.kept
 			assertKept := func(r *templateRun, msg string) {
 				t.Helper()
-				assert.Equal(t, "café\nnaïve ☃", sql(r, "SELECT note FROM kept WHERE id <= 2 ORDER BY id"), msg)
-				assert.Equal(t, "5000", sql(r, "SELECT n FROM kept_count"), msg)
+				assert.Equal(t, "café\nnaïve ☃", sql(r, kept.notes), msg)
+				assert.Equal(t, "5000", sql(r, kept.count), msg)
 				assert.Equal(t, "00ff", strings.ToLower(sql(r, probe.binary)), msg)
 			}
 
@@ -663,7 +849,7 @@ func TestTemplatesBackUpAndRestore(t *testing.T) {
 			require.Equal(t, 0, code, stderr)
 			assertKept(target, "restored into a fresh app, with its own database and passwords")
 
-			sql(source, "UPDATE kept SET note = 'changed' WHERE id = 1; DELETE FROM kept WHERE id = 2")
+			sql(source, kept.change)
 			_, code, stderr = source.stream(b.Restore, bytes.NewReader(dump))
 			require.Equal(t, 0, code, stderr)
 			assertKept(source, "restored over changed data")
@@ -687,13 +873,13 @@ func TestTemplatesBackUpAndRestore(t *testing.T) {
 			assert.NotEqual(t, 0, code, "a dump that isn't one fails")
 			t.Logf("not a dump: %s", stderr)
 
-			sql(target, "INSERT INTO kept (id, note) VALUES (9999, 'after')")
+			sql(target, kept.after)
 			_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump[:len(dump)/2]))
 			assert.NotEqual(t, 0, code, "a restore that fails half way exits non-zero")
 			t.Logf("cut off: %s", stderr)
 			if b.Atomic {
-				assert.Equal(t, "5001", sql(target, "SELECT COUNT(*) FROM kept"), "the failed restore rolled back")
-				assert.Equal(t, "after", sql(target, "SELECT note FROM kept WHERE id = 9999"))
+				assert.Equal(t, "5001", sql(target, kept.all), "the failed restore rolled back")
+				assert.Equal(t, "after", sql(target, kept.afterNote))
 			}
 
 			out, err = exec.Command("docker", "service", "scale", "--detach", source.spec.Name+"=0").CombinedOutput()
@@ -704,6 +890,101 @@ func TestTemplatesBackUpAndRestore(t *testing.T) {
 			}, time.Minute, time.Second, "a dump of a stopped service fails with ErrNotRunning")
 		})
 	}
+}
+
+func TestRedisBacksUpAndRestoresTheWholeServer(t *testing.T) {
+	tmpl, _ := Find("redis")
+	b := tmpl.Backup
+	cli := func(r *templateRun, args ...string) string {
+		t.Helper()
+		out, err := r.exec(append([]string{"sh", "-c", `REDISCLI_AUTH="$REDIS_PASSWORD" exec redis-cli "$@"`, "sh"}, args...)...)
+		require.NoError(t, err, out)
+		return strings.TrimSpace(out)
+	}
+	positive := func(r *templateRun, args ...string) {
+		t.Helper()
+		n, err := strconv.Atoi(cli(r, args...))
+		require.NoError(t, err)
+		assert.Positive(t, n, "%v", args)
+	}
+	// Every kind of value, a module's among them, in two databases.
+	seed := func(r *templateRun) {
+		t.Helper()
+		require.Equal(t, "OK", cli(r, "DEBUG", "POPULATE", "5000", "key", "64"))
+		require.Equal(t, "OK", cli(r, "SET", "note", "café ☃"))
+		require.Equal(t, "OK", cli(r, "SET", "session", "abc", "EX", "86400"))
+		require.Equal(t, "2", cli(r, "RPUSH", "queue", "a", "b"))
+		require.Equal(t, "2", cli(r, "HSET", "user", "name", "Ada", "token", "t"))
+		require.Equal(t, "1", cli(r, "HEXPIRE", "user", "86400", "FIELDS", "1", "token"))
+		require.Equal(t, "OK", cli(r, "JSON.SET", "doc", "$", `{"a":[1,2]}`))
+		require.Equal(t, "OK", cli(r, "-n", "3", "SET", "other", "db3"))
+	}
+	assertKept := func(r *templateRun, msg string) {
+		t.Helper()
+		assert.Equal(t, "5005", cli(r, "DBSIZE"), msg)
+		assert.Equal(t, "café ☃", cli(r, "GET", "note"), msg)
+		assert.Equal(t, "a\nb", cli(r, "LRANGE", "queue", "0", "-1"), msg)
+		assert.Equal(t, "Ada", cli(r, "HGET", "user", "name"), msg)
+		assert.Equal(t, `{"a":[1,2]}`, cli(r, "JSON.GET", "doc"), msg)
+		assert.Equal(t, "db3", cli(r, "-n", "3", "GET", "other"), msg)
+		positive(r, "TTL", "session")
+		positive(r, "HTTL", "user", "FIELDS", "1", "token")
+	}
+
+	source := deployTemplate(t, "redis", false)
+	seed(source)
+	out, err := source.engine.Exec(source.ctx, source.spec.Name, b.Version)
+	require.NoError(t, err)
+	version, err := ServerVersion(out)
+	require.NoError(t, err)
+	t.Logf("server version %s (%s)", version, strings.TrimSpace(string(out)))
+
+	start := time.Now()
+	dump, code, stderr := source.stream(b.Dump, nil)
+	require.Equal(t, 0, code, stderr)
+	t.Logf("dumped %d bytes in %s", len(dump), time.Since(start))
+	assert.Contains(t, stderr, "Transfer finished with success")
+	head, err := ReadDumpHead(dump)
+	require.NoError(t, err)
+	assert.Equal(t, "redis", head.Template)
+	assert.Equal(t, version, head.ServerVersion)
+
+	target := deployTemplate(t, "redis", false)
+	out, err = target.engine.Exec(target.ctx, target.spec.Name, b.Restorable)
+	require.NoError(t, err)
+	assert.Equal(t, "1", strings.TrimSpace(string(out)), "a server Echowa deploys can take a restore")
+	saves := cli(target, "CONFIG", "GET", "save")
+	_, code, stderr = target.stream(b.Restore, bytes.NewReader(dump))
+	require.Equal(t, 0, code, stderr)
+	assertKept(target, "restored into a fresh app, with its own password")
+	assert.Equal(t, saves, cli(target, "CONFIG", "GET", "save"), "saves are back on")
+	target.redeploy()
+	assertKept(target, "the restore was written to the append-only file")
+
+	require.Equal(t, "OK", cli(source, "SET", "note", "changed"))
+	require.Equal(t, "OK", cli(source, "SET", "since", "the backup"))
+	require.Equal(t, "1", cli(source, "DEL", "queue"))
+	_, code, stderr = source.stream(b.Restore, bytes.NewReader(dump))
+	require.Equal(t, 0, code, stderr)
+	assertKept(source, "restored over changed data")
+	assert.Equal(t, "0", cli(source, "EXISTS", "since"), "keys written since the backup are gone")
+
+	flipped := bytes.Clone(dump)
+	flipped[len(flipped)/2] ^= 0xff
+	for name, broken := range map[string][]byte{
+		"not a dump": []byte("this is not a dump\n"),
+		"cut off":    dump[:len(dump)/2],
+		"flipped":    flipped,
+		"empty":      nil,
+	} {
+		_, code, stderr = target.stream(b.Restore, bytes.NewReader(broken))
+		assert.Equal(t, b.Unchanged, code, "%s is refused before anything changes: %s", name, stderr)
+		assertKept(target, name+" changed nothing")
+	}
+	assert.Equal(t, saves, cli(target, "CONFIG", "GET", "save"), "saves are back on after a refusal")
+	ls, err := target.exec("ls", "/data")
+	require.NoError(t, err)
+	assert.NotContains(t, ls, "echowa-restore", "a refused dump's file is removed")
 }
 
 // stream runs cmd in the service's task through ExecStream, as a backup

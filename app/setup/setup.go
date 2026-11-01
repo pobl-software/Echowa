@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"goravel/app/host"
 	"goravel/app/release"
 )
 
@@ -212,11 +213,11 @@ func (s *steps) each(steps ...func() error) error {
 // machine names this server for the banner: host name, OS and CPU.
 func machine() string {
 	parts := []string{}
-	if host, err := os.Hostname(); err == nil {
-		parts = append(parts, host)
+	if hostname, err := os.Hostname(); err == nil {
+		parts = append(parts, hostname)
 	}
 	if data, err := os.ReadFile("/etc/os-release"); err == nil {
-		if name := parseOSRelease(string(data))["PRETTY_NAME"]; name != "" {
+		if name := host.ParseOSRelease(data)["PRETTY_NAME"]; name != "" {
 			parts = append(parts, name)
 		}
 	}
@@ -293,7 +294,7 @@ func (s *steps) preflight() error {
 	if err != nil {
 		return err
 	}
-	info := parseOSRelease(string(osRelease))
+	info := host.ParseOSRelease(osRelease)
 	if _, _, ok := dockerRepo(info); !ok {
 		return fmt.Errorf("this supports Ubuntu and Debian (found %s)", info["PRETTY_NAME"])
 	}

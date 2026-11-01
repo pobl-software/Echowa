@@ -1,10 +1,12 @@
 package routes
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/http/limit"
+	"github.com/spf13/cast"
 
 	"goravel/app/facades"
 	"goravel/app/inertia"
@@ -23,6 +25,24 @@ func RateLimiters() {
 		return []http.Limit{
 			limit.PerMinute(5).By("email|" + strings.ToLower(ctx.Request().Input("email")) + "|" + ip).Response(tooManyAttempts("email")),
 			limit.PerMinute(20).By("ip|" + ip).Response(tooManyAttempts("email")),
+		}
+	})
+
+	// A code has a million values, so guesses are counted per user as
+	// well as per IP: spreading them over many addresses doesn't help.
+	// The user is the one signed in, or the one whose password was right.
+	// The hourly cap keeps a month of guessing, with the password, at a
+	// few percent.
+	facades.RateLimiter().ForWithLimits("two-factor", func(ctx http.Context) []http.Limit {
+		ip := services.ClientIP(ctx)
+		user := services.PendingTwoFactorUserID(ctx)
+		if id, err := facades.Auth(ctx).ID(); err == nil {
+			user = cast.ToUint(id)
+		}
+		return []http.Limit{
+			limit.PerMinute(5).By(fmt.Sprintf("two-factor|user|%d", user)).Response(tooManyAttempts("code")),
+			limit.PerHour(20).By(fmt.Sprintf("two-factor|user-hour|%d", user)).Response(tooManyAttempts("code")),
+			limit.PerMinute(10).By("two-factor|ip|" + ip).Response(tooManyAttempts("code")),
 		}
 	})
 }
