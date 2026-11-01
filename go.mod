@@ -2,6 +2,10 @@ module goravel
 
 go 1.26.0
 
+// No MPTCP on Echowa's listener: CVE-2026-98432's known exploit needs one,
+// and a single admin UI gains nothing from it.
+godebug multipathtcp=0
+
 require (
 	aead.dev/minisign v0.3.0
 	github.com/aws/aws-sdk-go-v2 v1.47.5
