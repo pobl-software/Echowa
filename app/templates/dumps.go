@@ -86,7 +86,8 @@ var (
 )
 
 // ReadDumpHead reads which template's dump head starts, and what it says.
-// It knows PostgreSQL's custom format, mysqldump's SQL, gzipped or not,
+// It knows PostgreSQL's custom format, mysqldump's and mariadb-dump's SQL,
+// gzipped or not,
 // and Redis's RDB snapshots. An error says, in words for the page, why the
 // file can't be restored.
 func ReadDumpHead(head []byte) (DumpHead, error) {
@@ -136,7 +137,8 @@ func gunzipHead(head []byte) ([]byte, error) {
 	return text[:n], nil
 }
 
-// readMySQLDump reads the comments mysqldump starts its output with. A
+// readMySQLDump reads the comments mysqldump and mariadb-dump start their
+// output with. A
 // dump that switches database would restore beside the app's database,
 // not into it, so it's refused.
 func readMySQLDump(text []byte, gzipped bool) (DumpHead, error) {
@@ -154,7 +156,13 @@ func readMySQLDump(text []byte, gzipped bool) (DumpHead, error) {
 	if err != nil {
 		return DumpHead{}, errors.New("This mysqldump file's server version can't be read.")
 	}
-	head := DumpHead{Template: "mysql", ServerVersion: version, Gzip: gzipped}
+	// The server says which it is, not the dump tool: either one dumps
+	// either server.
+	template := "mysql"
+	if bytes.Contains(server[1], []byte("MariaDB")) {
+		template = "mariadb"
+	}
+	head := DumpHead{Template: template, ServerVersion: version, Gzip: gzipped}
 	if db != nil {
 		head.Database = string(db[1])
 	}

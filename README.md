@@ -29,7 +29,8 @@ curl -fsSL https://get.echowa.dev/install.sh | sudo bash
 ```
 
 > [!NOTE]
-> Echowa is young (0.x) and changes quickly, so expect rough edges.
+> Echowa is 1.0. Updates within 1.x keep your apps, settings and data, and
+> each one says in its notes if you need to do anything.
 
 <br>
 
@@ -42,14 +43,16 @@ ran, so going back to any earlier one is a click.
 
 <img src=".github/readme/deploys.png" alt="Three cards. A deploy's live log from queued to succeeded in 49 seconds. A start-first rolling update from v47 to v48 with 0 dropped requests. A deployments list with a Redeploy button on each earlier success." width="100%">
 
-## PostgreSQL, MySQL and Redis, beside your app
+## PostgreSQL, MySQL, MariaDB and Redis, beside your app
 
 Start a database from a template and Echowa generates its passwords, gives it
 a volume that survives redeploys, and checks its health every minute. Link it
 to your app, copy the connection URL, and see what it's doing from the same
-page. You can also open it on a host port, over TLS, for a client outside the
-server, and put PgBouncer in front of PostgreSQL with one click when your apps
-open more connections than it should hold.
+page. Back it up to any S3 bucket on a schedule, and restore it in place or
+into a new app: every restore takes a safety backup first and checks the
+dump before it commits. You can also open it on a host port, over TLS, for a
+client outside the server, and put PgBouncer in front of PostgreSQL with one
+click when your apps open more connections than it should hold.
 
 <img src=".github/readme/databases.png" alt="Two cards. An app's databases: PostgreSQL 18, Redis 8 and MySQL 9.7, all running, with a hidden connection URL. A PostgreSQL database's connections, cache hits, commits and size, above its slowest queries." width="100%">
 
@@ -89,6 +92,11 @@ instead of in a crontab, a DNS console and a config file on the server.
 <td valign="top"><b>Your choice of access</b><br>Reach the UI over HTTP, HTTPS on your own domain, or a Cloudflare Tunnel.</td>
 <td valign="top"><b>Locked from the start</b><br>No sign-up page. The installer prints a one-time link that creates the only admin.</td>
 </tr>
+<tr>
+<td valign="top"><b>Two-factor sign-in</b><br>Codes from any authenticator app, and a session timeout you choose, measured from your last action.</td>
+<td valign="top"><b>Server maintenance</b><br>Security updates, a restart a new kernel needs, failed units and a release near the end of its support, read without root.</td>
+<td valign="top"><b>Alarms</b><br>Every alert that went off, in one list with what's still firing, whether or not it was sent anywhere.</td>
+</tr>
 </table>
 
 ## Does less, on purpose
@@ -109,8 +117,8 @@ server you understand completely, with the numbers to show it's healthy.
 - Pulls pre-built images from GHCR or any registry
 - Zero-downtime, healthcheck-gated rollouts on Docker Swarm
 - Automatic TLS through Traefik and Let's Encrypt
-- PostgreSQL, MySQL and Redis from templates
-- Backups of PostgreSQL and MySQL to S3, with restores and exports
+- PostgreSQL, MySQL, MariaDB and Redis from templates
+- Backups of PostgreSQL, MySQL, MariaDB and Redis to S3, with restores and exports
 - Host, app and database metrics, with a year of history
 - Alerts to Slack, Discord, Teams, ntfy or email
 - Live logs and live deploy output in the browser
@@ -125,7 +133,7 @@ server you understand completely, with the numbers to show it's healthy.
 - Compose stacks and sidecars
 - More than one server
 - Preview environments per branch
-- Backups of Redis or app volumes
+- Backups of app volumes
 - Teams and roles. One admin, by design
 
 </td>

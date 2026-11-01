@@ -67,7 +67,7 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 	_, page := b.visit("/apps/create")
 
 	list := page.Props["templates"].([]any)
-	s.Require().Len(list, 3)
+	s.Require().Len(list, 4)
 	postgres := list[0].(map[string]any)
 	s.Equal("postgres", postgres["slug"])
 	s.Equal("PostgreSQL", postgres["name"])
@@ -88,7 +88,16 @@ func (s *AppTemplatesTestSuite) TestCreateFormOffersTemplatesWithoutValues() {
 		map[string]any{"key": "MYSQL_PASSWORD", "source": "generated"},
 		map[string]any{"key": "MYSQL_ROOT_PASSWORD", "source": "generated"},
 	}, mysql["env"], "a fixed value is a source too, never the value")
-	s.Equal("redis", list[2].(map[string]any)["slug"])
+	mariadb := list[2].(map[string]any)
+	s.Equal("mariadb", mariadb["slug"])
+	s.Equal("12.3", mariadb["default_tag"])
+	s.Equal([]any{
+		map[string]any{"key": "MARIADB_USER", "source": "fixed"},
+		map[string]any{"key": "MARIADB_DATABASE", "source": "app_name"},
+		map[string]any{"key": "MARIADB_PASSWORD", "source": "generated"},
+		map[string]any{"key": "MARIADB_ROOT_PASSWORD", "source": "generated"},
+	}, mariadb["env"])
+	s.Equal("redis", list[3].(map[string]any)["slug"])
 }
 
 func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() {
@@ -98,6 +107,7 @@ func (s *AppTemplatesTestSuite) TestStoreFromATemplateSeedsTheAppAndDeploysIt() 
 	}{
 		{"postgres", "POSTGRES_PASSWORD", "/var/lib/postgresql", false},
 		{"mysql", "MYSQL_PASSWORD", "/var/lib/mysql", false},
+		{"mariadb", "MARIADB_PASSWORD", "/var/lib/mysql", false},
 		{"redis", "REDIS_PASSWORD", "/data", true},
 	} {
 		s.Run(tt.slug, func() {

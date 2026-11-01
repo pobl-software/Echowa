@@ -27,6 +27,12 @@ export function SlowQueriesPanel({
 }) {
     const switched = template.slow_queries === 'switch';
     const on = !switched || app.slow_queries;
+    // What the switch starts the server with: PostgreSQL's extension, or
+    // MariaDB's Performance Schema.
+    const collector =
+        template.slug === 'mariadb'
+            ? { on: 'to turn on the Performance Schema', off: 'without the Performance Schema' }
+            : { on: 'to load the statistics extension', off: 'without the statistics extension' };
     const [loading, setLoading] = useState(false);
 
     const load = () =>
@@ -51,8 +57,7 @@ export function SlowQueriesPanel({
                         variant="default"
                         onConfirm={() => router.post(`/apps/${app.id}/slow-queries`)}
                     >
-                        {app.name} redeploys now to load the statistics extension, so it&apos;s unavailable for a few
-                        seconds.
+                        {app.name} redeploys now {collector.on}, so it&apos;s unavailable for a few seconds.
                     </ConfirmDelete>
                 }
             />
@@ -97,8 +102,8 @@ export function SlowQueriesPanel({
                             variant="default"
                             onConfirm={() => router.delete(`/apps/${app.id}/slow-queries`)}
                         >
-                            {app.name} redeploys now without the statistics extension, so it&apos;s unavailable for a
-                            few seconds. The totals so far are lost.
+                            {app.name} redeploys now {collector.off}, so it&apos;s unavailable for a few seconds. The
+                            totals so far are lost.
                         </ConfirmDelete>
                     )}
                 </>

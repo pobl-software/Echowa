@@ -7,7 +7,7 @@
 //
 //	go test -tags docker ./app/templates/...
 //
-// It pulls postgres:18, mysql:9.7 and redis:8, and needs the docker CLI to
+// It pulls postgres:18, mysql:9.7, mariadb:12.3 and redis:8, and needs the docker CLI to
 // exec into the tasks. Each is also backed up and restored, as ADRs 0034
 // and 0044 do.
 package templates
@@ -245,6 +245,27 @@ func TestMySQLTemplate(t *testing.T) {
 	assert.Equal(t, "42", strings.TrimSpace(out), "the table survived the redeploy")
 }
 
+func TestMariaDBTemplate(t *testing.T) {
+	run := deployTemplate(t, "mariadb", false)
+	env := run.seed.Env
+	mariadb := func(user, password, sql string) (string, error) {
+		return run.client("env", "MYSQL_PWD="+password, "mariadb", "-h", run.spec.Name, "-u", user, "-NBe", sql, env["MARIADB_DATABASE"])
+	}
+
+	_, err := mariadb(env["MARIADB_USER"], env["MARIADB_PASSWORD"], "CREATE TABLE kept (x int); INSERT INTO kept VALUES (42)")
+	require.NoError(t, err)
+	out, err := mariadb(env["MARIADB_USER"], "wrong", "SELECT 1")
+	assert.Error(t, err, "a wrong password is refused")
+	assert.Contains(t, out, "Access denied")
+	out, err = mariadb("root", env["MARIADB_ROOT_PASSWORD"], "SELECT COUNT(*) FROM kept")
+	require.NoError(t, err, "root signs in with its generated password: %s", out)
+
+	run.redeploy()
+	out, err = mariadb(env["MARIADB_USER"], env["MARIADB_PASSWORD"], "SELECT x FROM kept")
+	require.NoError(t, err)
+	assert.Equal(t, "42", strings.TrimSpace(out), "the table survived the redeploy")
+}
+
 func TestRedisTemplate(t *testing.T) {
 	run := deployTemplate(t, "redis", false)
 	cli := func(args ...string) (string, error) {
@@ -293,6 +314,9 @@ func TestTemplatesServeTLSWithTheAppsCertificate(t *testing.T) {
 		{"mysql", func(run *templateRun, ca string) (string, error) {
 			return withCA(run, ca, fmt.Sprintf(`MYSQL_PWD="$SECRET" mysql --ssl-mode=VERIFY_IDENTITY --ssl-ca=/tmp/ca.crt -h %s -u app -NBe "SELECT VARIABLE_VALUE <> '' FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_cipher'"`, run.spec.Name))
 		}, "1"},
+		{"mariadb", func(run *templateRun, ca string) (string, error) {
+			return withCA(run, ca, fmt.Sprintf(`MYSQL_PWD="$SECRET" mariadb --ssl-verify-server-cert --ssl-ca=/tmp/ca.crt -h %s -u app -NBe "SELECT VARIABLE_VALUE <> '' FROM information_schema.SESSION_STATUS WHERE VARIABLE_NAME = 'Ssl_cipher'"`, run.spec.Name))
+		}, "1"},
 		{"redis", func(run *templateRun, ca string) (string, error) {
 			return withCA(run, ca, fmt.Sprintf(`redis-cli -h %s -p 6380 --tls --cacert /tmp/ca.crt -a "$SECRET" --no-auth-warning ping`, run.spec.Name))
 		}, "PONG"},
@@ -304,7 +328,7 @@ func TestTemplatesServeTLSWithTheAppsCertificate(t *testing.T) {
 			assert.Equal(t, c.want, strings.TrimSpace(out), "connected over verified TLS")
 			out, err = run.exec("stat", "-c", "%a %U", tlsDir+"/server.key")
 			require.NoError(t, err, out)
-			assert.Equal(t, "600 "+c.slug, strings.TrimSpace(out), "only the server's user reads the key")
+			assert.Equal(t, "600 "+run.tmpl.TLS.Owner, strings.TrimSpace(out), "only the server's user reads the key")
 
 			other, err := IssueTLS("other", time.Now())
 			require.NoError(t, err)
@@ -328,6 +352,7 @@ type templateRun struct {
 	engine *docker.Engine
 	spec   docker.ServiceSpec
 	seed   Seed
+	tmpl   Template
 }
 
 // deployTemplate deploys the template as an app would be, minus the
@@ -387,7 +412,7 @@ func deployTemplate(t *testing.T, slug string, tls bool) *templateRun {
 		}
 	})
 
-	run := &templateRun{t: t, ctx: ctx, engine: engine, spec: spec, seed: seed}
+	run := &templateRun{t: t, ctx: ctx, engine: engine, spec: spec, seed: seed, tmpl: tmpl}
 	run.deploy()
 
 	return run
@@ -432,7 +457,7 @@ func (r *templateRun) container() string {
 
 // password is the seed's generated password for the template's user.
 func (r *templateRun) password() string {
-	for _, key := range []string{"POSTGRES_PASSWORD", "MYSQL_PASSWORD", "REDIS_PASSWORD"} {
+	for _, key := range []string{"POSTGRES_PASSWORD", "MYSQL_PASSWORD", "MARIADB_PASSWORD", "REDIS_PASSWORD"} {
 		if p, ok := r.seed.Env[key]; ok {
 			return p
 		}
@@ -506,6 +531,14 @@ var slowQueryProbes = map[string]struct {
 				r.password(), r.spec.Name, r.seed.Env["MYSQL_USER"], r.seed.Env["MYSQL_DATABASE"]))
 		},
 		want: "echowa_probe", own: "performance_schema",
+	},
+	// As MySQL's. Its health check reads information_schema instead.
+	"mariadb": {
+		run: func(r *templateRun) (string, error) {
+			return r.client("sh", "-c", fmt.Sprintf(`MYSQL_PWD='%s' mariadb -h %s -u %s %s -e "SELECT 4242 AS echowa_probe"`,
+				r.password(), r.spec.Name, r.seed.Env["MARIADB_USER"], r.seed.Env["MARIADB_DATABASE"]))
+		},
+		want: "echowa_probe", own: "information_schema",
 	},
 	"redis": {
 		run: func(r *templateRun) (string, error) {
@@ -602,6 +635,18 @@ var backupProbes = map[string]struct {
 		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data varbinary(32));
 			INSERT INTO kept VALUES (1, 'café', 0x00ff), (2, 'naïve ☃', NULL);
 			SET SESSION cte_max_recursion_depth = 10000;
+			INSERT INTO kept WITH RECURSIVE s (n) AS (SELECT 3 UNION ALL SELECT n + 1 FROM s WHERE n < 5000)
+				SELECT n, SHA2(n, 256), UNHEX(SHA2(n, 256)) FROM s;
+			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,
+		binary: "SELECT HEX(data) FROM kept WHERE id = 1",
+	},
+	"mariadb": {
+		sql: func(r *templateRun, statements string) (string, error) {
+			return r.exec("sh", "-c", `MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -u root -N -B -e "$1" "$MARIADB_DATABASE"`, "sh", statements)
+		},
+		create: `CREATE TABLE kept (id int PRIMARY KEY, note text NOT NULL, data varbinary(32));
+			INSERT INTO kept VALUES (1, 'café', 0x00ff), (2, 'naïve ☃', NULL);
+			SET SESSION max_recursive_iterations = 10000;
 			INSERT INTO kept WITH RECURSIVE s (n) AS (SELECT 3 UNION ALL SELECT n + 1 FROM s WHERE n < 5000)
 				SELECT n, SHA2(n, 256), UNHEX(SHA2(n, 256)) FROM s;
 			CREATE VIEW kept_count AS SELECT COUNT(*) AS n FROM kept`,

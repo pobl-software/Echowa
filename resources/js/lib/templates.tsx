@@ -1,14 +1,14 @@
 import { BoxIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
-import { siRedis } from 'simple-icons';
+import { siMariadb, siRedis } from 'simple-icons';
 
 import { cn } from '@/lib/utils';
 
 export type AppIcon = ComponentType<{ className?: string }>;
 
 // Each database's own logo in its own colours: PostgreSQL and MySQL from
-// Devicon (MIT, see NOTICE), Redis from Simple Icons, which has its 2024
-// logo. The one place raw colours are allowed: a brand's colour is part of
+// Devicon (MIT, see NOTICE), MariaDB and Redis from Simple Icons, which
+// has Redis's 2024 logo. The one place raw colours are allowed: a brand's colour is part of
 // the mark, so it wins over the caller's text colour.
 
 // PostgreSQL's elephant: a black outline, the blue body and a white rim,
@@ -61,6 +61,21 @@ function MysqlIcon({ className }: { className?: string }) {
     );
 }
 
+// MariaDB's sea lion. Its navy is lightened in dark mode, as MySQL's blue
+// is.
+function MariadbIcon({ className }: { className?: string }) {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+            className={cn('size-4', className, 'text-[#003545] dark:text-[#6EA5BA]')}
+        >
+            <path d={siMariadb.path} />
+        </svg>
+    );
+}
+
 function RedisIcon({ className }: { className?: string }) {
     return (
         <svg
@@ -74,7 +89,12 @@ function RedisIcon({ className }: { className?: string }) {
     );
 }
 
-const icons: Record<string, AppIcon> = { postgres: PostgresIcon, mysql: MysqlIcon, redis: RedisIcon };
+const icons: Record<string, AppIcon> = {
+    postgres: PostgresIcon,
+    mysql: MysqlIcon,
+    mariadb: MariadbIcon,
+    redis: RedisIcon,
+};
 
 // templateIcon is the icon for an app template (ADR 0025), and a box for
 // an app from your own image.

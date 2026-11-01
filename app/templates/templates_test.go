@@ -124,6 +124,10 @@ func TestConnectURLs(t *testing.T) {
 	mysql, _ := Find("mysql")
 	assert.Equal(t, "mysql://MYSQL_USER:MYSQL_PASSWORD@echowa-db:3306/MYSQL_DATABASE", mysql.ConnectPreview("echowa-db", 3306))
 
+	mariadb, _ := Find("mariadb")
+	assert.Equal(t, "mysql://MARIADB_USER:MARIADB_PASSWORD@echowa-db:3306/MARIADB_DATABASE", mariadb.ConnectPreview("echowa-db", 3306),
+		"the scheme MariaDB's drivers take")
+
 	redis, _ := Find("redis")
 	assert.Equal(t, "redis://:REDIS_PASSWORD@echowa-cache:6379", redis.ConnectPreview("echowa-cache", 6379))
 

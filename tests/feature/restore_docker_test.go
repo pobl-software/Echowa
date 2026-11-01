@@ -4,7 +4,7 @@
 // Echowa's own deploy, backup and restore, on a real Swarm manager and the
 // dev machine's S3 server (deploy/s3), and restores a PostgreSQL 17 backup
 // into a new app on 18. Run it with deploy/dev-vm.sh test-docker. It pulls
-// postgres:17, postgres:18 and mysql:9.7.
+// postgres:17, postgres:18, mysql:9.7 and mariadb:12.3.
 package feature
 
 import (
@@ -46,6 +46,7 @@ func TestRestoreDockerTestSuite(t *testing.T) {
 var probes = map[string][]string{
 	"postgres": {"sh", "-c", `exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA -F "$(printf '\t')" -c "$1"`, "sh"},
 	"mysql":    {"sh", "-c", `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -u root -N -B "$MYSQL_DATABASE" -e "$1"`, "sh"},
+	"mariadb":  {"sh", "-c", `export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -u root -N -B "$MARIADB_DATABASE" -e "$1"`, "sh"},
 }
 
 func (s *RestoreDockerTestSuite) SetupTest() {
@@ -166,7 +167,7 @@ func (s *RestoreDockerTestSuite) restored(app *models.App, src *services.Restore
 }
 
 func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup() {
-	for _, slug := range []string{"postgres", "mysql"} {
+	for _, slug := range []string{"postgres", "mysql", "mariadb"} {
 		s.Run(slug, func() {
 			app := s.deployed(slug)
 			s.waitForSQL(app)
@@ -213,7 +214,7 @@ func (s *RestoreDockerTestSuite) TestARestoreOverChangedDataBringsBackTheBackup(
 // changed data: the round trip Restore from a file is for. Its first bytes
 // say which server it came from, with no manifest.
 func (s *RestoreDockerTestSuite) TestAnExportUploadedBackRestoresOverChangedData() {
-	for _, slug := range []string{"postgres", "mysql"} {
+	for _, slug := range []string{"postgres", "mysql", "mariadb"} {
 		s.Run(slug, func() {
 			ctx := context.Background()
 			app := s.deployed(slug)

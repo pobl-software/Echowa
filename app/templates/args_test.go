@@ -21,6 +21,9 @@ func TestArgsMatchWhatAppsWereSeededWith(t *testing.T) {
 		{"postgres", Options{TLS: true}, []string{"sh", "-c", wantTLSSetup + "postgres /run/echowa-tls; exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/run/echowa-tls/server.crt -c ssl_key_file=/run/echowa-tls/server.key"}},
 		{"mysql", Options{}, nil},
 		{"mysql", Options{TLS: true}, []string{"sh", "-c", wantTLSSetup + "mysql /run/echowa-tls; exec docker-entrypoint.sh mysqld --ssl-cert=/run/echowa-tls/server.crt --ssl-key=/run/echowa-tls/server.key"}},
+		{"mariadb", Options{}, nil},
+		{"mariadb", Options{TLS: true}, []string{"sh", "-c", wantTLSSetup + "mysql /run/echowa-tls; exec docker-entrypoint.sh mariadbd --ssl-cert=/run/echowa-tls/server.crt --ssl-key=/run/echowa-tls/server.key"}},
+		{"mariadb", Options{SlowQueries: true}, []string{"sh", "-c", "exec docker-entrypoint.sh mariadbd --performance-schema=ON"}},
 		{"redis", Options{}, []string{"sh", "-c", `exec docker-entrypoint.sh redis-server --appendonly yes --requirepass "$REDIS_PASSWORD" --enable-debug-command local`}},
 		{"redis", Options{TLS: true}, []string{"sh", "-c", wantTLSSetup + `redis /run/echowa-tls; exec docker-entrypoint.sh redis-server --appendonly yes --requirepass "$REDIS_PASSWORD" --enable-debug-command local --tls-port 6380 --tls-cert-file /run/echowa-tls/server.crt --tls-key-file /run/echowa-tls/server.key --tls-auth-clients no`}},
 	}

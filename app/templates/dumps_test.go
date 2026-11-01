@@ -138,9 +138,33 @@ func TestReadDumpHeadReadsMySQLDumps(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, want, head)
 
+	// mariadb-dump of a MySQL server: the server decides.
+	head, err = ReadDumpHead([]byte("-- MariaDB dump 10.20-12.3.3-MariaDB, for debian-linux-gnu (aarch64)\n--\n-- Host: db    Database: mysqldb\n-- Server version\t9.7.4\n"))
+	require.NoError(t, err)
+	assert.Equal(t, DumpHead{Template: "mysql", Database: "mysqldb", ServerVersion: "9.7.4"}, head)
+}
+
+// The head is mariadb-dump's from the mariadb:12.3 image, which starts
+// with the line that turns the client's sandbox mode on.
+func TestReadDumpHeadReadsMariaDBDumps(t *testing.T) {
+	const mariadbHead = "/*M!999999\\- enable the sandbox mode */ \n" +
+		"-- MariaDB dump 10.20-12.3.3-MariaDB, for debian-linux-gnu (aarch64)\n" +
+		"--\n" +
+		"-- Host: localhost    Database: shop\n" +
+		"-- ------------------------------------------------------\n" +
+		"-- Server version\t12.3.3-MariaDB-ubu2404\n\n" +
+		"/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n"
+	want := DumpHead{Template: "mariadb", Database: "shop", ServerVersion: "12.3.3", Gzip: true}
+
+	head, err := ReadDumpHead(gzipped(t, mariadbHead))
+	require.NoError(t, err)
+	assert.Equal(t, want, head)
+	assert.NoError(t, head.ReadableBy("12.3.3"))
+
+	// An older MariaDB, before the sandbox line.
 	head, err = ReadDumpHead([]byte("-- MariaDB dump 10.19  Distrib 10.11.6-MariaDB\n-- Server version\t10.11.6-MariaDB-0+deb12u1\n"))
 	require.NoError(t, err)
-	assert.Equal(t, "10.11.6", head.ServerVersion)
+	assert.Equal(t, DumpHead{Template: "mariadb", ServerVersion: "10.11.6"}, head)
 }
 
 // The snapshots are redis-cli --rdb - from the redis:8 and redis:7.4

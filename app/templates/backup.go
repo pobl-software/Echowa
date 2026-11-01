@@ -190,6 +190,28 @@ var mysqlBackup = &Backup{
 	}},
 }
 
+// MariaDB's are MySQL's with its own names. It has no GTIDs in a dump
+// unless asked, so no --set-gtid-purged.
+var mariadbDump = []string{"sh", "-c", `export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb-dump -u root ` +
+	`--single-transaction --routines --triggers --events --no-tablespaces --hex-blob "$MARIADB_DATABASE"`}
+
+var mariadbBackup = &Backup{
+	Database: "MARIADB_DATABASE",
+	Version:  []string{"mariadbd", "--version"},
+	Ready: []string{"sh", "-c", `export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -u root -N -B ` +
+		`-e "SELECT 1 - @@skip_networking"`},
+	Dump:       mariadbDump,
+	Restore:    []string{"sh", "-c", `export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb -u root "$MARIADB_DATABASE"`},
+	Extension:  "sql.gz",
+	Gzip:       true,
+	Compatible: sameOrNewer(2),
+	Exports: []Export{{
+		Format: "sql", Label: "SQL",
+		Hint: "For mariadb, or Import in phpMyAdmin.",
+		Dump: mariadbDump, Extension: "sql.gz", Gzip: true,
+	}},
+}
+
 // Redis has no dump a client replays, so a backup is the RDB snapshot a
 // replica would get, every logical database in it. It ends with the 40
 // byte mark that ends a diskless transfer, which redis-cli can't trim from

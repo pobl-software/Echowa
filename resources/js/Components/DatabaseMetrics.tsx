@@ -48,7 +48,7 @@ const wording = (slug: string): Wording =>
               cacheHits: `Reads served from memory. Below ${LOW_CACHE_HIT_PERCENT}% for long, the cache is too small for what’s read.`,
               cacheHitsOf: 'of reads, last minute',
               size:
-                  slug === 'mysql'
+                  slug === 'mysql' || slug === 'mariadb'
                       ? 'Its data directory on disk, with the binary and redo logs.'
                       : 'Its data and write-ahead log on disk.',
           };

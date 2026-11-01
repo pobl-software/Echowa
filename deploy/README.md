@@ -295,13 +295,13 @@ Deployed apps keep running throughout; Echowa only manages them.
 ### Backing up template apps
 
 Echowa's own backup holds its database, not your apps' data. A
-PostgreSQL, MySQL or Redis app made from a template keeps its data in a
+PostgreSQL, MySQL, MariaDB or Redis app made from a template keeps its data in a
 Docker volume, `echowa-<app>-data`, which survives deploys but not
 deleting the app.
 
 **Template apps** have a **Backups** section that backs the app up to
 S3-compatible storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi,
-Hetzner or your own. For PostgreSQL and MySQL it dumps the app's
+Hetzner or your own. For PostgreSQL, MySQL and MariaDB it dumps the app's
 database, the one its connection URL names; other databases you made by
 hand in the same server aren't included. For Redis it's a snapshot of
 the whole server, every logical database in it.
@@ -323,8 +323,8 @@ the whole server, every logical database in it.
    from the bucket**, which lists the backups in the location's folder
    for this app, including ones another server made. You type the app's
    name to confirm. By default, Echowa first backs up the current data,
-   so you can go back. PostgreSQL restores all or nothing; MySQL restores
-   one table at a time and stops at the first error, which is when that
+   so you can go back. PostgreSQL restores all or nothing; MySQL and MariaDB restore
+   one table at a time and stop at the first error, which is when that
    first backup matters. A Redis restore replaces every key, and keys
    written since the backup are gone. It checks the snapshot before
    loading it, so a damaged one changes nothing. A Redis app deployed by
@@ -334,7 +334,7 @@ the whole server, every logical database in it.
    major version or newer) and restores into it once it's running.
 
 Each backup is two objects in the bucket,
-`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL, `.rdb`
+`<folder>/<app>/<app>-<time>-<id>.dump` (`.sql.gz` for MySQL and MariaDB, `.rdb`
 for Redis) and a `.json` manifest beside it with the app, template,
 server version, size and SHA-256. A restore checks the dump against its manifest as it reads
 it, and stops before the end if they differ. Echowa needs nothing else to find them again:
@@ -368,7 +368,7 @@ Set the bucket up so a leak or a mistake costs little:
 
 **Export** downloads the database straight to your browser, with nothing
 kept on the server or in S3: PostgreSQL's custom format (for
-`pg_restore` or pgAdmin) or plain SQL, and gzipped SQL for MySQL.
+`pg_restore` or pgAdmin) or plain SQL, and gzipped SQL for MySQL and MariaDB.
 Deploys of the app wait until the download ends, so for a big database
 on a slow connection, back up to S3 and download that instead.
 **Restore from a file** takes a file Export or a backup's download made
@@ -409,6 +409,19 @@ To restore it into the same app, or into a new MySQL app:
 
 ```bash
 sudo docker exec -i "$c" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root "$MYSQL_DATABASE"' < <app>-2026-10-26.sql
+```
+
+**MariaDB.** The same with MariaDB's names. Its dump has no GTIDs unless
+asked, so there's no `--set-gtid-purged`:
+
+```bash
+sudo docker exec "$c" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-dump -u root --single-transaction --routines --triggers "$MARIADB_DATABASE"' > <app>-$(date -u +%F).sql
+```
+
+To restore it into the same app, or into a new MariaDB app:
+
+```bash
+sudo docker exec -i "$c" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -u root "$MARIADB_DATABASE"' < <app>-2026-10-26.sql
 ```
 
 **Redis.** It saves every write to its append-only file in `/data`. For a
@@ -455,11 +468,12 @@ verify the server with it:
 |---|---|
 | PostgreSQL | pgAdmin: SSL mode `verify-ca`, Root certificate the CA file. psql: `"host=<server IP> port=4040 user=<user> dbname=<db> sslmode=verify-ca sslrootcert=<app>-ca.crt"` |
 | MySQL | `mysql -h <server IP> -P 4040 -u app -p --ssl-mode=VERIFY_CA --ssl-ca=<app>-ca.crt <db>` |
+| MariaDB | `mariadb -h <server IP> -P 4040 -u app -p <db>`. With a CA file, the `mariadb` client also checks the host name, which the certificate doesn't have, so leave it out: with a password, the client verifies the server by that. A client with an SSL mode takes `VERIFY_CA` and the CA file, as for MySQL. |
 | Redis | `redis-cli -h <server IP> -p 4040 --tls --cacert <app>-ca.crt -a <password>`. The port only speaks TLS. |
 
 Use `verify-ca`, not `verify-full`: the certificate names the app's
 internal host, `echowa-<app>`, because Echowa doesn't know your server's
-public address. PostgreSQL and MySQL also accept clients that don't ask
+public address. PostgreSQL, MySQL and MariaDB also accept clients that don't ask
 for TLS, so set the client to require it as above.
 
 Turning it off, or changing the port, redeploys the database too: a few

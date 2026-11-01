@@ -315,6 +315,49 @@ var all = []Template{
 		Backup:  mysqlBackup,
 	},
 	{
+		Slug:        "mariadb",
+		Name:        "MariaDB",
+		Description: "A MariaDB server with one database and generated passwords.",
+		Repository:  "mariadb",
+		// The LTS release. MariaDB won't start on files a later version has
+		// upgraded either.
+		DefaultTag: "12.3",
+		Port:       3306,
+		// As MySQL's: over TCP, past the entrypoint's server without
+		// networking. The image has only the mariadb names, no mysql ones.
+		Healthcheck: `MYSQL_PWD="$MARIADB_PASSWORD" mariadb -h 127.0.0.1 -u "$MARIADB_USER" -e 'SELECT 1' "$MARIADB_DATABASE" >/dev/null`,
+		Server:      "docker-entrypoint.sh mariadbd",
+		Env: []Env{
+			// The image refuses "root", and MySQL's user is "app" too.
+			{Key: "MARIADB_USER", Value: Fixed("app")},
+			{Key: "MARIADB_DATABASE", Value: AppName},
+			{Key: "MARIADB_PASSWORD", Value: Generated},
+			{Key: "MARIADB_ROOT_PASSWORD", Value: Generated},
+		},
+		Volumes: []Volume{{Name: "data", Target: "/var/lib/mysql"}},
+		// mysql://, which MariaDB's drivers and ORMs take, where few know
+		// mariadb://.
+		Connect: func(host string, port int, env map[string]string) string {
+			u := url.URL{
+				Scheme: "mysql",
+				User:   url.UserPassword(env["MARIADB_USER"], env["MARIADB_PASSWORD"]),
+				Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+				Path:   "/" + env["MARIADB_DATABASE"],
+			}
+			return u.String()
+		},
+		// The mariadb client checks the host name whenever it's given a CA,
+		// and the certificate names only echowa-<app>. Without one, since
+		// 11.4, it verifies the server with the user's password instead.
+		TLS: &TLS{
+			Owner:  "mysql",
+			Flags:  "--ssl-cert=" + tlsDir + "/server.crt --ssl-key=" + tlsDir + "/server.key",
+			Client: "Set SSL mode to VERIFY_CA and the CA certificate as the CA file. The mariadb client takes no CA file: with a password, it verifies the server by that.",
+		},
+		Inspect: mariadbInspect,
+		Backup:  mariadbBackup,
+	},
+	{
 		Slug:        "redis",
 		Name:        "Redis",
 		Description: "A Redis server that saves to disk, with a generated password.",

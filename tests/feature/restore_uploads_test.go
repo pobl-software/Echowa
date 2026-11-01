@@ -192,6 +192,39 @@ func (s *BackupsTestSuite) TestAnUploadedMySQLDumpIsRestoredDecompressed() {
 	s.Equal([]string{mysqlDumpText, mysqlDumpText}, s.restoredSoFar())
 }
 
+// mariadb-dump's head from the mariadb:12.3 image, sandbox line and all.
+const mariadbDumpText = "/*M!999999\\- enable the sandbox mode */ \n-- MariaDB dump 10.20-12.3.3-MariaDB, for debian-linux-gnu (aarch64)\n--\n" +
+	"-- Host: localhost    Database: orders\n-- ------------------------------------------------------\n" +
+	"-- Server version\t12.3.3-MariaDB-ubu2404\n\nDROP TABLE IF EXISTS `t`;\n"
+
+func (s *BackupsTestSuite) TestAnUploadedMariaDBDumpRestoresIntoAMariaDBAppOnly() {
+	orders := s.templateApp("orders", "mariadb")
+	mysqlOrders := s.templateApp("mysql-orders", "mysql")
+	s.scriptRestore("mariadbd  Ver 12.3.3-MariaDB-ubu2404 for debian-linux-gnu on aarch64 (mariadb.org binary distribution)\n", "", 0, nil)
+	b := signedIn(s.T(), &s.TestCase)
+
+	id := s.upload(b, mysqlOrders, "orders.sql.gz", gzipText(mariadbDumpText))
+	body := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", mysqlOrders.ID, id), nethttp.StatusUnprocessableEntity)
+	s.Equal("This is a dump of a MariaDB database, and mysql-orders is MySQL.", body["error"])
+	id = s.upload(b, orders, "orders.sql.gz", gzipText(mysqlDumpText))
+	body = s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", orders.ID, id), nethttp.StatusUnprocessableEntity)
+	s.Equal("This is a dump of a MySQL database, and orders is MariaDB.", body["error"])
+
+	id = s.upload(b, orders, "orders.sql.gz", gzipText(mariadbDumpText))
+	preview := s.getJSON(b, fmt.Sprintf("/apps/%d/restores/preview?upload=%s", orders.ID, id), nethttp.StatusOK)
+	s.Equal("MariaDB", preview["template"])
+	s.Equal("orders", preview["database"])
+	s.Equal("12.3.3", preview["server_version"])
+	s.Equal(false, preview["atomic"])
+	s.Empty(preview["refusal"])
+
+	s.restore(b, orders, map[string]any{"upload": id, "safety": false, "confirm": "orders"})
+	services.WaitForRestores()
+	rec := s.restores(orders.ID)[0]
+	s.Equal(models.RestoreSucceeded, rec.Status, "message: %v", rec.Message)
+	s.Equal([]string{mariadbDumpText}, s.restoredSoFar(), "Echowa gunzips the dump into mariadb")
+}
+
 func (s *BackupsTestSuite) TestAnUploadThatCantRestoreIntoTheAppIsRefused() {
 	orders := s.templateApp("orders", "mysql")
 	s.scriptRestore("postgres (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)\n", "", 0, nil)
