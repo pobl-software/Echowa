@@ -18,6 +18,7 @@ import {
     ScrollTextIcon,
     SquareTerminalIcon,
     TriangleAlertIcon,
+    WebhookIcon,
 } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useEffect, useRef } from 'react';
 
@@ -36,6 +37,8 @@ export const appSections = [
     // Dumps of a template database to S3 storage (ADR 0034). Not Redis.
     { group: 'Configuration', id: 'backups', label: 'Backups', icon: ArchiveIcon, kind: 'backups' },
     { group: 'Configuration', id: 'docker', label: 'Docker config', icon: ContainerIcon },
+    // The deploy webhook CI calls, and how to set it up (ADR 0047).
+    { group: 'Configuration', id: 'ci', label: 'Webhooks', icon: WebhookIcon, kind: 'custom' },
     // The paths whose files survive a deploy (ADR 0039). A template's are
     // fixed, and listed in its Docker config.
     { group: 'Configuration', id: 'volumes', label: 'Volumes', icon: HardDriveIcon, kind: 'custom' },

@@ -191,19 +191,6 @@ func (r *ScheduledTaskController) Preview(ctx http.Context) http.Response {
 	return ctx.Response().Json(http.StatusOK, http.Json{"next": schedule.Next(time.Now(), 3), "error": nil})
 }
 
-// findCustomApp loads the {app} route's app, or answers 404 for a missing
-// one or a template app, which has no scheduled tasks.
-func findCustomApp(ctx http.Context, app *models.App) http.Response {
-	if resp := findOr404(ctx, "app", app); resp != nil {
-		return resp
-	}
-	if app.Template != nil {
-		return notFound(ctx)
-	}
-
-	return nil
-}
-
 // findTask loads the {app} route's custom app and its {task}.
 func findTask(ctx http.Context, app *models.App, task *models.ScheduledTask) http.Response {
 	if resp := findCustomApp(ctx, app); resp != nil {

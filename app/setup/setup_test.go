@@ -32,12 +32,17 @@ func TestParseFlags(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, AccessTunnel, opts.Access, "a token implies the tunnel")
 
+	opts, err = parse([]string{"--tunnel-token", token, "--hooks-domain", "Hooks.Example.com"}, io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, "hooks.example.com", opts.HooksDomain)
+
 	for args, want := range map[string]string{
 		"--access ftp":                     "must be http, https or tunnel",
 		"--access http --tunnel-token abc": "--tunnel-token is for --access tunnel",
-		"--url https://echowa.example.com": "not defined",
-		"--acme-email a@b.c":               "not defined",
-		"extra":                            "unexpected argument",
+		"--access https --domain echowa.example.com --hooks-domain hooks.example.com": "--hooks-domain is for --access tunnel",
+		"--url https://echowa.example.com":                                            "not defined",
+		"--acme-email a@b.c":                                                          "not defined",
+		"extra":                                                                       "unexpected argument",
 	} {
 		_, err := parse(strings.Fields(args), io.Discard)
 		assert.ErrorContains(t, err, want, args)
@@ -55,6 +60,37 @@ func TestCheckAccess(t *testing.T) {
 	assert.NoError(t, check(Options{Access: AccessTunnel, TunnelToken: token}))
 	assert.ErrorContains(t, check(Options{Access: AccessTunnel}), "needs its token")
 	assert.ErrorContains(t, check(Options{Access: AccessTunnel, TunnelToken: "sudo cloudflared service install"}), "isn't a Cloudflare Tunnel token")
+
+	tunnel := Options{Access: AccessTunnel, TunnelToken: token, Domain: "echowa.example.com"}
+	tunnel.HooksDomain = "hooks.example.com"
+	assert.NoError(t, check(tunnel))
+	tunnel.HooksDomain = "https://hooks.example.com"
+	assert.ErrorContains(t, check(tunnel), "isn't a domain")
+	tunnel.HooksDomain = "echowa.example.com"
+	assert.ErrorContains(t, check(tunnel), "behind Access", "CI can't pass the UI's Access")
+	assert.ErrorContains(t, check(Options{Access: AccessHTTP, HooksDomain: "hooks.example.com"}), "--hooks-domain is for --access tunnel", "no terminal picks HTTP")
+}
+
+func TestATunnelWithAHooksHostnameListensForHooks(t *testing.T) {
+	template, err := files.ReadFile("files/echowa.env")
+	require.NoError(t, err)
+	render := func(opts Options) map[string]string {
+		values, err := (&steps{opts: opts}).envFor()
+		require.NoError(t, err)
+		return parseEnv([]byte(renderEnv(string(template), values)))
+	}
+
+	env := render(Options{Access: AccessTunnel, Domain: "echowa.example.com", HooksDomain: "hooks.example.com"})
+	assert.Equal(t, "127.0.0.1:"+hooksPort, env["ECHOWA_HOOKS_ADDR"], "loopback, for cloudflared only")
+	assert.Equal(t, "https://hooks.example.com", env["ECHOWA_HOOKS_URL"])
+	assert.Equal(t, "127.0.0.1", env["APP_HOST"])
+	assert.NotEqual(t, env["APP_PORT"], hooksPort)
+
+	for _, opts := range []Options{{Access: AccessTunnel, Domain: "echowa.example.com"}, {Access: AccessHTTP}} {
+		env := render(opts)
+		assert.NotContains(t, env, "ECHOWA_HOOKS_ADDR", opts.Access)
+		assert.NotContains(t, env, "ECHOWA_HOOKS_URL", opts.Access, "APP_URL, whose port is the UI's")
+	}
 }
 
 func TestProxiedByCloudflare(t *testing.T) {

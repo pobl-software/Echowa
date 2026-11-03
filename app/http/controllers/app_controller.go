@@ -142,6 +142,16 @@ type ConnectInfo struct {
 	Preview string `json:"preview"`
 }
 
+// CIInfo is a custom app's Webhooks section: where CI sends deploys, a
+// step for each CI that sends them, the same request for Postman, and the
+// calls refused lately.
+type CIInfo struct {
+	URL      string                 `json:"url"`
+	Snippets []services.HookSnippet `json:"snippets"`
+	Postman  services.HookPostman   `json:"postman"`
+	Calls    []services.HookCall    `json:"calls"`
+}
+
 // PoolerInfo is the Connection tab's pooling section, for an app whose
 // template runs a connection pooler (ADR 0035).
 type PoolerInfo struct {
@@ -405,6 +415,19 @@ func (r *AppController) Show(ctx http.Context) http.Response {
 				return []services.ScheduledTaskSummary{}, nil
 			}
 			return services.ScheduledTasks(c, app.ID, time.Now())
+		},
+		// The Webhooks section's, for a custom app (ADR 0047). Never the
+		// secret: the section reveals it with a POST.
+		"ci": func(c context.Context) (any, error) {
+			if app.Template != nil {
+				return nil, nil
+			}
+			return CIInfo{
+				URL:      services.HookURL(&app),
+				Snippets: services.HookSnippets(&app),
+				Postman:  services.HookPostmanRequest(&app),
+				Calls:    services.HookCalls(app.ID),
+			}, nil
 		},
 		// The Alerts section's (ADR 0040).
 		"alerts": func(c context.Context) (any, error) {

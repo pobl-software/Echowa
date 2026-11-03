@@ -118,6 +118,7 @@ func DeleteApp(ctx context.Context, app *models.App) error {
 		return err
 	}
 	deleteAppMetrics(ctx, app.ID)
+	forgetHookCalls(app.ID)
 	// A new app could get the ID again, and with it a firing alert.
 	if _, err := facades.Orm().WithContext(ctx).Query().Where("subject", models.AppSubject(app.ID)).Delete(&models.AlertState{}); err != nil {
 		facades.Log().Error(fmt.Errorf("deleting app %d's alert states: %w", app.ID, err))

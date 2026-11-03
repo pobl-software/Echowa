@@ -31,6 +31,13 @@ func init() {
 		// Where Traefik serves HTTPS on this machine. The Domains tab
 		// reads each domain's certificate from here, not over DNS.
 		"traefik_https": config.Env("ECHOWA_TRAEFIK_HTTPS", "127.0.0.1:443"),
+		// The address CI reaches Echowa's deploy webhooks on (ADR 0047).
+		// Without a hooks listener of its own, it's the UI's.
+		"hooks_url": config.Env("ECHOWA_HOOKS_URL", config.Env("APP_URL", "http://localhost")),
+		// A second listener that serves /hooks/ and nothing else (ADR
+		// 0020), e.g. 127.0.0.1:3001, for a tunnel hostname without
+		// Cloudflare Access in front. Empty: none, and CI calls the UI's.
+		"hooks_addr": config.Env("ECHOWA_HOOKS_ADDR", ""),
 		"prune": map[string]any{
 			// Images of each app's last N successful deployments are never
 			// pruned, so rolling back to them needs no pull.

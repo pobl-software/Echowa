@@ -5,6 +5,7 @@ import (
 
 	"goravel/app/facades"
 	"goravel/app/inertia"
+	"goravel/app/models"
 )
 
 // findOr404 loads the model whose ID is in the route parameter param. When
@@ -20,6 +21,19 @@ func findOr404(ctx http.Context, param string, model any, preload ...string) htt
 		query = query.With(relation)
 	}
 	if err := query.Where("id", id).FirstOrFail(model); err != nil {
+		return notFound(ctx)
+	}
+
+	return nil
+}
+
+// findCustomApp loads the {app} route's app, or answers 404 for a missing
+// one or a template app, which has no scheduled tasks or webhook.
+func findCustomApp(ctx http.Context, app *models.App) http.Response {
+	if resp := findOr404(ctx, "app", app); resp != nil {
+		return resp
+	}
+	if app.Template != nil {
 		return notFound(ctx)
 	}
 

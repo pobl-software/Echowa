@@ -4,6 +4,7 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react';
 
 import { AppAlerts, ConditionAlert } from '@/Components/AppAlerts';
 import { AppBackups, BackupAlert, LastBackup } from '@/Components/AppBackups';
+import { AppCIDeploys } from '@/Components/AppCIDeploys';
 import { AppDomains } from '@/Components/AppDomains';
 import { AppLogs } from '@/Components/AppLogs';
 import { AppMetrics } from '@/Components/AppMetrics';
@@ -40,6 +41,7 @@ import {
     type AppVolume,
     type AppWork,
     type BackupsSection,
+    type CIInfo,
     type ConnectInfo,
     type DatabaseChoices,
     type DeploymentSummary,
@@ -73,6 +75,8 @@ interface Props {
     // Null for a custom app.
     template: TemplateOption | null;
     connect: ConnectInfo | null;
+    // A custom app's Webhooks section (ADR 0047); null for a template app.
+    ci: CIInfo | null;
     // The Connection section's pooling, for a PostgreSQL app (ADR 0035).
     pooler: PoolerInfo | null;
     // The Metrics section's: range picker choices, charts and the newest
@@ -139,6 +143,7 @@ export default function AppsShow({
     resources,
     template,
     connect,
+    ci,
     pooler,
     ranges,
     series,
@@ -480,6 +485,8 @@ export default function AppsShow({
                             onSelect={show}
                         />
                     )}
+
+                    {section === 'ci' && ci && <AppCIDeploys app={app} ci={ci} />}
 
                     {section === 'volumes' && <AppVolumes app={app} volumes={volumes} />}
 

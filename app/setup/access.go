@@ -39,6 +39,9 @@ const (
 	UIPort = "8192"
 	// innerPort is where Echowa listens behind Traefik or cloudflared.
 	innerPort = "3000"
+	// hooksPort is the listener for deploy webhooks only, on loopback,
+	// that a tunnel's second hostname reaches without Access (ADR 0020).
+	hooksPort = "3001"
 	// TraefikDynamic holds Traefik routes that aren't Swarm services: the
 	// UI's, with AccessHTTPS. files/traefik.yml mounts it.
 	TraefikDynamic = "/etc/echowa/traefik"
@@ -56,7 +59,7 @@ func (a Access) valid() bool {
 // and without either the UI goes on HTTP, port 8192.
 func (s *steps) chooseAccess() error {
 	if _, err := os.Stat(EnvFile); err == nil {
-		if s.opts.Access != "" || s.opts.TunnelToken != "" {
+		if s.opts.Access != "" || s.opts.TunnelToken != "" || s.opts.HooksDomain != "" {
 			s.ui.say("Keeping how the UI is reached: %s already exists (deploy/README.md, \"Changing how the UI is reached\")", EnvFile)
 		}
 		return nil
@@ -147,7 +150,31 @@ func (s *steps) askAccess(tty *os.File) error {
 		}
 		s.opts.Domain = strings.ToLower(domain)
 	}
+	if s.opts.Access == AccessTunnel && s.opts.HooksDomain == "" {
+		hooks, err := p.ask("Hooks hostname", "Optional, for deploys from CI: a second one, with no Access in front, e.g. hooks.example.com. Enter skips.", false, func(answer string) error {
+			if answer == "" {
+				return nil
+			}
+			return checkHooksDomain(strings.ToLower(answer), s.opts.Domain)
+		})
+		if err != nil {
+			return err
+		}
+		s.opts.HooksDomain = strings.ToLower(hooks)
+	}
 
+	return nil
+}
+
+// checkHooksDomain checks the tunnel's hostname for deploy webhooks. It
+// can't be the UI's: that one has Access in front, which CI can't pass.
+func checkHooksDomain(hooks, ui string) error {
+	switch {
+	case !rules.IsDomain(hooks):
+		return fmt.Errorf("%q isn't a domain like hooks.example.com", hooks)
+	case hooks == ui:
+		return fmt.Errorf("%s is the UI's hostname, behind Access; CI needs one of its own", hooks)
+	}
 	return nil
 }
 
@@ -167,6 +194,9 @@ func (s *steps) showAccess(err error) error {
 			s.ui.fact("Access", "https://%s, through a Cloudflare Tunnel", s.opts.Domain)
 		} else {
 			s.ui.fact("Access", "a Cloudflare Tunnel")
+		}
+		if s.opts.HooksDomain != "" {
+			s.ui.fact("Hooks", "https://%s, for deploys from CI, without Access", s.opts.HooksDomain)
 		}
 	default:
 		s.ui.fact("Access", "http://%s:%s, unencrypted", s.address(), UIPort)
@@ -233,6 +263,14 @@ func (s *steps) checkAccess() error {
 			return err
 		}
 	}
+	if s.opts.HooksDomain != "" {
+		if s.opts.Access != AccessTunnel {
+			return errors.New("--hooks-domain is for --access tunnel: with http or https, CI calls the UI's port")
+		}
+		if err := checkHooksDomain(s.opts.HooksDomain, s.opts.Domain); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -282,7 +320,12 @@ func (s *steps) envFor() (map[string]string, error) {
 		if s.opts.Domain != "" {
 			url = "https://" + s.opts.Domain
 		}
-		return map[string]string{"APP_URL": url, "APP_HOST": "127.0.0.1", "APP_PORT": innerPort}, nil
+		values := map[string]string{"APP_URL": url, "APP_HOST": "127.0.0.1", "APP_PORT": innerPort}
+		if s.opts.HooksDomain != "" {
+			values["ECHOWA_HOOKS_ADDR"] = "127.0.0.1:" + hooksPort
+			values["ECHOWA_HOOKS_URL"] = "https://" + s.opts.HooksDomain
+		}
+		return values, nil
 	default:
 		return map[string]string{"APP_URL": "http://" + s.address() + ":" + UIPort, "APP_HOST": "0.0.0.0", "APP_PORT": UIPort}, nil
 	}

@@ -106,6 +106,9 @@ func Web() {
 			router.Post("/apps/{app}/env/reveal", apps.EnvReveal)
 			router.Post("/apps/{app}/connect/reveal", apps.ConnectReveal)
 			router.Post("/apps/{app}/deploy", apps.Deploy)
+			webhook := controllers.NewAppWebhookController()
+			router.Post("/apps/{app}/webhook/reveal", webhook.Reveal)
+			router.Post("/apps/{app}/webhook/rotate", webhook.Rotate)
 			appStop := controllers.NewAppStopController()
 			router.Post("/apps/{app}/stop", appStop.Stop)
 			router.Post("/apps/{app}/start", appStop.Start)
@@ -224,6 +227,7 @@ func Web() {
 	})
 
 	Streams()
+	Hooks()
 
 	// Gin's built-in 404 runs after the global Timeout middleware has already
 	// written a 200 from its buffer, so unknown URLs came back as empty 200s.

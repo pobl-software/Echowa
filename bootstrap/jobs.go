@@ -5,6 +5,7 @@ import (
 	"github.com/goravel/framework/contracts/queue"
 
 	"goravel/app/deploy"
+	"goravel/routes"
 )
 
 func Jobs() []queue.Job {
@@ -18,5 +19,6 @@ func Jobs() []queue.Job {
 func Runners() []foundation.Runner {
 	return []foundation.Runner{
 		deploy.NewRecoveryRunner(),
+		routes.NewHooksListener(),
 	}
 }

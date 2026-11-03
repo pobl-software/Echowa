@@ -699,6 +699,51 @@ export interface ConnectInfo {
     preview: string;
 }
 
+// services.HookRefusal: why a deploy webhook was refused (ADR 0047).
+export type HookRefusal =
+    | 'malformed'
+    | 'clock'
+    | 'signature'
+    | 'too_large'
+    | 'body'
+    | 'ref'
+    | 'stopped'
+    | 'rate_limited';
+
+// services.HookCall: a refused webhook, with the error its caller was sent.
+export interface HookCall {
+    at: string;
+    ip: string;
+    reason: HookRefusal;
+    message: string;
+}
+
+// services.HookSnippet: a CI step that deploys the app.
+export interface HookSnippet {
+    id: string;
+    label: string;
+    code: string;
+}
+
+// services.HookPostman: the webhook as a Postman request. The script fills
+// in {{timestamp}} and {{signature}} from the variable ECHOWA_SECRET.
+export interface HookPostman {
+    url: string;
+    headers: { name: string; value: string }[];
+    body: string;
+    script: string;
+}
+
+// controllers.CIInfo: a custom app's Webhooks section. The secret comes
+// from POST /apps/{id}/webhook/reveal, never a prop.
+export interface CIInfo {
+    url: string;
+    snippets: HookSnippet[];
+    postman: HookPostman;
+    // The last 10 refused calls since Echowa started, newest first.
+    calls: HookCall[];
+}
+
 // services.PoolerStatus: an app's connection pooler (ADR 0035).
 export interface PoolerStatus {
     // Echowa is starting, updating or removing it.

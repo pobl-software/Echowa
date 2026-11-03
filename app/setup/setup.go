@@ -64,6 +64,9 @@ type Options struct {
 	Access      Access
 	Domain      string
 	TunnelToken string
+	// HooksDomain is a second tunnel hostname, without Cloudflare Access,
+	// for CI's deploy webhooks (ADR 0020). Empty: none.
+	HooksDomain string
 	WithBackups bool
 }
 
@@ -128,6 +131,7 @@ answers. Without a terminal, it picks HTTP.
 	})
 	fs.StringVar(&opts.Domain, "domain", "", "the UI's domain, for https (required) or tunnel, e.g. echowa.example.com")
 	fs.StringVar(&opts.TunnelToken, "tunnel-token", "", "Cloudflare Tunnel token (implies --access tunnel); asked, hidden, when there's a terminal")
+	fs.StringVar(&opts.HooksDomain, "hooks-domain", "", "with tunnel: a second hostname, without Access, for deploys from CI, e.g. hooks.example.com; asked when there's a terminal")
 	fs.BoolVar(&opts.WithBackups, "with-backups", false, "back the database up daily to "+Backups)
 	if err := fs.Parse(args); err != nil {
 		return opts, err
@@ -141,7 +145,11 @@ answers. Without a terminal, it picks HTTP.
 		}
 		opts.Access = AccessTunnel
 	}
+	if opts.HooksDomain != "" && opts.Access != "" && opts.Access != AccessTunnel {
+		return opts, errors.New("--hooks-domain is for --access tunnel: with http or https, CI calls the UI's port")
+	}
 	opts.Domain = strings.ToLower(opts.Domain)
+	opts.HooksDomain = strings.ToLower(opts.HooksDomain)
 
 	return opts, nil
 }
@@ -412,6 +420,11 @@ func (s *steps) finish() error {
 		before = append(before, fmt.Sprintf("In Cloudflare Zero Trust, route %s to the tunnel, as HTTP to 127.0.0.1:%s, with an Access application in front of it.", host, innerPort))
 		if s.opts.Domain == "" {
 			before = append(before, "Set APP_URL in "+EnvFile+" to https://<that hostname>, then run: sudo systemctl restart echowa")
+		}
+		if s.opts.HooksDomain != "" {
+			before = append(before, fmt.Sprintf("Route %s to the tunnel too, as HTTP to 127.0.0.1:%s, with no Access application: CI can't sign in to one. That port serves the deploy webhooks and nothing else.", s.opts.HooksDomain, hooksPort))
+		} else {
+			before = append(before, fmt.Sprintf("To deploy from CI, route a second hostname to the tunnel as HTTP to 127.0.0.1:%s, with no Access application. Then set ECHOWA_HOOKS_ADDR=127.0.0.1:%s and ECHOWA_HOOKS_URL=https://<that hostname> in %s, and run: sudo systemctl restart echowa", hooksPort, hooksPort, EnvFile))
 		}
 		link = "https://" + host + page
 	default:

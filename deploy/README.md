@@ -105,7 +105,9 @@ curl -fsSL https://get.echowa.dev/install.sh | sudo bash -s -- --access https --
 ```
 
 `--access` takes `http`, `https` or `tunnel`; `--tunnel-token <token>`
-means the tunnel. Without a terminal and without flags (cloud-init, say),
+means the tunnel, and `--hooks-domain <hostname>` gives it a second
+hostname for deploys from CI ("Deploys from CI", below; asked in a
+terminal, Enter skips). Without a terminal and without flags (cloud-init, say),
 it picks HTTP. In a terminal the choice is a menu (arrow keys and enter,
 or the number), a domain or token that won't do is asked again, and
 Ctrl-C (or Esc, in the menu) stops before anything is installed.
@@ -267,8 +269,93 @@ moving to HTTP, whose Echowa needs the port). Leaving the tunnel,
 `sudo cloudflared service uninstall`. Leaving HTTP or HTTPS for the
 tunnel, close port 8192.
 
-Webhooks from CI (build step 8) will get their own listener, mapped to a
-second tunnel hostname without Access. The UI's port stays private.
+### Deploys from CI
+
+CI redeploys a custom app by calling a signed webhook once the image is
+pushed. Any CI that can run a shell works (GitHub Actions, GitLab CI,
+Bitbucket, CircleCI, Woodpecker, a laptop): it needs `date`, `openssl`
+and `curl` 7.76 or later. Template apps (databases) have no webhook.
+
+On the app, open **Webhooks**. It has:
+
+- the webhook's URL;
+- the secret, behind Reveal: add it to your CI as a secret variable
+  named `ECHOWA_SECRET`. Rotate makes a new one; the old one stops
+  working at once;
+- the step to add to your CI, for GitHub Actions (it deploys the digest
+  `docker/build-push-action` just pushed), GitLab CI (the commit's short
+  SHA) or any shell (the app's default tag), with the app's name and URL
+  filled in;
+- the same request for Postman, to try it by hand: the URL, the
+  headers, the body and a pre-request script that signs it with an
+  environment variable named `ECHOWA_SECRET`;
+- the last 10 calls the webhook refused, with the error CI was sent.
+
+The request, if you'd rather write the step yourself:
+
+```bash
+ts=$(date +%s)
+body="{\"ref\":\"$REF\"}"   # a tag or sha256: digest; "" deploys the default tag
+sig=$(printf '%s.%s.%s' "$ts" "$APP" "$body" | openssl dgst -sha256 -hmac "$ECHOWA_SECRET" -r | cut -d' ' -f1)
+curl -sS --fail-with-body -L --max-redirs 0 --retry 3 -X POST "$ECHOWA_URL/hooks/deploy/$APP" \
+  -H 'Content-Type: application/json' \
+  -H "X-Echowa-Timestamp: $ts" \
+  -H "X-Echowa-Signature: sha256=$sig" \
+  --data "$body"
+```
+
+`--fail-with-body` fails the step on any refusal and prints its error;
+`-L --max-redirs 0` fails it on a redirect rather than passing with
+nothing deployed. `--retry` is safe: a resend is the same signature,
+which returns the first deployment.
+
+The signature covers the time, the app's name and the body, so a
+captured request can't deploy another app, and it's refused once it's
+more than 5 minutes old. The caller only chooses a tag or digest: the
+image's repository, registry, env and domain come from the app, so a
+leaked secret can redeploy the app's own images and nothing else.
+
+| Status | Means |
+|---|---|
+| 202 | Queued: `{"deployment_id": N}` |
+| 200 | The same request again within 10 minutes (curl's retry): the first deployment's ID, nothing new queued |
+| 400 | A header is missing or malformed, or the body isn't `{"ref": "..."}` sent as `application/json` |
+| 401 | Bad signature, unknown app or template app (all say `invalid signature`), or a clock more than 5 minutes off (which says so) |
+| 409 | The app is stopped: start it in Echowa |
+| 413 | The body is over 8 KiB |
+| 422 | The ref isn't a tag or `sha256:` digest |
+| 429 | 10 failures from one IP in 10 minutes, or 20 deploys of one app in a minute; see `Retry-After` |
+
+CI goes green when the deploy is queued, not when it finishes. A deploy
+that fails or rolls back shows in Echowa and reaches your notifications
+("Notifications and alerts", below).
+
+**Where CI calls.** With HTTP or HTTPS access, the webhook is on the
+UI's port, so CI must be able to reach port 8192. If you limit that port
+to your own addresses, allow your CI's too, or use a tunnel hostname as
+below. The URL comes from `APP_URL`, or from `ECHOWA_HOOKS_URL` when set.
+
+**With a Cloudflare Tunnel,** the UI's hostname has Access in front, which
+CI can't pass: Access answers with a redirect to its login page, and the
+step fails with curl's `Maximum (0) redirects followed`. CI gets a second hostname with no Access application,
+routed to a listener that serves `/hooks/` and nothing else (the UI, its
+login page and `/up` answer 404 there):
+
+1. If you gave setup a hooks hostname, it has already written
+   `ECHOWA_HOOKS_ADDR=127.0.0.1:3001` and `ECHOWA_HOOKS_URL`. If not, add
+   both to `/etc/echowa/env`, then `sudo systemctl restart echowa`:
+
+   ```
+   ECHOWA_HOOKS_ADDR=127.0.0.1:3001
+   ECHOWA_HOOKS_URL=https://hooks.example.com
+   ```
+
+2. In Cloudflare Zero Trust, add a route to the tunnel: a published
+   application, `hooks.example.com`, service HTTP `127.0.0.1:3001`. Don't
+   add an Access application for it.
+3. Check from anywhere: `curl -s https://hooks.example.com/login` answers
+   `{"error":"not found"}`, and the app's Webhooks section shows the
+   new URL.
 
 ### Backups
 
@@ -757,3 +844,5 @@ docker swarm leave --force           # only if you don't want Swarm any more
 | ACME `rateLimited` | Too many failed attempts. Fix DNS or the firewall (steps 1 and 2), then wait an hour before deploying the app again. |
 | `echowa setup` stops with "the Swarm is in state 'pending'" or "error" | A previous join or init failed half way. Run `docker swarm leave --force` and rerun. |
 | Locally, `whoami.localhost` shows a Valet or Herd 404 page | nginx owns port 80. See local step 1. |
+| CI's deploy step gets 401 | The secret isn't the app's current one, or the step's app name isn't the URL's; or a clock is more than 5 minutes off. The app's Webhooks section lists refused calls with the reason. |
+| CI's deploy step fails with `Maximum (0) redirects followed` | The URL redirected: with a tunnel, it's the UI's hostname, and Access sent the call to its login page. Use a hooks hostname ("Deploys from CI"). |
